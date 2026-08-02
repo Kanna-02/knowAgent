@@ -9,6 +9,7 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
+backend/.alembic-phase1.db
 .coverage
 .pytest_cache/
 .mypy_cache/

@@ -4,8 +4,12 @@ import type {
   AccountStatus,
   AccountView,
   ApiErrorBody,
+  BusinessSystemPage,
+  BusinessSystemStatus,
+  BusinessSystemView,
   CurrentUser,
   SessionView,
+  SystemOwnerView,
 } from "./types";
 
 export const AUTH_UNAUTHORIZED_EVENT = "knowagent:auth-unauthorized";
@@ -60,6 +64,7 @@ export class ApiClient {
     pageSize: number;
     role?: AccountRole;
     status?: AccountStatus;
+    search?: string;
   }): Promise<AccountPage> {
     const query = new URLSearchParams({
       page: String(filters.page),
@@ -67,6 +72,7 @@ export class ApiClient {
     });
     if (filters.role) query.set("role", filters.role);
     if (filters.status) query.set("status", filters.status);
+    if (filters.search) query.set("search", filters.search);
     return this.request<AccountPage>(`/admin/accounts?${query.toString()}`);
   }
 
@@ -85,6 +91,61 @@ export class ApiClient {
     return this.request<AccountView>(`/admin/accounts/${accountId}/status`, {
       method: "PATCH",
       body: JSON.stringify({ status }),
+    });
+  }
+
+  async listSystems(status?: BusinessSystemStatus): Promise<BusinessSystemView[]> {
+    const query = status ? `?status=${status}` : "";
+    return this.request<BusinessSystemView[]>(`/systems${query}`);
+  }
+
+  async listAdminSystems(filters: {
+    page: number;
+    pageSize: number;
+    status?: BusinessSystemStatus;
+  }): Promise<BusinessSystemPage> {
+    const query = new URLSearchParams({
+      page: String(filters.page),
+      page_size: String(filters.pageSize),
+    });
+    if (filters.status) query.set("status", filters.status);
+    return this.request<BusinessSystemPage>(`/admin/systems?${query.toString()}`);
+  }
+
+  async createSystem(payload: {
+    code: string;
+    name: string;
+    description?: string | null;
+    status?: BusinessSystemStatus;
+  }): Promise<BusinessSystemView> {
+    return this.request<BusinessSystemView>("/admin/systems", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateSystem(
+    systemId: string,
+    payload: {
+      name?: string;
+      description?: string | null;
+      status?: BusinessSystemStatus;
+    },
+  ): Promise<BusinessSystemView> {
+    return this.request<BusinessSystemView>(`/admin/systems/${systemId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async assignSystemOwners(
+    systemId: string,
+    accountIds: string[],
+    replaceExisting: boolean,
+  ): Promise<SystemOwnerView[]> {
+    return this.request<SystemOwnerView[]>(`/admin/systems/${systemId}/owners`, {
+      method: "PUT",
+      body: JSON.stringify({ account_ids: accountIds, replace_existing: replaceExisting }),
     });
   }
 

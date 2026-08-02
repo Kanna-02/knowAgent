@@ -79,8 +79,15 @@ class AccountService:
         page_size: int,
         role: AccountRole | None,
         status: AccountStatus | None,
+        search: str | None,
     ) -> tuple[list[Account], int]:
-        return self._accounts.list(page=page, page_size=page_size, role=role, status=status)
+        return self._accounts.list(
+            page=page,
+            page_size=page_size,
+            role=role,
+            status=status,
+            search=search,
+        )
 
     def set_status(
         self,

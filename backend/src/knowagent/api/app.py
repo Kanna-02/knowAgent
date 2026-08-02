@@ -13,6 +13,7 @@ from knowagent.common.errors import KnowAgentError
 from knowagent.identity.api.router import router as identity_router
 from knowagent.platform.database import create_database_engine, create_session_factory
 from knowagent.platform.settings import Settings
+from knowagent.systems.api.router import router as systems_router
 
 
 _REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")
@@ -65,6 +66,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"status": "ok"}
 
     application.include_router(identity_router, prefix="/api/v1")
+    application.include_router(systems_router, prefix="/api/v1")
     return application
 
 

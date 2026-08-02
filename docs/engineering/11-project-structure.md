@@ -164,7 +164,8 @@ class SourceLocator(BaseModel):
 
 | 方法与路径 | 请求 | 响应 | 权限/异常 |
 | --- | --- | --- | --- |
-| `GET /systems` | 状态过滤 | `list[SystemSummary]` | 返回当前账号可见系统 |
+| `GET /systems` | 状态过滤 | `list[SystemSummary]` | 返回当前账号可见系统；普通用户响应不包含负责人详情 |
+| `GET /admin/systems` | 分页/状态 | `Page[SystemView]` | 平台管理员；包含负责人详情 |
 | `POST /admin/systems` | `SystemCreateRequest` | `SystemView` | 平台管理员 |
 | `PATCH /admin/systems/{system_id}` | `SystemUpdateRequest` | `SystemView` | 平台管理员 |
 | `PUT /admin/systems/{system_id}/owners` | `OwnerAssignmentRequest` | `list[OwnerView]` | 平台管理员 |

@@ -35,6 +35,7 @@ from knowagent.identity.infrastructure.sqlalchemy_repository import (
     SqlAlchemyAuditSink,
 )
 from knowagent.identity.infrastructure.sso import DisabledIdentityProvider
+from knowagent.systems.infrastructure.sqlalchemy_repository import SqlAlchemySystemRepository
 
 router = APIRouter()
 
@@ -45,8 +46,9 @@ def create_user_session(
     request: Request,
     response: Response,
     auth: AuthServiceDependency,
+    database: DatabaseSession,
 ) -> SessionView:
-    return _create_session(payload, request, response, auth, LoginEntry.USER)
+    return _create_session(payload, request, response, auth, LoginEntry.USER, database)
 
 
 @router.post("/auth/admin/sessions", response_model=SessionView)
@@ -55,8 +57,9 @@ def create_admin_session(
     request: Request,
     response: Response,
     auth: AuthServiceDependency,
+    database: DatabaseSession,
 ) -> SessionView:
-    return _create_session(payload, request, response, auth, LoginEntry.ADMIN)
+    return _create_session(payload, request, response, auth, LoginEntry.ADMIN, database)
 
 
 @router.delete("/auth/session", status_code=status.HTTP_204_NO_CONTENT)
@@ -81,9 +84,16 @@ def delete_session(
 
 
 @router.get("/auth/me", response_model=CurrentUserView)
-def get_current_user(response: Response, context: CurrentContextDependency) -> CurrentUserView:
+def get_current_user(
+    response: Response,
+    context: CurrentContextDependency,
+    database: DatabaseSession,
+) -> CurrentUserView:
     response.headers["X-CSRF-Token"] = context.session.csrf_token
-    return CurrentUserView.from_account(context.account)
+    return CurrentUserView.from_account(
+        context.account,
+        SqlAlchemySystemRepository(database).list_system_roles(context.account.id),
+    )
 
 
 @router.post("/auth/password/change", status_code=status.HTTP_204_NO_CONTENT)
@@ -133,6 +143,7 @@ def list_accounts(
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
     role: AccountRole | None = None,
     account_status: Annotated[AccountStatus | None, Query(alias="status")] = None,
+    search: Annotated[str | None, Query(max_length=100)] = None,
 ) -> AccountPage:
     del context
     items, total = _account_service(request, database, redis).list_accounts(
@@ -140,6 +151,7 @@ def list_accounts(
         page_size=page_size,
         role=role,
         status=account_status,
+        search=search,
     )
     return AccountPage(
         items=[AccountView.from_account(account) for account in items],
@@ -183,6 +195,7 @@ def _create_session(
     response: Response,
     auth: AuthServiceDependency,
     entry: LoginEntry,
+    database: DatabaseSession,
 ) -> SessionView:
     source_ip = request.client.host if request.client else "unknown"
     result = auth.login(
@@ -194,7 +207,10 @@ def _create_session(
     )
     _set_session_cookie(request, response, result.session.token, result.session.expires_at)
     return SessionView(
-        user=CurrentUserView.from_account(result.account),
+        user=CurrentUserView.from_account(
+            result.account,
+            SqlAlchemySystemRepository(database).list_system_roles(result.account.id),
+        ),
         must_change_password=result.account.must_change_password,
         csrf_token=result.session.csrf_token,
         expires_at=result.session.expires_at,

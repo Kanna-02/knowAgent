@@ -1,7 +1,7 @@
 import { Button, Dropdown, Layout, type MenuProps, Tooltip } from "antd";
-import { LogOut, ShieldCheck, UserRound, UsersRound } from "lucide-react";
+import { LogOut, ServerCog, ShieldCheck, UserRound, UsersRound } from "lucide-react";
 import type { ReactNode } from "react";
-import { Outlet, useNavigate } from "react-router-dom";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { useAuth } from "../auth/authContextValue";
 
@@ -10,6 +10,7 @@ const { Header, Sider, Content } = Layout;
 export function AdminShell(): ReactNode {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const accountMenu: MenuProps["items"] = [
     {
       key: "logout",
@@ -35,8 +36,21 @@ export function AdminShell(): ReactNode {
           <span>KnowAgent 管理</span>
         </div>
         <nav className="sidebar-nav" aria-label="管理导航">
-          <Button type="text" className="nav-item nav-item-active" icon={<UsersRound size={18} />}>
+          <Button
+            type="text"
+            className={`nav-item ${location.pathname.endsWith("/accounts") ? "nav-item-active" : ""}`}
+            icon={<UsersRound size={18} />}
+            onClick={() => void navigate("/admin/accounts")}
+          >
             用户与角色
+          </Button>
+          <Button
+            type="text"
+            className={`nav-item ${location.pathname.endsWith("/systems") ? "nav-item-active" : ""}`}
+            icon={<ServerCog size={18} />}
+            onClick={() => void navigate("/admin/systems")}
+          >
+            业务系统
           </Button>
         </nav>
       </Sider>

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -64,12 +64,21 @@ class SqlAlchemyAccountRepository:
         page_size: int,
         role: AccountRole | None,
         status: AccountStatus | None,
+        search: str | None,
     ) -> tuple[list[Account], int]:
         filters = []
         if role is not None:
             filters.append(AccountRecord.role == role)
         if status is not None:
             filters.append(AccountRecord.status == status)
+        normalized_search = search.strip() if search else ""
+        if normalized_search:
+            filters.append(
+                or_(
+                    AccountRecord.username.icontains(normalized_search, autoescape=True),
+                    AccountRecord.display_name.icontains(normalized_search, autoescape=True),
+                )
+            )
         total = self._session.scalar(
             select(func.count()).select_from(AccountRecord).where(*filters)
         )

@@ -253,11 +253,26 @@ describe("route and shell workflows", () => {
         <Route path="/admin" element={<AdminShell />}>
           <Route index element={<Navigate to="accounts" replace />} />
           <Route path="accounts" element={<div>账号内容</div>} />
+          <Route path="systems" element={<div>系统内容</div>} />
         </Route>
       </Routes>,
       auth({ user: admin, logout: adminLogout }),
       "/admin/accounts",
     );
+    expect(adminView.container.textContent).toContain("账号内容");
+    await click(
+      [...adminView.container.querySelectorAll("button")].find((item) =>
+        item.textContent?.includes("业务系统"),
+      ) as Element,
+    );
+    await flush();
+    expect(adminView.container.textContent).toContain("系统内容");
+    await click(
+      [...adminView.container.querySelectorAll("button")].find((item) =>
+        item.textContent?.includes("用户与角色"),
+      ) as Element,
+    );
+    await flush();
     expect(adminView.container.textContent).toContain("账号内容");
     await click(adminView.container.querySelector('[aria-label="账号菜单"]') as Element);
     await flush();

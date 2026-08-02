@@ -262,6 +262,9 @@ def test_admin_can_create_list_and_disable_account_but_not_last_admin(client: Te
         },
     )
     listed = client.get("/api/v1/admin/accounts", params={"role": "ADMIN", "page_size": 10})
+    searched = client.get(
+        "/api/v1/admin/accounts", params={"role": "ADMIN", "search": "second"}
+    )
     created_id = created.json()["id"]
     disabled = client.patch(
         f"/api/v1/admin/accounts/{created_id}/status",
@@ -279,6 +282,7 @@ def test_admin_can_create_list_and_disable_account_but_not_last_admin(client: Te
     assert created.json()["role"] == "ADMIN"
     assert created.json()["must_change_password"] is True
     assert listed.json()["total"] == 2
+    assert [item["username"] for item in searched.json()["items"]] == ["second.admin"]
     assert disabled.status_code == 200
     assert disabled.json()["status"] == "DISABLED"
     assert last_admin.status_code == 409
@@ -305,3 +309,143 @@ def test_logout_revokes_server_session(client: TestClient) -> None:
 
     assert logged_out.status_code == 204
     assert current.status_code == 401
+
+
+def test_admin_manages_systems_and_owner_assignments(client: TestClient) -> None:
+    session = _login(client, "admin", "admin")
+    csrf = str(session["csrf_token"])
+    created_esb = client.post(
+        "/api/v1/admin/systems",
+        headers={"X-CSRF-Token": csrf},
+        json={"code": "esb", "name": "企业服务总线", "description": "集成服务"},
+    )
+    created_crm = client.post(
+        "/api/v1/admin/systems",
+        headers={"X-CSRF-Token": csrf},
+        json={"code": "crm", "name": "客户关系管理", "description": None},
+    )
+    duplicate = client.post(
+        "/api/v1/admin/systems",
+        headers={"X-CSRF-Token": csrf},
+        json={"code": "ESB", "name": "重复系统"},
+    )
+    owner_accounts = client.get(
+        "/api/v1/admin/accounts", params={"role": "SYSTEM_OWNER", "page_size": 100}
+    )
+    owner_id = owner_accounts.json()["items"][0]["id"]
+    owners = client.put(
+        f"/api/v1/admin/systems/{created_esb.json()['id']}/owners",
+        headers={"X-CSRF-Token": csrf},
+        json={"account_ids": [owner_id], "replace_existing": True},
+    )
+    disabled = client.patch(
+        f"/api/v1/admin/systems/{created_crm.json()['id']}",
+        headers={"X-CSRF-Token": csrf},
+        json={"status": "DISABLED"},
+    )
+    admin_page = client.get(
+        "/api/v1/admin/systems", params={"page": 1, "page_size": 1}
+    )
+    admin_list = client.get("/api/v1/systems")
+
+    assert created_esb.status_code == created_crm.status_code == 201
+    assert created_esb.json()["code"] == "ESB"
+    assert duplicate.status_code == 409
+    assert duplicate.json()["code"] == "SYSTEM_EXISTS"
+    assert owners.status_code == 200
+    assert owners.json()[0]["account_id"] == owner_id
+    assert disabled.json()["status"] == "DISABLED"
+    assert admin_page.status_code == 200
+    assert admin_page.json()["total"] == 2
+    assert len(admin_page.json()["items"]) == 1
+    assert {item["code"] for item in admin_list.json()} == {"ESB", "CRM"}
+
+    owner_session = _login(client, "user", "owner")
+    assert owner_session["user"]["system_roles"] == [
+        {"system_id": created_esb.json()["id"], "role": "SYSTEM_OWNER"}
+    ]
+    owner_list = client.get("/api/v1/systems")
+    assert [item["code"] for item in owner_list.json()] == ["ESB"]
+    assert owner_list.json()[0]["owners"] == []
+
+
+def test_owner_assignment_changes_revoke_existing_owner_sessions(client: TestClient) -> None:
+    admin_session = _login(client, "admin", "admin")
+    csrf = str(admin_session["csrf_token"])
+    created = client.post(
+        "/api/v1/admin/systems",
+        headers={"X-CSRF-Token": csrf},
+        json={"code": "ESB", "name": "企业服务总线"},
+    )
+    owner_id = client.get(
+        "/api/v1/admin/accounts", params={"role": "SYSTEM_OWNER"}
+    ).json()["items"][0]["id"]
+
+    _login(client, "user", "owner")
+    session_before_assignment = client.cookies.get(
+        "knowagent_session", domain="testserver.local", path="/"
+    )
+    admin_session = _login(client, "admin", "admin")
+    assigned = client.put(
+        f"/api/v1/admin/systems/{created.json()['id']}/owners",
+        headers={"X-CSRF-Token": str(admin_session["csrf_token"])},
+        json={"account_ids": [owner_id], "replace_existing": True},
+    )
+    client.cookies.set(
+        "knowagent_session", session_before_assignment, domain="testserver.local", path="/"
+    )
+    after_assignment = client.get("/api/v1/auth/me")
+
+    _login(client, "user", "owner")
+    session_before_removal = client.cookies.get(
+        "knowagent_session", domain="testserver.local", path="/"
+    )
+    admin_session = _login(client, "admin", "admin")
+    removed = client.put(
+        f"/api/v1/admin/systems/{created.json()['id']}/owners",
+        headers={"X-CSRF-Token": str(admin_session["csrf_token"])},
+        json={"account_ids": [], "replace_existing": True},
+    )
+    client.cookies.set(
+        "knowagent_session", session_before_removal, domain="testserver.local", path="/"
+    )
+    after_removal = client.get("/api/v1/auth/me")
+
+    assert assigned.status_code == 200
+    assert removed.status_code == 200
+    assert after_assignment.status_code == 401
+    assert after_removal.status_code == 401
+
+
+def test_system_mutations_enforce_csrf_rbac_and_owner_role(client: TestClient) -> None:
+    admin_session = _login(client, "admin", "admin")
+    csrf = str(admin_session["csrf_token"])
+    created = client.post(
+        "/api/v1/admin/systems",
+        headers={"X-CSRF-Token": csrf},
+        json={"code": "ESB", "name": "企业服务总线"},
+    )
+    accounts = client.get("/api/v1/admin/accounts", params={"page_size": 100}).json()["items"]
+    user_id = next(item["id"] for item in accounts if item["username"] == "alice")
+    invalid_owner = client.put(
+        f"/api/v1/admin/systems/{created.json()['id']}/owners",
+        headers={"X-CSRF-Token": csrf},
+        json={"account_ids": [user_id], "replace_existing": True},
+    )
+    missing_csrf = client.patch(
+        f"/api/v1/admin/systems/{created.json()['id']}", json={"name": "新名称"}
+    )
+
+    owner_session = _login(client, "user", "owner")
+    forbidden = client.post(
+        "/api/v1/admin/systems",
+        headers={"X-CSRF-Token": str(owner_session["csrf_token"])},
+        json={"code": "CRM", "name": "客户关系管理"},
+    )
+
+    assert invalid_owner.status_code == 422
+    assert invalid_owner.json()["code"] == "SYSTEM_OWNER_INVALID"
+    assert missing_csrf.status_code == 403
+    assert missing_csrf.json()["code"] == "CSRF_INVALID"
+    assert forbidden.status_code == 403
+    assert forbidden.json()["code"] == "FORBIDDEN"

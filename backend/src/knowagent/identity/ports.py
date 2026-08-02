@@ -39,6 +39,7 @@ class AccountRepository(Protocol):
         page_size: int,
         role: AccountRole | None,
         status: AccountStatus | None,
+        search: str | None,
     ) -> tuple[list[Account], int]: ...
 
     def count_active_admins(self) -> int: ...

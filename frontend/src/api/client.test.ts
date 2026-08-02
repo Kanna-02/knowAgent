@@ -84,7 +84,13 @@ describe("ApiClient", () => {
 
     await client.me();
     await client.listAccounts({ page: 1, pageSize: 20 });
-    await client.listAccounts({ page: 2, pageSize: 10, role: "ADMIN", status: "ACTIVE" });
+    await client.listAccounts({
+      page: 2,
+      pageSize: 10,
+      role: "ADMIN",
+      status: "ACTIVE",
+      search: "second admin",
+    });
     await client.createAdmin({
       username: "second.admin",
       display_name: "Second Admin",
@@ -93,8 +99,54 @@ describe("ApiClient", () => {
     await client.setAccountStatus(account.id, "DISABLED");
 
     expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/v1/admin/accounts?page=1&page_size=20");
-    expect(fetchMock.mock.calls[2]?.[0]).toContain("role=ADMIN&status=ACTIVE");
+    expect(fetchMock.mock.calls[2]?.[0]).toContain("role=ADMIN&status=ACTIVE&search=second+admin");
     expect(fetchMock.mock.calls[3]?.[1]?.method).toBe("POST");
     expect(fetchMock.mock.calls[4]?.[1]?.method).toBe("PATCH");
+  });
+
+  it("builds business-system queries and mutations", async () => {
+    const businessSystem = {
+      id: "20000000-0000-0000-0000-000000000001",
+      code: "ESB",
+      name: "企业服务总线",
+      description: null,
+      status: "ACTIVE",
+      owners: [],
+      created_at: "2026-08-02T12:00:00Z",
+      updated_at: "2026-08-02T12:00:00Z",
+    };
+    const owner = {
+      account_id: "10000000-0000-0000-0000-000000000002",
+      username: "owner",
+      display_name: "Owner",
+    };
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse([businessSystem]))
+      .mockResolvedValueOnce(jsonResponse([businessSystem]))
+      .mockResolvedValueOnce(
+        jsonResponse({ items: [businessSystem], page: 1, page_size: 20, total: 1 }),
+      )
+      .mockResolvedValueOnce(jsonResponse(businessSystem, 201))
+      .mockResolvedValueOnce(jsonResponse({ ...businessSystem, status: "DISABLED" }))
+      .mockResolvedValueOnce(jsonResponse([owner]));
+    const client = new ApiClient();
+
+    await client.listSystems();
+    await client.listSystems("ACTIVE");
+    await client.listAdminSystems({ page: 1, pageSize: 20 });
+    await client.createSystem({ code: "ESB", name: "企业服务总线" });
+    await client.updateSystem(businessSystem.id, { status: "DISABLED" });
+    await client.assignSystemOwners(businessSystem.id, [owner.account_id], true);
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/v1/systems");
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/v1/systems?status=ACTIVE");
+    expect(fetchMock.mock.calls[2]?.[0]).toBe("/api/v1/admin/systems?page=1&page_size=20");
+    expect(fetchMock.mock.calls[3]?.[1]?.method).toBe("POST");
+    expect(fetchMock.mock.calls[4]?.[1]?.method).toBe("PATCH");
+    expect(fetchMock.mock.calls[5]?.[1]?.method).toBe("PUT");
+    expect(fetchMock.mock.calls[5]?.[1]?.body).toBe(
+      JSON.stringify({ account_ids: [owner.account_id], replace_existing: true }),
+    );
   });
 });

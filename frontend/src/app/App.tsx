@@ -17,6 +17,11 @@ const AdminShell = lazy(() =>
     default: component,
   })),
 );
+const SystemsPage = lazy(() =>
+  import("../features/admin/SystemsPage").then(({ SystemsPage: component }) => ({
+    default: component,
+  })),
+);
 const ChangePasswordPage = lazy(() =>
   import("../features/auth/ChangePasswordPage").then(({ ChangePasswordPage: component }) => ({
     default: component,
@@ -64,6 +69,7 @@ export function App(): ReactNode {
                 >
                   <Route index element={<Navigate replace to="accounts" />} />
                   <Route path="accounts" element={<AccountsPage />} />
+                  <Route path="systems" element={<SystemsPage />} />
                 </Route>
                 <Route
                   path="/forbidden"

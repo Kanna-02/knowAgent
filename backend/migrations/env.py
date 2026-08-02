@@ -7,6 +7,9 @@ from sqlalchemy import engine_from_config, pool
 
 from knowagent.identity.infrastructure.sqlalchemy_models import Base
 from knowagent.platform.settings import Settings
+from knowagent.systems.infrastructure import sqlalchemy_models as systems_models
+
+del systems_models
 
 config = context.config
 if config.config_file_name is not None:

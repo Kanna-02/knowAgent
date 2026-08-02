@@ -6,6 +6,8 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from knowagent.identity.domain.models import Account, AccountRole, AccountSource, AccountStatus
+from knowagent.systems.api.schemas import SystemRoleView
+from knowagent.systems.domain.models import SystemRoleAssignment
 
 
 class LoginRequest(BaseModel):
@@ -44,10 +46,14 @@ class CurrentUserView(BaseModel):
     role: AccountRole
     status: AccountStatus
     must_change_password: bool
-    system_roles: list[str] = Field(default_factory=list)
+    system_roles: list[SystemRoleView] = Field(default_factory=list)
 
     @classmethod
-    def from_account(cls, account: Account) -> CurrentUserView:
+    def from_account(
+        cls,
+        account: Account,
+        system_roles: list[SystemRoleAssignment] | None = None,
+    ) -> CurrentUserView:
         return cls(
             id=account.id,
             username=account.username,
@@ -55,6 +61,10 @@ class CurrentUserView(BaseModel):
             role=account.role,
             status=account.status,
             must_change_password=account.must_change_password,
+            system_roles=[
+                SystemRoleView.from_assignment(assignment)
+                for assignment in (system_roles or [])
+            ],
         )
 
 
