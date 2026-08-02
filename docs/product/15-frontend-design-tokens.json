@@ -1,0 +1,70 @@
+{
+  "_comment": "Frontend design tokens. UI code must reference these values instead of hardcoding visual constants.",
+  "colors": {
+    "primary": "#0F766E",
+    "primary-hover": "#115E59",
+    "primary-active": "#134E4A",
+    "secondary": "#2563EB",
+    "background": "#F7F8FA",
+    "surface": "#FFFFFF",
+    "surface-elevated": "#F1F5F4",
+    "text-primary": "#17201D",
+    "text-secondary": "#5F6B66",
+    "text-disabled": "#9AA5A0",
+    "border": "#D7DEDA",
+    "border-focus": "#0F766E",
+    "success": "#15803D",
+    "error": "#B42318",
+    "warning": "#B7791F",
+    "info": "#2563EB"
+  },
+  "spacing": {
+    "unit": 4,
+    "scale": [0, 4, 8, 12, 16, 20, 24, 32, 40, 48, 64]
+  },
+  "radius": {
+    "none": 0,
+    "sm": 4,
+    "md": 6,
+    "lg": 8,
+    "xl": 8,
+    "full": 9999
+  },
+  "typography": {
+    "font-family": "Inter, PingFang SC, Microsoft YaHei, sans-serif",
+    "font-family-mono": "SFMono-Regular, Consolas, Liberation Mono, monospace",
+    "heading-weight": 600,
+    "body-weight": 400,
+    "body-size": "14px",
+    "body-line-height": 1.5,
+    "letter-spacing": "0",
+    "h1-size": "24px",
+    "h2-size": "20px",
+    "h3-size": "16px",
+    "small-size": "12px"
+  },
+  "layout": {
+    "sidebar-width": "240px",
+    "content-max-width": "1440px",
+    "toolbar-height": "48px",
+    "control-height": "36px",
+    "icon-button-size": "36px"
+  },
+  "shadows": {
+    "none": "none",
+    "sm": "0 1px 2px rgba(23, 32, 29, 0.06)",
+    "md": "0 6px 16px rgba(23, 32, 29, 0.10)",
+    "lg": "0 16px 32px rgba(23, 32, 29, 0.14)"
+  },
+  "breakpoints": {
+    "sm": "640px",
+    "md": "768px",
+    "lg": "1024px",
+    "xl": "1280px"
+  },
+  "transitions": {
+    "fast": "150ms ease",
+    "normal": "250ms ease",
+    "slow": "350ms ease"
+  }
+}

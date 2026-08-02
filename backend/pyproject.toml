@@ -1,0 +1,82 @@
+[build-system]
+requires = ["setuptools==83.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "knowagent-backend"
+version = "0.1.0"
+description = "KnowAgent API, domain services, and asynchronous workers"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+  "alembic==1.18.5",
+  "argon2-cffi==25.1.0",
+  "celery==5.6.3",
+  "fastapi==0.141.1",
+  "httpx==0.28.1",
+  "langgraph==1.2.10",
+  "markdown-it-py==4.2.0",
+  "openpyxl==3.1.5",
+  "pgvector==0.5.0",
+  "psycopg[binary]==3.3.4",
+  "pydantic==2.13.4",
+  "PyMuPDF==1.28.0",
+  "python-docx==1.2.0",
+  "python-multipart==0.0.32",
+  "redis==6.4.0",
+  "SQLAlchemy==2.0.51",
+  "uvicorn==0.52.1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "bandit==1.9.4",
+  "black==26.5.1",
+  "isort==8.0.1",
+  "mypy==2.3.0",
+  "pylint==4.0.6",
+  "pytest==9.1.1",
+  "pytest-cov==7.1.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+packages = ["knowagent"]
+mypy_path = "src"
+
+[tool.pylint.main]
+py-version = "3.11"
+source-roots = ["src"]
+
+[tool.pylint."messages control"]
+disable = ["C0114", "C0115", "C0116"]
+
+[tool.pylint.format]
+max-line-length = 100
+
+[tool.bandit]
+exclude_dirs = ["tests"]
+severity = "MEDIUM"
+
+[tool.pytest.ini_options]
+addopts = "--cov=knowagent --cov-report=term-missing --cov-fail-under=80"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["knowagent"]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
