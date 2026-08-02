@@ -4,8 +4,13 @@ import os
 from dataclasses import dataclass, field, fields
 
 
-def _as_bool(value: str) -> bool:
-    return value.strip().lower() in {"1", "true", "yes", "on"}
+def _as_bool(value: str, *, setting_name: str) -> bool:
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{setting_name} must be an explicit boolean value")
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +69,112 @@ class DocumentProcessingSettings:  # pylint: disable=too-many-instance-attribute
 
 
 @dataclass(frozen=True, slots=True)
+class ObjectStorageSettings:  # pylint: disable=too-many-instance-attributes
+    endpoint_url: str = ""
+    bucket: str = ""
+    region: str = "us-east-1"
+    access_key: str = field(default="", repr=False)
+    secret_key: str = field(default="", repr=False)
+    verify_tls: bool = True
+    ca_bundle: str | None = None
+    multipart_threshold: int = 8 * 1024 * 1024
+    multipart_chunk_size: int = 8 * 1024 * 1024
+    connect_timeout_seconds: int = 5
+    read_timeout_seconds: int = 60
+    sdk_max_attempts: int = 3
+
+    def __post_init__(self) -> None:
+        values = (
+            self.multipart_threshold,
+            self.multipart_chunk_size,
+            self.connect_timeout_seconds,
+            self.read_timeout_seconds,
+            self.sdk_max_attempts,
+        )
+        if any(value <= 0 for value in values):
+            raise ValueError("S3 size, timeout, and retry settings must be positive")
+
+    @property
+    def configured(self) -> bool:
+        return all((self.endpoint_url, self.bucket, self.access_key, self.secret_key))
+
+    @property
+    def verify_value(self) -> bool | str:
+        return self.ca_bundle or self.verify_tls
+
+    @classmethod
+    def from_environment(cls) -> ObjectStorageSettings:
+        ca_bundle = os.getenv("KNOWAGENT_S3_CA_BUNDLE", "").strip() or None
+        return cls(
+            endpoint_url=os.getenv("KNOWAGENT_S3_ENDPOINT_URL", "").strip(),
+            bucket=os.getenv("KNOWAGENT_S3_BUCKET", "").strip(),
+            region=os.getenv("KNOWAGENT_S3_REGION", "us-east-1").strip(),
+            access_key=os.getenv("KNOWAGENT_S3_ACCESS_KEY", "").strip(),
+            secret_key=os.getenv("KNOWAGENT_S3_SECRET_KEY", "").strip(),
+            verify_tls=_as_bool(
+                os.getenv("KNOWAGENT_S3_VERIFY_TLS", "true"),
+                setting_name="KNOWAGENT_S3_VERIFY_TLS",
+            ),
+            ca_bundle=ca_bundle,
+            multipart_threshold=int(
+                os.getenv("KNOWAGENT_S3_MULTIPART_THRESHOLD", str(8 * 1024 * 1024))
+            ),
+            multipart_chunk_size=int(
+                os.getenv("KNOWAGENT_S3_MULTIPART_CHUNK_SIZE", str(8 * 1024 * 1024))
+            ),
+            connect_timeout_seconds=int(os.getenv("KNOWAGENT_S3_CONNECT_TIMEOUT_SECONDS", "5")),
+            read_timeout_seconds=int(os.getenv("KNOWAGENT_S3_READ_TIMEOUT_SECONDS", "60")),
+            sdk_max_attempts=int(os.getenv("KNOWAGENT_S3_SDK_MAX_ATTEMPTS", "3")),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class IngestionSettings:
+    max_attempts: int = 3
+    lease_seconds: int = 900
+    retry_base_seconds: int = 30
+    dispatch_stale_seconds: int = 60
+    recovery_batch_size: int = 100
+    soft_time_limit_seconds: int = 600
+    hard_time_limit_seconds: int = 660
+
+    def __post_init__(self) -> None:
+        values = (
+            self.max_attempts,
+            self.lease_seconds,
+            self.retry_base_seconds,
+            self.dispatch_stale_seconds,
+            self.recovery_batch_size,
+            self.soft_time_limit_seconds,
+            self.hard_time_limit_seconds,
+        )
+        if any(value <= 0 for value in values):
+            raise ValueError("ingestion settings must be positive")
+        if self.hard_time_limit_seconds <= self.soft_time_limit_seconds:
+            raise ValueError("ingestion hard time limit must exceed soft time limit")
+        if self.lease_seconds <= self.hard_time_limit_seconds:
+            raise ValueError("ingestion lease must exceed hard time limit")
+
+    @classmethod
+    def from_environment(cls) -> IngestionSettings:
+        return cls(
+            max_attempts=int(os.getenv("KNOWAGENT_INGESTION_MAX_ATTEMPTS", "3")),
+            lease_seconds=int(os.getenv("KNOWAGENT_INGESTION_LEASE_SECONDS", "900")),
+            retry_base_seconds=int(os.getenv("KNOWAGENT_INGESTION_RETRY_BASE_SECONDS", "30")),
+            dispatch_stale_seconds=int(
+                os.getenv("KNOWAGENT_INGESTION_DISPATCH_STALE_SECONDS", "60")
+            ),
+            recovery_batch_size=int(os.getenv("KNOWAGENT_INGESTION_RECOVERY_BATCH_SIZE", "100")),
+            soft_time_limit_seconds=int(
+                os.getenv("KNOWAGENT_INGESTION_SOFT_TIME_LIMIT_SECONDS", "600")
+            ),
+            hard_time_limit_seconds=int(
+                os.getenv("KNOWAGENT_INGESTION_HARD_TIME_LIMIT_SECONDS", "660")
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class Settings:  # pylint: disable=too-many-instance-attributes
     database_url: str
     redis_url: str
@@ -77,6 +188,8 @@ class Settings:  # pylint: disable=too-many-instance-attributes
     document_processing: DocumentProcessingSettings = field(
         default_factory=DocumentProcessingSettings
     )
+    object_storage: ObjectStorageSettings = field(default_factory=ObjectStorageSettings)
+    ingestion: IngestionSettings = field(default_factory=IngestionSettings)
 
     @classmethod
     def from_environment(cls) -> Settings:
@@ -89,9 +202,14 @@ class Settings:  # pylint: disable=too-many-instance-attributes
             redis_prefix=os.getenv("KNOWAGENT_REDIS_PREFIX", "knowagent"),
             session_cookie_name=os.getenv("KNOWAGENT_SESSION_COOKIE", "knowagent_session"),
             session_ttl_seconds=int(os.getenv("KNOWAGENT_SESSION_TTL_SECONDS", "28800")),
-            cookie_secure=_as_bool(os.getenv("KNOWAGENT_COOKIE_SECURE", "true")),
+            cookie_secure=_as_bool(
+                os.getenv("KNOWAGENT_COOKIE_SECURE", "true"),
+                setting_name="KNOWAGENT_COOKIE_SECURE",
+            ),
             login_attempts=int(os.getenv("KNOWAGENT_LOGIN_ATTEMPTS", "8")),
             login_window_seconds=int(os.getenv("KNOWAGENT_LOGIN_WINDOW_SECONDS", "900")),
             environment=os.getenv("KNOWAGENT_ENVIRONMENT", "production"),
             document_processing=DocumentProcessingSettings.from_environment(),
+            object_storage=ObjectStorageSettings.from_environment(),
+            ingestion=IngestionSettings.from_environment(),
         )

@@ -10,11 +10,16 @@ from pydantic import BaseModel
 from redis import Redis
 
 from knowagent.common.errors import KnowAgentError
+from knowagent.documents.api.router import router as documents_router
+from knowagent.documents.infrastructure.sqlalchemy_repository import (
+    SqlAlchemyIngestionCoordinator,
+)
 from knowagent.identity.api.router import router as identity_router
 from knowagent.platform.database import create_database_engine, create_session_factory
 from knowagent.platform.settings import Settings
 from knowagent.systems.api.router import router as systems_router
-
+from knowagent.worker.celery_app import build_celery_app
+from knowagent.worker.dispatcher import CeleryIngestionDispatcher
 
 _REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")
 
@@ -33,6 +38,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.settings = resolved_settings
     application.state.engine = engine
     application.state.session_factory = create_session_factory(engine)
+    application.state.object_store = None
+    application.state.ingestion_coordinator = SqlAlchemyIngestionCoordinator(
+        application.state.session_factory
+    )
+    application.state.ingestion_dispatcher = CeleryIngestionDispatcher(
+        build_celery_app(resolved_settings)
+    )
     application.state.redis_client = Redis.from_url(
         resolved_settings.redis_url,
         decode_responses=True,
@@ -67,6 +79,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     application.include_router(identity_router, prefix="/api/v1")
     application.include_router(systems_router, prefix="/api/v1")
+    application.include_router(documents_router, prefix="/api/v1")
     return application
 
 

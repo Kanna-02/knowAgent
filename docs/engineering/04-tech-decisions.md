@@ -10,7 +10,7 @@
 | 认证 | 用户端和管理端分别登录；统一账号表；用户 SQL 批量导入，管理员后台新增；Redis 服务端会话 | Redis Session 具体库/中间件版本、公司 SSO 协议 |
 | 数据库 | 公司已有 PostgreSQL；确认 pgvector + pg_trgm、SQLAlchemy 2、Alembic、Psycopg 3 | DBA 扩展可用性、服务端版本、Schema 和权限 |
 | 缓存 | 公司已有 Redis；确认用于 Celery broker 和服务端 Session，Python 客户端固定 redis-py 6.4.0 | 服务端版本、AOF/noeviction 配置、命名空间和容量 |
-| 文件 | 公司已有对象存储 | 协议、客户端、Bucket 和权限 |
+| 文件 | 公司已有对象存储；确认使用 S3 兼容协议和 boto3 客户端 | Endpoint、Bucket、Region、TLS CA 和最小权限账号 |
 | LLM | 公司已有可发送内部知识的大模型 API | 协议、模型、限流、超时和费用 |
 | Embedding | 公司没有现成 API；确认自建独立内网 Python 模型服务 | 目标服务器资源、模型精度/量化和性能基线 |
 | Rerank | 公司没有现成 API；确认与 Embedding 共用独立内网模型服务 | 目标服务器资源、模型精度/量化和降级阈值 |
@@ -76,6 +76,7 @@
 | TD-008 | 非 Docker Linux 部署 | systemd 原生部署、Ansible 编排、Supervisor | 可重复、回滚、日志、权限、运维 | 已确认：systemd + Nginx + 版本化发布 |
 | TD-009 | 检索、证据充分性与拒答决策 | LangGraph + 领域服务、自研状态机、端到端 RAG 框架 | `system_id` 隔离、召回、可解释阈值、降级、工单触发 | 已确认：LangGraph 状态图 + 自定义领域服务 |
 | TD-010 | 应用框架、前端组件与核心版本基线 | FastAPI + SQLAlchemy、Django + DRF、FastAPI + SQLModel | 类型、异步/流式、后台效率、依赖兼容、维护 | 已确认：FastAPI + SQLAlchemy + React/Ant Design |
+| TD-011 | 对象存储协议与客户端 | S3 + boto3、S3 + MinIO SDK、公司自定义 REST + httpx | 兼容性、流式上传、重试、维护和迁移 | 已确认：S3 兼容协议 + boto3 |
 
 ## 5. 技术决策记录要求
 
@@ -244,6 +245,18 @@
 - **成本与维护**：所有核心组件均为开源软件，无新增许可费用；代价是维护 Python 与 TypeScript 两套构建和检查工具。通过固定直接依赖、提交锁文件、自动化安全扫描和版本化发布控制升级风险。
 - **回滚与升级**：升级以单独变更执行，先更新锁文件和兼容性测试，再进入发布；出现回归时恢复上一份锁文件和发布目录。禁止使用不受约束的宽版本范围直接构建生产包。
 - **锁定状态**：核心应用、TD-007 解析器和测试/静态检查工具的直接版本已写入 `backend/pyproject.toml`；前端直接与传递依赖已写入 `frontend/package-lock.json`。Python 传递依赖锁和 PyTorch/Transformers/ONNX 模型运行时仍必须等待目标 Linux 与模型服务器资源后生成，不能在此猜测。
+
+### TD-011：S3 兼容对象存储与 boto3 客户端
+
+- **日期**：2026-08-02
+- **决策**：对象存储采用 S3 兼容协议，基础设施适配器使用 `boto3==1.43.62`；业务层只依赖 `ObjectStore` 端口，不暴露 boto3、botocore 或厂商类型。
+- **目的**：复用公司现有对象存储，可靠保存原始文档和确定性派生清单，并支持流式/分片上传、下载、删除、校验和可诊断错误。
+- **方案比较**：boto3 对 MinIO、Ceph 和多数云厂商 S3 接口的兼容及运维经验最成熟，但依赖树较大且同步调用必须隔离出 API 事件循环；MinIO SDK 更轻、API 更直接，但跨厂商细节兼容与团队经验较弱；自定义 REST 可复用 httpx，却需要自行维护签名、分片、重试和错误映射，协议未知时风险最高。
+- **性能与成本**：上传使用 SDK 管理的分片和连接池；FastAPI 通过受控线程执行同步 SDK 调用，解析 Worker 直接使用同步端口。继续使用现有对象存储，不新增服务费用；增加 boto3/botocore 依赖和版本维护成本。
+- **安全**：Endpoint、Bucket、Region、Access Key、Secret Key、TLS 校验和可选 CA 路径全部由环境变量注入；凭据不进入数据库、日志或响应。对象 key 使用不可预测业务 ID，浏览器不接收长期存储凭据。
+- **可靠性**：原文件和派生清单使用确定性 key；数据库幂等键、任务租约和终态决定业务结果，SDK/Broker 重试不替代 PostgreSQL 事实状态。只对明确的超时、连接和 5xx/限流错误自动重试，权限、Bucket、签名和输入错误直接失败。
+- **风险与回滚**：公司 Endpoint 的具体兼容差异仍需用隔离 Bucket 做真实契约测试。若不兼容，通过 `ObjectStore` 端口替换为厂商适配器；数据库对象 key 和任务协议保持不变，业务模块无需改写。
+- **确认**：用户于 2026-08-02 确认方案 A。
 
 ## 7. 架构方案：KnowAgent
 

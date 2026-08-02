@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import UTC, datetime
+from io import BytesIO
 from pathlib import Path
 from typing import Self
 from uuid import UUID, uuid4
@@ -9,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from knowagent.api.app import create_app
+from knowagent.documents.domain.ingestion import DocumentVersionStatus
 from knowagent.identity.domain.models import AccountRole, AccountSource, AccountStatus
 from knowagent.identity.infrastructure.passwords import Argon2PasswordHasher
 from knowagent.identity.infrastructure.sqlalchemy_models import AccountRecord, Base
@@ -102,6 +105,41 @@ class FakeRedis:
         return value
 
 
+class FakeObjectStore:
+    def __init__(self) -> None:
+        self.objects: dict[str, bytes] = {}
+        self.put_calls = 0
+
+    def put(
+        self,
+        *,
+        key: str,
+        content: BytesIO,
+        content_type: str,
+        content_length: int,
+    ) -> None:
+        del content_type
+        payload = content.read()
+        assert len(payload) == content_length
+        self.objects[key] = payload
+        self.put_calls += 1
+
+    def get(self, *, key: str) -> bytes:
+        return self.objects[key]
+
+    def delete(self, *, key: str) -> None:
+        self.objects.pop(key, None)
+
+
+class FakeDispatcher:
+    def __init__(self) -> None:
+        self.jobs: list[UUID] = []
+
+    def enqueue(self, job_id: UUID) -> str:
+        self.jobs.append(job_id)
+        return f"task-{job_id}"
+
+
 @pytest.fixture()
 def client(tmp_path: Path) -> Iterator[TestClient]:
     settings = Settings(
@@ -117,6 +155,8 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
     )
     app = create_app(settings)
     app.state.redis_client = FakeRedis()
+    app.state.object_store = FakeObjectStore()
+    app.state.ingestion_dispatcher = FakeDispatcher()
     Base.metadata.create_all(app.state.engine)
     password_hash = Argon2PasswordHasher().hash("Temporary1!")
     with app.state.session_factory.begin() as session:
@@ -262,9 +302,7 @@ def test_admin_can_create_list_and_disable_account_but_not_last_admin(client: Te
         },
     )
     listed = client.get("/api/v1/admin/accounts", params={"role": "ADMIN", "page_size": 10})
-    searched = client.get(
-        "/api/v1/admin/accounts", params={"role": "ADMIN", "search": "second"}
-    )
+    searched = client.get("/api/v1/admin/accounts", params={"role": "ADMIN", "search": "second"})
     created_id = created.json()["id"]
     disabled = client.patch(
         f"/api/v1/admin/accounts/{created_id}/status",
@@ -343,9 +381,7 @@ def test_admin_manages_systems_and_owner_assignments(client: TestClient) -> None
         headers={"X-CSRF-Token": csrf},
         json={"status": "DISABLED"},
     )
-    admin_page = client.get(
-        "/api/v1/admin/systems", params={"page": 1, "page_size": 1}
-    )
+    admin_page = client.get("/api/v1/admin/systems", params={"page": 1, "page_size": 1})
     admin_list = client.get("/api/v1/systems")
 
     assert created_esb.status_code == created_crm.status_code == 201
@@ -377,9 +413,9 @@ def test_owner_assignment_changes_revoke_existing_owner_sessions(client: TestCli
         headers={"X-CSRF-Token": csrf},
         json={"code": "ESB", "name": "企业服务总线"},
     )
-    owner_id = client.get(
-        "/api/v1/admin/accounts", params={"role": "SYSTEM_OWNER"}
-    ).json()["items"][0]["id"]
+    owner_id = client.get("/api/v1/admin/accounts", params={"role": "SYSTEM_OWNER"}).json()[
+        "items"
+    ][0]["id"]
 
     _login(client, "user", "owner")
     session_before_assignment = client.cookies.get(
@@ -449,3 +485,125 @@ def test_system_mutations_enforce_csrf_rbac_and_owner_role(client: TestClient) -
     assert missing_csrf.json()["code"] == "CSRF_INVALID"
     assert forbidden.status_code == 403
     assert forbidden.json()["code"] == "FORBIDDEN"
+
+
+def test_owner_upload_is_idempotent_queryable_and_failed_job_can_be_retried(
+    client: TestClient,
+) -> None:
+    admin_session = _login(client, "admin", "admin")
+    admin_csrf = str(admin_session["csrf_token"])
+    system = client.post(
+        "/api/v1/admin/systems",
+        headers={"X-CSRF-Token": admin_csrf},
+        json={"code": "DOCS", "name": "文档系统"},
+    ).json()
+    other_system = client.post(
+        "/api/v1/admin/systems",
+        headers={"X-CSRF-Token": admin_csrf},
+        json={"code": "OTHER", "name": "其他系统"},
+    ).json()
+    owner_id = client.get("/api/v1/admin/accounts", params={"role": "SYSTEM_OWNER"}).json()[
+        "items"
+    ][0]["id"]
+    client.put(
+        f"/api/v1/admin/systems/{system['id']}/owners",
+        headers={"X-CSRF-Token": admin_csrf},
+        json={"account_ids": [owner_id], "replace_existing": True},
+    )
+    owner_session = _login(client, "user", "owner")
+    headers = {
+        "X-CSRF-Token": str(owner_session["csrf_token"]),
+        "Idempotency-Key": "docs-upload-001",
+    }
+    file_content = b"# Guide\n\nStable content\n"
+
+    first = client.post(
+        f"/api/v1/systems/{system['id']}/documents",
+        headers=headers,
+        data={"document_name": "Guide"},
+        files={"file": ("guide.md", file_content, "text/markdown")},
+    )
+    duplicate = client.post(
+        f"/api/v1/systems/{system['id']}/documents",
+        headers=headers,
+        data={"document_name": "Guide"},
+        files={"file": ("guide.md", file_content, "text/markdown")},
+    )
+    forbidden = client.post(
+        f"/api/v1/systems/{other_system['id']}/documents",
+        headers={**headers, "Idempotency-Key": "docs-upload-002"},
+        data={"document_name": "Other"},
+        files={"file": ("other.md", file_content, "text/markdown")},
+    )
+    admin_session = _login(client, "admin", "admin")
+    scoped_idempotency = client.post(
+        f"/api/v1/systems/{other_system['id']}/documents",
+        headers={
+            "X-CSRF-Token": str(admin_session["csrf_token"]),
+            "Idempotency-Key": "docs-upload-001",
+        },
+        data={"document_name": "Other"},
+        files={"file": ("other.md", file_content, "text/markdown")},
+    )
+
+    assert first.status_code == duplicate.status_code == 202
+    assert duplicate.json()["job_id"] == first.json()["job_id"]
+    assert duplicate.json()["document_version_id"] == first.json()["document_version_id"]
+    assert forbidden.status_code == 403
+    assert forbidden.json()["code"] == "SYSTEM_ACCESS_DENIED"
+    assert scoped_idempotency.status_code == 202
+    assert scoped_idempotency.json()["job_id"] != first.json()["job_id"]
+    assert client.app.state.object_store.put_calls == 2
+    assert client.app.state.ingestion_dispatcher.jobs == [
+        UUID(first.json()["job_id"]),
+        UUID(scoped_idempotency.json()["job_id"]),
+    ]
+
+    owner_session = _login(client, "user", "owner")
+
+    status_response = client.get(f"/api/v1/ingestion-jobs/{first.json()['job_id']}")
+    assert status_response.status_code == 200
+    assert status_response.json()["status"] == "QUEUED"
+    assert status_response.json()["stage"] == "STORED"
+    assert status_response.json()["progress"] == 0
+    assert status_response.json()["celery_task_id"].startswith("task-")
+
+    invalid_retry = client.post(
+        f"/api/v1/ingestion-jobs/{first.json()['job_id']}/retry",
+        headers={"X-CSRF-Token": str(owner_session["csrf_token"])},
+    )
+    assert invalid_retry.status_code == 409
+    assert invalid_retry.json()["code"] == "INGESTION_JOB_NOT_RETRYABLE"
+
+    job_id = UUID(first.json()["job_id"])
+    claimed = client.app.state.ingestion_coordinator.claim(
+        job_id,
+        owner="test-worker",
+        now=datetime.now(UTC),
+        lease_seconds=60,
+    )
+    assert claimed is not None
+    client.app.state.ingestion_coordinator.fail(
+        job_id,
+        owner="test-worker",
+        attempt=claimed.job.attempt,
+        error_code="INVALID_FILE",
+        error_message="文件无效",
+        retryable=False,
+        version_status=DocumentVersionStatus.FAILED,
+        now=datetime.now(UTC),
+        retry_base_seconds=1,
+    )
+    retry = client.post(
+        f"/api/v1/ingestion-jobs/{job_id}/retry",
+        headers={"X-CSRF-Token": str(owner_session["csrf_token"])},
+    )
+
+    assert retry.status_code == 202
+    assert retry.json()["status"] == "QUEUED"
+    assert retry.json()["attempt"] == 0
+    assert client.app.state.ingestion_dispatcher.jobs == [
+        job_id,
+        UUID(scoped_idempotency.json()["job_id"]),
+        job_id,
+    ]

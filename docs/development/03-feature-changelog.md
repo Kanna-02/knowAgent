@@ -249,3 +249,31 @@ review 修复（5 阻塞 + 3 建议 + 3 提醒）：
 验证方式：后端 81 个测试全部通过，总覆盖率 90.80%，`chunking.py` 覆盖率 90%；Black/isort 检查通过，`documents` 与平台 settings 共 16 个源文件 `mypy --strict` 零错误，Pylint 10.00/10，全仓 Bandit 中高危问题 0；目标 Python 3.11 未运行，`py -0p` 确认本机没有已安装 Python。
 
 后续注意：本轮仍使用 Python 3.12.13；Celery 任务软/硬超时、进程内存限制和真实 Office/PDF 样本需在下一项持久入库任务及目标 Python 3.11/Linux 集成环境验证。
+
+### 2026-08-02 - 完成 Phase 1 对象存储与可恢复持久化入库任务
+
+类型：新功能
+
+相关需求：REQ-004 的对象存储、持久任务和可恢复处理部分；AC-003、AC-009。
+
+变更说明：
+
+1. 新增 S3 兼容对象存储适配器，支持流式/multipart 上传、读取和删除，配置受控 TLS/CA、连接与读取超时及 SDK 标准有限重试；对象 key 确定生成，凭据只从环境提供且不进入配置对象 repr。
+2. 新增 `documents`、`document_versions`、`ingestion_jobs` ORM 与 Alembic 迁移，持久记录任务状态、处理阶段、进度、尝试预算、租约、派发、错误和 parser/manifest 元数据，并用账号+系统幂等作用域、检查约束和乐观版本列保护一致性。
+3. 新增上传用例和 API：管理员或系统负责人可上传，同一账号与系统内只有文档名、文件元数据和内容摘要全部一致时重复幂等键才返回同一任务；数据库或审计持久化失败会尽力清理孤儿对象。任务查询和人工重试均执行系统归属权限与 CSRF 校验。
+4. 新增 Celery ingestion Worker、仅携带 `job_id` 的派发器和 Beat 恢复扫描。PostgreSQL 保持业务事实源；Worker 通过租约领取，持久推进 `STORED -> PARSING -> CHUNKING -> COMPLETED`，并写入确定性 `chunks-v1.json` manifest。
+5. 新增可重试/永久失败分类、指数退避、自动尝试预算、人工重试预算重置和租约过期恢复；自动重试与恢复清除旧 Celery 派发元数据，耗尽后 fail closed。
+6. 新增状态机、S3 配置/错误、repository、processor/recovery、幂等上传、孤儿清理、权限和 API 测试，并同步技术决策、路线图、追溯矩阵、架构和本地运行说明。
+
+review 修复（5 阻塞 + 4 建议 + 2 提醒）：
+
+1. 为 Worker 状态写入增加 owner + attempt + 有效期 fencing，并约束租约必须长于 Celery 硬超时；过期 Worker 无法覆盖重新领取后的任务。
+2. 非 `FAILED` 任务人工重试改为稳定 `INGESTION_JOB_NOT_RETRYABLE` 409，API 工厂按传入 Settings 构造相同 Redis Broker 的 Dispatcher。
+3. 解析与切分完成后的版本状态改为 `CHUNKED`，Embedding 和知识索引完成前不再提前进入 `READY_DRAFT`；租约恢复时版本同步回到 `UPLOADED`。
+4. S3 TLS 和 Cookie 安全布尔配置改为严格解析，未知值启动失败；幂等键唯一范围改为账号+业务系统，避免跨租户键占用。
+5. 上传审计纳入对象补偿边界，审计或数据库持久化失败时尽力删除本次对象；API 契约同步当前 job-centric 查询与重试路径。
+6. 补充 Dispatcher Broker、Worker task 装配、租约竞争、非法重试、幂等作用域、严格配置和审计补偿测试，并统一格式化本次修改的集成测试文件。
+
+验证方式：后端 115 项测试全部通过，总覆盖率 91.07%；review 相关 42 项定向测试通过；本次 30 个相关源文件 `mypy --strict` 零错误，Pylint 10.00/10，全仓 Bandit 中高危 0；本次 28 个未提交 Python 文件 Black/isort 检查通过，`git diff --check` 通过；隔离 SQLite 空库 `alembic upgrade head` 与 `alembic check` 通过且 ORM/迁移无新增差异。全仓 mypy 仍为 identity/systems 既有 6 文件 26 个错误，未计为本功能通过。
+
+后续注意：本轮为纯后端能力，无页面手动测试；未连接公司真实 PostgreSQL、Redis、S3 兼容端点或 ESB 文件，尚未验证签名/TLS/multipart/权限和重启恢复的真实基础设施契约；测试运行于 Python 3.12.13，目标 Python 3.11/Linux 仍需集成验证。Phase 1 下一项为文档版本、发布状态和基于 `system_id` 强过滤的知识隔离基础模型。

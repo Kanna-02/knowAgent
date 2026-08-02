@@ -15,17 +15,17 @@
 ## 2. 当前阶段
 
 ```text
-当前阶段：Phase 1 进行中（4/6）
+当前阶段：Phase 1 进行中（5/6）
 阶段目标：认证、系统管理、双端基础界面和四类文档可恢复入库
-当前任务：REQ-004 统一来源定位、四类结构化解析和切分
-任务状态：解析基础已完成；对象存储、持久任务和可恢复索引待下一项实现
+当前任务：Phase 1 文档版本、发布状态和基于 `system_id` 强过滤的知识隔离基础模型
+任务状态：REQ-004 的解析、对象存储和可恢复持久任务已完成；可检索知识索引与发布链路待下一项实现
 ```
 
 ## 3. 已完成
 
 1. 初始化需求、路线图、前端设计、开发规则和追溯矩阵。
 2. 完成 `knowledge-rag` 跨项目资产盘点。
-3. 已确认 TD-001 至 TD-010，包括全 Python、PostgreSQL 混合检索、独立模型服务、Celery、双入口 Redis Session、格式专用解析、原生 Linux 部署、LangGraph 编排和应用框架版本基线。
+3. 已确认 TD-001 至 TD-011，包括全 Python、PostgreSQL 混合检索、独立模型服务、Celery、双入口 Redis Session、格式专用解析、S3 兼容对象存储、原生 Linux 部署、LangGraph 编排和应用框架版本基线。
 4. 已同步双端登录、统一账号体系、用户批量导入、管理员后台新增和首次强制改密，并完成跨文档一致性检查。
 5. 已确认四类文档解析器边界、统一 `SourceLocator`、结构化切分约束和扫描 PDF 显式失败策略。
 6. 已确认 systemd + Nginx + 版本化发布目录，以及向后兼容数据库迁移和应用回滚边界。
@@ -49,16 +49,20 @@
 24. 已实现 PyMuPDF、python-docx、markdown-it-py、openpyxl 四个隔离解析适配器及 registry；扫描/空 PDF 标记 `OCR_REQUIRED`，旧格式、损坏、加密、编码和资源超限均使用稳定错误码。
 25. 已实现结构感知 chunker：不跨 PDF 页、标题路径、工作表或表格边界，超长块按预算拆分，表格分组重复表头，每个 chunk 保留完整 locator 集合。
 26. 已完成 REQ-004/REQ-005 评审修复：中文与表头严格遵守 chunk 预算，Markdown 表格使用 AST 精确源行，locator 格式内组合严格校验，损坏 OOXML 统一错误，解析限制配置化并改为同步 worker 契约。
+27. 已实现 S3 兼容对象存储适配器，支持受控 TLS/CA、multipart、连接/读取超时和 SDK 有限重试；凭据仅从环境读取并从配置对象 repr 隐藏。
+28. 已实现 `documents`、`document_versions`、`ingestion_jobs` 持久模型和迁移，以及上传/查询/人工重试 API；数据库事实记录幂等键、任务/版本状态、阶段进度、尝试次数、租约、派发和错误信息。
+29. 已实现 Celery 入库 Worker 与 Beat 恢复扫描：消息只携带 `job_id`，任务按数据库租约领取，解析与切分 manifest 使用确定性对象 key；自动退避重试、耗尽失败、人工重置预算和进程重启恢复均由 PostgreSQL 状态机驱动。
+30. 已完成持久入库 review 修复：Worker 写入使用 owner/attempt 租约 fencing，解析完成停在 `CHUNKED`，非法重试返回稳定 409，API/Worker 共用同一 Broker 配置，安全布尔值严格解析，幂等键按账号+系统隔离，审计失败执行对象补偿。
 
 ## 4. 正在进行
 
-1. Phase 1 下一项为对象存储、持久化入库任务、幂等、阶段进度、失败重试和进程重启恢复。
+1. Phase 1 下一项为文档版本、发布状态和基于 `system_id` 强过滤的知识隔离基础模型。
 2. 等待 DBA 验证 `pgvector` 与 `pg_trgm` 扩展。
 3. 等待目标 Linux 服务器资源信息以确定模型推理后端、量化方式和 Python 传递依赖锁。
 
 ## 5. 未完成 / 下一步
 
-1. 使用 `feature` 完成 Phase 1 对象存储与可恢复文档入库任务。
+1. 使用 `feature` 完成 Phase 1 文档版本、发布状态和知识隔离基础模型。
 2. 在数据库功能落地前确认 PostgreSQL 扩展和版本。
 3. 在类生产 Linux 环境验证 Python 3.11 完整安装、模型运行和发布回滚。
 4. 在 `knowledge` 与 `retrieval` 模块落地后完成 REQ-002 的系统级强隔离和 AC-002 零跨系统泄漏验收。
@@ -69,8 +73,8 @@
 | --- | --- | --- | --- |
 | PostgreSQL 是否允许安装 `vector`、`pg_trgm` | 影响 TD-002 实施 | DBA | 待验证 |
 | 模型服务器 CPU/内存/GPU 信息未知 | 影响 Embedding/Rerank 运行时和量化 | 运维/用户 | 待提供 |
-| 公司 LLM、通知、对象存储协议未知 | 影响 provider 实现 | 用户/第三方 | 待提供 |
-| 本机无 Python 3.11、未连接 PostgreSQL/Redis 测试实例 | 影响目标运行时和真实基础设施验证 | 开发/DBA | 待在集成环境验证 |
+| 公司 LLM、通知协议及真实对象存储端点契约待验证 | 影响 provider 实现和 S3 兼容性证明 | 用户/第三方 | 待提供/验证 |
+| 本机无 Python 3.11、未连接 PostgreSQL/Redis/S3 测试实例 | 影响目标运行时和真实基础设施验证 | 开发/DBA | 待在集成环境验证 |
 
 ## 7. 最近改动文件
 
@@ -78,7 +82,7 @@
 | --- | --- | --- |
 | `docs/product/01-requirements-clarification.md` | 同步双登录、账号来源、默认密码规则并清理框架待确认旧状态 | 已完成 |
 | `docs/engineering/04-tech-decisions.md` | 记录正式架构决策并将运行时调整为 Python 3.11 | 已完成 |
-| `docs/product/06-roadmap.md` | Phase 1 推进为进行中（3/6） | 已完成 |
+| `docs/product/06-roadmap.md` | Phase 1 推进为进行中（5/6） | 已完成 |
 | `docs/product/15-frontend-design.md` | 增加双登录流程和 TD-010 前端组件策略 | 已完成 |
 | `docs/development/17-traceability-matrix.md` | 18 项需求映射实现模块并推进到 `skeleton` | 已完成 |
 | `AI_DEVELOPMENT_RULES.md` | 更新本项目账号与会话规则 | 已完成 |
@@ -111,6 +115,12 @@
 | `backend/src/knowagent/platform/settings.py`、`backend/.env.example` | 文档解析、归档、格式结构和 chunk 预算环境配置 | 已完成 |
 | `backend/tests/unit/test_document_configuration.py` | 文档配置加载与非法边界回归测试 | 已完成 |
 | `docs/operations/07-local-development.md` | 文档解析配置与同步 worker 执行边界 | 已完成 |
+| `backend/src/knowagent/platform/object_store.py`、`backend/src/knowagent/platform/settings.py`、`backend/.env.example` | S3 兼容对象存储适配器、超时/TLS/multipart/重试和入库任务配置 | 已完成 |
+| `backend/src/knowagent/documents/domain/ingestion.py`、`application/`、`infrastructure/`、`api/` | 持久任务状态机、上传幂等用例、处理/恢复流程、SQLAlchemy 适配和 API | 已完成 |
+| `backend/src/knowagent/worker/` | Celery ingestion 队列、仅 `job_id` 派发和 Beat 恢复扫描 | 已完成 |
+| `backend/migrations/versions/d1a97d2e451b_create_document_ingestion_tables.py` | 文档、版本和入库任务表及约束/索引 | 已完成 |
+| `backend/tests/unit/test_*ingestion*.py`、`test_s3_object_store.py`、`backend/tests/integration/test_identity_api.py` | 状态机、幂等、重试、恢复、对象存储、权限和 API 回归测试 | 已完成 |
+| `backend/tests/unit/test_worker_tasks.py`、入库相关回归测试 | Worker 装配、租约 fencing、Broker 一致性、非法重试、幂等作用域和对象补偿 review 回归 | 已完成 |
 
 ## 8. 已运行验证
 
@@ -142,6 +152,12 @@
 | REQ-004 `mypy --strict` | 通过（本模块） | `documents` 与平台 settings 共 16 个源文件零错误；全仓仍有 identity/systems 既有 26 个错误 |
 | REQ-004 Pylint/Bandit | 通过 | `documents` 与平台 settings 的 Pylint 10.00/10；全仓 Bandit 中高危 0 |
 | REQ-004 评审修复定向验证 | 通过 | 42 项 locator/parser/chunker/config 定向测试通过；损坏 OOXML、MIME 参数、中文预算、超长表头、多行 Markdown 表格和非法配置均已覆盖 |
+| Phase 1 持久入库定向测试 | 通过 | 42 项 ingestion/S3/config/worker/API review 回归测试通过 |
+| Phase 1 持久入库后端全量测试 | 通过 | 115 项测试通过，总覆盖率 91.07% |
+| Phase 1 持久入库 Black/isort | 通过（本次范围） | 本次 28 个未提交 Python 文件 Black/isort 检查通过，集成测试历史格式问题已统一修复 |
+| Phase 1 持久入库 `mypy --strict` | 通过（本次模块） | `documents`、object store、settings、worker 和 API 共 30 个源文件零错误；全仓仍为 identity/systems 既有 6 文件 26 错误 |
+| Phase 1 持久入库 Pylint/Bandit | 通过 | 本次源文件 Pylint 10.00/10；全仓 Bandit 中高危 0 |
+| Phase 1 持久入库 Alembic | 通过 | 隔离 SQLite 空库 `upgrade head` 与 `alembic check` 通过；人工核对三表列、枚举、外键、唯一/检查约束和索引与 ORM 一致 |
 
 ## 9. 未运行验证与风险
 
@@ -153,15 +169,15 @@
 6. Python 3.11 本地无依赖 metadata dry-run 因当前环境缺少 `wheel` 的 `bdist_wheel` 命令未完成；配置约束已单独验证，未为此安装全局构建工具。
 7. `npm audit` 的公告接口访问审批同样返回 503；`npm ci` 报告现有锁文件有 2 个 high 漏洞，未在未评估 breaking change 的情况下执行自动升级。
 8. 本轮 `npm audit` 沙箱内无法访问公告接口；外部执行因会向公共 npm 服务发送依赖元数据而被安全策略拒绝，未取得最新公告结果。
-9. 四类解析器已通过内存生成样本测试，但尚未接入对象存储、PostgreSQL/Celery 或公司真实 ESB 文档；扫描 PDF 仅返回 `OCR_REQUIRED`，首版不执行 OCR。
-10. 本轮依赖和测试仍运行于内置 Python 3.12.13；`py -0p` 确认本机没有已安装 Python，无法执行目标 Python 3.11 验证。全仓 mypy/Pylint 仍有此前 identity/systems 基线问题，本次 `documents` 与平台 settings 无新增错误。
+9. 四类解析器已接入 S3/PostgreSQL/Celery 端口和持久任务，但尚未连接公司真实 PostgreSQL、Redis、S3 兼容端点或 ESB 文档；当前证明来自单元/SQLite 集成验证，不替代隔离基础设施核心链路测试。扫描 PDF 仅返回 `OCR_REQUIRED`，首版不执行 OCR。
+10. 本轮依赖和测试仍运行于内置 Python 3.12.13；`py -0p` 确认本机没有已安装 Python，无法执行目标 Python 3.11/Linux 验证。全仓 mypy 仍有此前 identity/systems 6 文件 26 个错误，本次 30 个相关源文件无新增错误。
 
 ## 10. 继续开发建议
 
 新对话或新开发者接手时，建议下一步：
 
-1. 先阅读 TD-005、TD-007、`documents` 解析契约和 Phase 1 文档入库数据流。
-2. 使用 `feature` 完成对象存储、持久化入库任务、幂等、进度、重试和重启恢复。
+1. 先阅读 TD-005、TD-007、TD-011、`documents` 入库契约和 Phase 1 文档入库数据流。
+2. 使用 `feature` 完成文档版本、发布状态和基于 `system_id` 强过滤的知识隔离基础模型。
 
 ## 11. 接手时必须先读
 

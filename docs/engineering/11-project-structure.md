@@ -2,7 +2,7 @@
 
 > 状态：架构方案已于 2026-08-02 通过用户确认门禁。
 >
-> 基线：本方案落实 TD-001 至 TD-010，并覆盖 REQ-001 至 REQ-018。
+> 基线：本方案落实 TD-001 至 TD-011，并覆盖 REQ-001 至 REQ-018。
 
 ## 1. 架构结论
 
@@ -178,11 +178,11 @@ class SourceLocator(BaseModel):
 | `POST /admin/systems` | `SystemCreateRequest` | `SystemView` | 平台管理员 |
 | `PATCH /admin/systems/{system_id}` | `SystemUpdateRequest` | `SystemView` | 平台管理员 |
 | `PUT /admin/systems/{system_id}/owners` | `OwnerAssignmentRequest` | `list[OwnerView]` | 平台管理员 |
-| `POST /systems/{system_id}/documents` | multipart + checksum | `DocumentVersionView` | 负责人/管理员；格式、大小、配额校验 |
+| `POST /systems/{system_id}/documents` | multipart 文件 + `Idempotency-Key` | `202 IngestionJobView` | 负责人/管理员；格式、大小、系统授权和幂等校验 |
 | `GET /systems/{system_id}/documents` | 分页/状态/关键词 | `Page[DocumentView]` | 负责人/管理员；强制系统授权 |
 | `GET /document-versions/{version_id}` | 无 | `DocumentVersionView` | 所属系统授权 |
-| `GET /document-versions/{version_id}/jobs` | 无 | `list[IngestionJobView]` | 所属系统授权 |
-| `POST /document-versions/{version_id}/retry` | `RetryRequest` | `IngestionJobView` | 仅失败/OCR_REQUIRED 版本可重试 |
+| `GET /ingestion-jobs/{job_id}` | 无 | `IngestionJobView` | 所属系统授权 |
+| `POST /ingestion-jobs/{job_id}/retry` | 无 | `202 IngestionJobView` | 仅 `FAILED` 任务可重试；其余状态返回稳定 409 |
 | `POST /document-versions/{version_id}/publish` | `PublishRequest` | `DocumentVersionView` | READY_DRAFT 才能发布；事务切换当前版本 |
 | `POST /document-versions/{version_id}/retire` | `RetireRequest` | `DocumentVersionView` | 负责人/管理员；不删除历史引用快照 |
 
@@ -326,7 +326,7 @@ Provider 可由内部 HTTP、自建运行时或后续公司 API 实现；领域�
 | 系统 | `system_access_rules` | P2 部门/用户组可见性；首版默认启用系统级公开策略 |
 | 文档 | `documents` | `system_id`、逻辑文档名、当前发布版本、状态 |
 | 文档 | `document_versions` | 对象键、文件名、媒体类型、SHA-256、版本号、解析/发布状态；`document_id + version_no` 唯一 |
-| 文档 | `ingestion_jobs` | 任务类型、阶段、状态、进度、attempt、租约、错误码、Celery task id；幂等键唯一 |
+| 文档 | `ingestion_jobs` | 任务类型、阶段、状态、进度、attempt、租约、错误码、Celery task id；`actor_id + system_id + idempotency_key` 唯一 |
 | 知识 | `knowledge_sources` | 来源类型 `DOCUMENT/TICKET`、`system_id`、源版本/工单、发布状态 |
 | 知识 | `knowledge_chunks` | `system_id`、source、文本、`SourceLocator` JSONB、结构路径、序号、token 数、模型版本、向量、检索文本 |
 | 会话 | `conversations` | `owner_id`、不可变 `system_id`、标题、状态、最近活动时间 |
@@ -353,9 +353,9 @@ Provider 可由内部 HTTP、自建运行时或后续公司 API 实现；领域�
 
 ```text
 DocumentVersion:
-UPLOADED -> PARSING -> INDEXING -> READY_DRAFT -> PUBLISHED -> RETIRED
-               |          |             |
-               +-------> FAILED <--------+
+UPLOADED -> PARSING -> CHUNKING -> CHUNKED -> INDEXING -> READY_DRAFT -> PUBLISHED -> RETIRED
+               |          |                    |             |
+               +-------> FAILED <---------------+-------------+
                +-------> OCR_REQUIRED
 
 QuestionRun:
@@ -377,15 +377,15 @@ DRAFT -> SUBMITTED -> APPROVED -> PUBLISHING -> PUBLISHED
 
 ### 7.1 文档入库
 
-1. API 校验角色、`system_id` 权限、扩展名、MIME、大小和 SHA-256，并以流式方式写对象存储。
-2. PostgreSQL 事务创建 `document_version`、`ingestion_job` 和 Outbox/Celery 派发事实；重复幂等键返回已有任务。
-3. Worker 领取任务并更新租约，选择格式专用 Parser，输出结构块和统一 `SourceLocator`。
-4. Chunker 按标题、段落、页、工作表和 token 上限切分，不跨越不可追溯的结构边界。
+1. API 校验角色、`system_id` 权限、扩展名、MIME、大小和 SHA-256，并以流式方式写入 S3 兼容对象存储；该阶段已实现。
+2. PostgreSQL 事务创建 `document`、`document_version` 和 `ingestion_job`；幂等键按账号与业务系统划分作用域，作用域内重复请求返回已有任务；提交后仅向 Celery 投递 `job_id`，该阶段已实现。
+3. Worker 通过数据库租约领取任务，选择格式专用 Parser，输出结构块和统一 `SourceLocator`；任务阶段、进度、尝试次数和可诊断错误持续入库。每次状态写入都校验租约 owner、attempt 与有效期，过期 Worker 不得覆盖新执行，该阶段已实现。
+4. Chunker 按标题、段落、页、工作表和 token 上限切分，不跨越不可追溯的结构边界，并将确定性 `chunks-v1.json` manifest 写入对象存储；完成后版本停在 `CHUNKED`，不得提前标记 `READY_DRAFT`，该阶段已实现。
 5. Worker 批量调用 Embedding 服务；校验模型名、版本、维度与归一化契约。
 6. 在暂存状态批量写入 chunks；全部成功后将版本置为 `READY_DRAFT`，失败则记录阶段和可诊断错误，不暴露半成品索引。
 7. 负责人发布后事务切换可检索版本。扫描 PDF 进入 `OCR_REQUIRED`，旧 `.doc/.xls` 返回明确不支持。
 
-恢复策略：Worker 定时扫描租约过期的 `RUNNING` 任务，根据幂等键重新排队；超过最大重试次数后进入 `FAILED`，允许人工重试。Celery 状态不用于决定业务是否完成。
+恢复策略：Beat 定时扫描未派发、到期重试和租约过期的未终态任务，根据数据库事实重新排队；恢复时版本同步回到 `UPLOADED`，自动重试耗尽后进入 `FAILED`，人工重试重置尝试预算。Celery 状态不用于决定业务是否完成。
 
 ### 7.2 问答、引用和拒答
 
@@ -502,7 +502,7 @@ API、Worker、Beat、Model 使用独立低权限系统账号或最小共享组�
 | --- | --- | --- |
 | PostgreSQL 不允许 `vector`/`pg_trgm` | 核心检索方案不可实施 | DBA 在实现前验证扩展；失败则回到 TD-002，不绕过 |
 | 模型服务器资源未知 | 模型延迟、内存和并发不可确定 | 用 ESB 样本对 PyTorch/ONNX/量化实测后锁定运行时 |
-| 公司 LLM/通知/对象存储协议未知 | Provider 细节和错误策略待定 | 先保持稳定 port；获得契约后走 tech/feature 门禁 |
+| 公司 LLM/通知协议及真实对象存储端点契约待验证 | Provider 细节、错误策略和 S3 兼容差异待定 | 保持稳定 port；在隔离 Bucket 验证签名、TLS、multipart、错误映射和权限后再进入类生产 |
 | 模块化单体共享数据库 | 模块隔离弱于微服务 | Repository 私有、公开用例接口、架构测试禁止跨模块 ORM 引用 |
 | Celery Broker 状态与业务状态可能分叉 | 重复或遗漏执行 | PostgreSQL 幂等键、租约、事实状态和恢复扫描；任务至少一次执行 |
 | 本地账号默认密码 | 泄露与横向尝试风险 | 受控摘要生成、首次改密、限流、会话撤销和审计 |
@@ -549,10 +549,10 @@ knowAgent/
     src/knowagent/
       api/                 # FastAPI app、middleware、v1 routers
       common/              # 类型基元、错误、分页、UoW 接口
-      platform/            # settings、db、redis、object store、outbox
+      platform/            # settings、db、redis、S3 object store、outbox
       identity/
       systems/
-      documents/           # SourceLocator、parser port/registry、格式适配器、chunker
+      documents/           # SourceLocator、parser/chunker、持久入库用例、ORM/repository、API
       knowledge/
       conversations/
       retrieval/
@@ -561,7 +561,7 @@ knowAgent/
       notifications/
       analytics/
       audit/
-      worker/              # Celery app、task 入口、scheduler
+      worker/              # Celery app、仅 job_id 的 task/dispatcher、租约恢复 scheduler
     migrations/
     tests/unit/
     tests/integration/

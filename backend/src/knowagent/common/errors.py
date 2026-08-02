@@ -40,6 +40,11 @@ class ConflictError(KnowAgentError):
         super().__init__(code, message, status_code=409)
 
 
+class NotFoundError(KnowAgentError):
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(code, message, status_code=404)
+
+
 class FeatureDisabledError(KnowAgentError):
     def __init__(self, feature: str) -> None:
         super().__init__(

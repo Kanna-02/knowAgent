@@ -18,3 +18,7 @@ class DocumentParseError(Exception):
         super().__init__(message)
         self.code = code
         self.message = message
+
+
+class IngestionLeaseLostError(RuntimeError):
+    """Raised when a worker no longer owns the ingestion lease."""

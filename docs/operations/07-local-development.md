@@ -19,11 +19,13 @@ python -m pip install -e ".[dev]"
 Copy-Item .env.example .env
 ```
 
-将 `.env` 中的数据库和 Redis 地址改为本地测试实例，再把变量加载到当前终端。应用不会自动读取 `.env`，可使用公司统一的环境加载方式或在 PowerShell 中显式设置。
+将 `.env` 中的数据库、Redis 和 S3 兼容对象存储配置改为本地测试实例，再把变量加载到当前终端。应用不会自动读取 `.env`，可使用公司统一的环境加载方式或在 PowerShell 中显式设置。
+
+对象存储使用 `KNOWAGENT_S3_*` 环境变量。至少配置 endpoint、bucket、region、access key 和 secret key；内部 CA 使用 `KNOWAGENT_S3_CA_BUNDLE`，不得通过关闭 TLS 校验绕过证书问题。`KNOWAGENT_S3_VERIFY_TLS` 和 `KNOWAGENT_COOKIE_SECURE` 只接受明确的 `true/false`、`yes/no`、`on/off` 或 `1/0`，拼写错误会让应用启动失败。连接/读取超时、SDK 重试次数和 multipart 阈值/分片大小均可配置，凭据只能由环境或公司密钥设施提供。
 
 文档解析和切分参数统一使用 `KNOWAGENT_DOCUMENT_*` 环境变量。默认值已列在 `backend/.env.example`，包括上传字节数、Office 展开大小/压缩比/归档条目数、PDF 页数与块数、Word/Markdown 块数、Excel 工作表/行/列/单元格上限，以及 chunk token 预算和块重叠数。所有上限必须为正整数，只有 `KNOWAGENT_DOCUMENT_CHUNK_OVERLAP_BLOCKS` 可以为 `0`；无效值会在配置加载时失败，不应在生产环境静默回退。
 
-parser 是同步的 CPU/内存密集端口，只能由后续独立文档 worker 调用，不得直接放入 FastAPI `async` 请求链。目标 worker 还需在任务层配置软/硬超时和进程内存边界。
+parser 是同步的 CPU/内存密集端口，只能由独立文档 worker 调用，不得直接放入 FastAPI `async` 请求链。`KNOWAGENT_INGESTION_*` 配置任务最大尝试次数、租约、退避、派发超时、恢复批大小和 Celery 软/硬超时；硬超时必须大于软超时，租约必须大于硬超时。Worker 每次写状态都校验 owner、attempt 和租约有效期，过期执行只记录告警，不覆盖已被重新领取的任务。
 
 应用数据库迁移并启动 API：
 
@@ -33,6 +35,22 @@ uvicorn knowagent.api.app:app --reload --host 127.0.0.1 --port 8000
 ```
 
 健康检查：`GET http://127.0.0.1:8000/health/live`。
+
+另开终端启动入库 Worker 和恢复调度器；两者与 API 使用同一组数据库、Redis 和对象存储环境变量：
+
+```powershell
+cd backend
+.\.venv\Scripts\Activate.ps1
+celery -A knowagent.worker.celery_app:celery_app worker --loglevel=INFO --queues=ingestion
+```
+
+```powershell
+cd backend
+.\.venv\Scripts\Activate.ps1
+celery -A knowagent.worker.celery_app:celery_app beat --loglevel=INFO
+```
+
+Celery 消息只携带 `job_id`；业务状态以 PostgreSQL 为准。Beat 定期恢复未派发任务、到期重试和租约过期任务，不能用 Celery result backend 判断入库是否完成。
 
 ## 3. 首个管理员
 
