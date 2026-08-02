@@ -59,6 +59,21 @@ const systemPage = {
   page_size: 20,
   total: 1,
 };
+
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (reason: unknown) => void;
+} {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 const auth: AuthContextValue = {
   user: { ...owner, role: "ADMIN", system_roles: [] },
   loading: false,
@@ -160,6 +175,7 @@ describe("SystemsPage", () => {
   });
 
   it("keeps controls available when system mutations fail", async () => {
+    const retry = deferred<typeof systemPage>();
     const listSystems = vi.spyOn(apiClient, "listAdminSystems").mockResolvedValue(systemPage);
     vi.spyOn(apiClient, "listAccounts").mockResolvedValue(ownerPage);
     const createSystem = vi.spyOn(apiClient, "createSystem").mockRejectedValue(
@@ -213,6 +229,46 @@ describe("SystemsPage", () => {
     await click(view.container.querySelector('[aria-label="刷新业务系统列表"]')!);
     await flush();
     expect(listSystems).toHaveBeenCalledTimes(2);
+    expect(view.container.textContent).toContain("request-id");
+    listSystems.mockReturnValueOnce(retry.promise);
+    await click(view.container.querySelector('[aria-label="重试加载业务系统列表"]')!);
+    expect(listSystems).toHaveBeenCalledTimes(3);
+    expect(
+      (view.container.querySelector('[aria-label="重试加载业务系统列表"]') as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    retry.resolve(systemPage);
+    await flush();
+    expect(view.container.textContent).not.toContain("request-id");
+  });
+
+  it("ignores an older systems request that finishes after the latest refresh", async () => {
+    const older = deferred<typeof systemPage>();
+    const latest = deferred<typeof systemPage>();
+    const latestSystem = { ...system, id: "latest-system", code: "CRM", name: "客户关系管理" };
+    const listSystems = vi
+      .spyOn(apiClient, "listAdminSystems")
+      .mockResolvedValueOnce(systemPage)
+      .mockReturnValueOnce(older.promise)
+      .mockReturnValueOnce(latest.promise);
+    vi.spyOn(apiClient, "listAccounts").mockResolvedValue(ownerPage);
+    const view = await mountWithAuth(<SystemsPage />, auth, "/admin/systems");
+    views.push(view);
+    await flush();
+
+    await click(view.container.querySelector('[aria-label="刷新业务系统列表"]')!);
+    await click(view.container.querySelector('[aria-label="刷新业务系统列表"]')!);
+    expect(listSystems).toHaveBeenCalledTimes(3);
+
+    latest.resolve({ ...systemPage, items: [latestSystem] });
+    await flush();
+    expect(view.container.textContent).toContain("客户关系管理");
+    expect(view.container.textContent).not.toContain("企业服务总线");
+
+    older.reject(new Error("stale failure"));
+    await flush();
+    expect(view.container.textContent).not.toContain("业务系统列表加载失败");
+    expect(view.container.textContent).toContain("客户关系管理");
   });
 
   it("keeps systems visible and retries owner candidates independently", async () => {

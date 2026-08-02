@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ApiClient } from "./client";
+import { ApiClient, ApiError } from "./client";
 
 function jsonResponse(body: object, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -148,5 +148,24 @@ describe("ApiClient", () => {
     expect(fetchMock.mock.calls[5]?.[1]?.body).toBe(
       JSON.stringify({ account_ids: [owner.account_id], replace_existing: true }),
     );
+  });
+
+  it("normalizes an empty gateway error into a traceable API error", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(null, {
+        status: 502,
+        headers: { "X-Request-ID": "gateway-request-id" },
+      }),
+    );
+    const client = new ApiClient();
+
+    const request = client.me();
+    await expect(request).rejects.toBeInstanceOf(ApiError);
+    await expect(request).rejects.toMatchObject({
+      code: "HTTP_ERROR",
+      message: "服务暂时不可用，请稍后重试",
+      requestId: "gateway-request-id",
+      status: 502,
+    });
   });
 });

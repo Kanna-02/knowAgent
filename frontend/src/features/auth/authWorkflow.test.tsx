@@ -11,6 +11,7 @@ import { ChangePasswordPage } from "./ChangePasswordPage";
 import { LoginPage } from "./LoginPage";
 import { ProtectedRoute } from "./ProtectedRoute";
 import { UserHomePage } from "./UserHomePage";
+import { UserShell } from "./UserShell";
 import type { AuthContextValue } from "./authContextValue";
 
 const user: CurrentUser = {
@@ -237,9 +238,17 @@ describe("route and shell workflows", () => {
 
   it("renders user and admin shells and executes their logout menus", async () => {
     const userLogout = vi.fn<AuthContextValue["logout"]>().mockResolvedValue(undefined);
-    const userView = await mount(<UserHomePage />, auth({ user, logout: userLogout }), "/app");
-    expect(userView.container.textContent).toContain("普通用户");
-    await click(userView.container.querySelector("header button") as Element);
+    const userView = await mount(
+      <Routes>
+        <Route path="/app" element={<UserShell />}>
+          <Route path="question" element={<div>问答内容</div>} />
+        </Route>
+      </Routes>,
+      auth({ user, logout: userLogout }),
+      "/app/question",
+    );
+    expect(userView.container.textContent).toContain("问答内容");
+    await click(userView.container.querySelector('[aria-label="账号菜单"]') as Element);
     await flush();
     const userMenu = [...document.querySelectorAll(".ant-dropdown-menu-item")].find((item) =>
       item.textContent?.includes("退出登录"),

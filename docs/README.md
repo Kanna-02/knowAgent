@@ -1,6 +1,6 @@
 # KnowAgent 项目文档
 
-KnowAgent 是面向公司内部人员的多系统智能客服产品。Phase 0 已完成；Phase 1 正在进行（2/6），账号认证、多业务系统管理、负责人配置和前台系统选择已实现。
+KnowAgent 是面向公司内部人员的多系统智能客服产品。Phase 0 已完成；Phase 1 正在进行（3/6），账号认证、多业务系统管理、负责人配置、前台系统选择以及双端基础导航/状态/错误处理已实现。
 
 ## 开始阅读
 
@@ -17,13 +17,13 @@ KnowAgent 是面向公司内部人员的多系统智能客服产品。Phase 0 �
 | 分类 | 文档 | 状态 |
 | --- | --- | --- |
 | 产品 | `product/01-requirements-clarification.md` | 已确认，认证范围已同步 |
-| 产品 | `product/06-roadmap.md` | Phase 1 进行中（2/6） |
+| 产品 | `product/06-roadmap.md` | Phase 1 进行中（3/6） |
 | 产品 | `product/15-frontend-design.md` | 已确认，双登录流程已同步 |
 | 工程 | `engineering/02-development-principles.md` | 初版完成 |
 | 工程 | `engineering/04-tech-decisions.md` | TD-001 至 TD-010 及核心版本基线已确认 |
 | 工程 | `engineering/11-project-structure.md` | 架构已确认 |
 | 开发 | `development/03-feature-changelog.md` | 已记录技术决策及 REQ-001/REQ-002 实现 |
-| 开发 | `development/10-current-status.md` | Phase 1 进行中（2/6） |
+| 开发 | `development/10-current-status.md` | Phase 1 进行中（3/6） |
 | 开发 | `development/16-retrospective.md` | `knowledge-rag` 跨项目资产盘点已完成 |
 | 开发 | `development/17-traceability-matrix.md` | REQ-001 已完成；REQ-002 基础切片完成、知识隔离仍有 gap |
 

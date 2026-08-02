@@ -16,8 +16,10 @@ import { Pencil, Plus, Power, RefreshCw, ServerCog, UserRoundCog } from "lucide-
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { ApiError, apiClient } from "../../api/client";
+import { apiClient } from "../../api/client";
 import type { AccountView, BusinessSystemStatus, BusinessSystemView } from "../../api/types";
+import { FeedbackState } from "../../shared/FeedbackState";
+import { toUiError, type UiError } from "../../shared/uiError";
 
 interface SystemFormValues {
   code: string;
@@ -31,6 +33,7 @@ export function SystemsPage(): ReactNode {
   const [systems, setSystems] = useState<BusinessSystemView[]>([]);
   const [ownerAccounts, setOwnerAccounts] = useState<AccountView[]>([]);
   const [systemsLoading, setSystemsLoading] = useState(true);
+  const [systemsError, setSystemsError] = useState<UiError | null>(null);
   const [ownersLoading, setOwnersLoading] = useState(true);
   const [ownerError, setOwnerError] = useState<string | null>(null);
   const [ownerSearch, setOwnerSearch] = useState("");
@@ -42,25 +45,32 @@ export function SystemsPage(): ReactNode {
   const [editingSystem, setEditingSystem] = useState<BusinessSystemView | null>(null);
   const [ownerSystem, setOwnerSystem] = useState<BusinessSystemView | null>(null);
   const [ownerIds, setOwnerIds] = useState<string[]>([]);
+  const systemsRequestId = useRef(0);
   const ownerRequestId = useRef(0);
 
   const loadSystems = useCallback(
     async (targetPage = page, targetPageSize = pageSize): Promise<void> => {
+      const requestId = ++systemsRequestId.current;
       setSystemsLoading(true);
       try {
         const result = await apiClient.listAdminSystems({
           page: targetPage,
           pageSize: targetPageSize,
         });
-        setSystems(result.items);
-        setTotal(result.total);
+        if (requestId === systemsRequestId.current) {
+          setSystems(result.items);
+          setTotal(result.total);
+          setSystemsError(null);
+        }
       } catch (error: unknown) {
-        void message.error(error instanceof ApiError ? error.message : "业务系统列表加载失败");
+        if (requestId === systemsRequestId.current) {
+          setSystemsError(toUiError(error, "业务系统列表加载失败"));
+        }
       } finally {
-        setSystemsLoading(false);
+        if (requestId === systemsRequestId.current) setSystemsLoading(false);
       }
     },
-    [message, page, pageSize],
+    [page, pageSize],
   );
 
   const loadOwnerAccounts = useCallback(async (search = ""): Promise<void> => {
@@ -80,7 +90,7 @@ export function SystemsPage(): ReactNode {
       setOwnerError(null);
     } catch (error: unknown) {
       if (requestId !== ownerRequestId.current) return;
-      setOwnerError(error instanceof ApiError ? error.message : "负责人候选加载失败");
+      setOwnerError(toUiError(error, "负责人候选加载失败").message);
     } finally {
       if (requestId === ownerRequestId.current) setOwnersLoading(false);
     }
@@ -88,7 +98,10 @@ export function SystemsPage(): ReactNode {
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => void loadSystems(), 0);
-    return () => window.clearTimeout(timeoutId);
+    return () => {
+      window.clearTimeout(timeoutId);
+      systemsRequestId.current += 1;
+    };
   }, [loadSystems]);
 
   useEffect(() => {
@@ -142,7 +155,7 @@ export function SystemsPage(): ReactNode {
         await loadSystems(1, pageSize);
       }
     } catch (error: unknown) {
-      void message.error(error instanceof ApiError ? error.message : "业务系统保存失败");
+      void message.error(toUiError(error, "业务系统保存失败").message);
     } finally {
       setSaving(false);
     }
@@ -156,7 +169,7 @@ export function SystemsPage(): ReactNode {
       void message.success(nextStatus === "ACTIVE" ? "业务系统已启用" : "业务系统已停用");
       await loadSystems();
     } catch (error: unknown) {
-      void message.error(error instanceof ApiError ? error.message : "业务系统状态更新失败");
+      void message.error(toUiError(error, "业务系统状态更新失败").message);
     }
   };
 
@@ -174,7 +187,7 @@ export function SystemsPage(): ReactNode {
       setOwnerSystem(null);
       await loadSystems();
     } catch (error: unknown) {
-      void message.error(error instanceof ApiError ? error.message : "负责人配置失败");
+      void message.error(toUiError(error, "负责人配置失败").message);
     } finally {
       setSaving(false);
     }
@@ -217,6 +230,16 @@ export function SystemsPage(): ReactNode {
           />
         </Tooltip>
       </div>
+      {systemsError ? (
+        <FeedbackState
+          status="error"
+          title="业务系统列表加载失败"
+          error={systemsError}
+          retryLabel="重试加载业务系统列表"
+          retrying={systemsLoading}
+          onRetry={() => void loadSystems()}
+        />
+      ) : null}
       <Table<BusinessSystemView>
         rowKey="id"
         loading={systemsLoading}

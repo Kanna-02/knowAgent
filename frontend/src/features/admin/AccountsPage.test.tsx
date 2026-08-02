@@ -56,6 +56,21 @@ const accounts: AccountView[] = [
 ];
 
 const page: AccountPage = { items: accounts, page: 1, page_size: 20, total: 45 };
+
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (reason: unknown) => void;
+} {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 const adminUser = {
   id: accounts[2]!.id,
   username: "admin",
@@ -175,6 +190,7 @@ describe("AccountsPage", () => {
   });
 
   it("keeps the page usable when list and mutation requests fail", async () => {
+    const retry = deferred<AccountPage>();
     const listAccounts = vi
       .spyOn(apiClient, "listAccounts")
       .mockResolvedValueOnce(page)
@@ -184,7 +200,8 @@ describe("AccountsPage", () => {
           message: "服务暂时不可用",
           request_id: "request-id",
         }),
-      );
+      )
+      .mockReturnValueOnce(retry.promise);
     vi.spyOn(apiClient, "createAdmin").mockRejectedValue(new Error("network"));
     const setStatus = vi
       .spyOn(apiClient, "setAccountStatus")
@@ -194,6 +211,17 @@ describe("AccountsPage", () => {
     await click(view.container.querySelector('[aria-label="刷新账号列表"]') as Element);
     await flush();
     expect(listAccounts).toHaveBeenCalledTimes(2);
+    expect(view.container.textContent).toContain("服务暂时不可用");
+    expect(view.container.textContent).toContain("request-id");
+    await click(view.container.querySelector('[aria-label="重试加载账号列表"]')!);
+    expect(listAccounts).toHaveBeenCalledTimes(3);
+    expect(
+      (view.container.querySelector('[aria-label="重试加载账号列表"]') as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    retry.resolve(page);
+    await flush();
+    expect(view.container.textContent).not.toContain("request-id");
 
     await click(findDocumentElement("button", "新增管理员"));
     await flush();
@@ -214,5 +242,31 @@ describe("AccountsPage", () => {
     await click(findDocumentElement("button", "确认"));
     await flush();
     expect(setStatus).toHaveBeenCalledWith(accounts[0]!.id, "DISABLED");
+  });
+
+  it("ignores an older list request that finishes after the latest refresh", async () => {
+    const older = deferred<AccountPage>();
+    const latest = deferred<AccountPage>();
+    const latestPage = { ...page, items: [accounts[2]!], total: 1 };
+    const listAccounts = vi
+      .spyOn(apiClient, "listAccounts")
+      .mockResolvedValueOnce(page)
+      .mockReturnValueOnce(older.promise)
+      .mockReturnValueOnce(latest.promise);
+    const view = await mountPage();
+
+    await click(view.container.querySelector('[aria-label="刷新账号列表"]')!);
+    await click(view.container.querySelector('[aria-label="刷新账号列表"]')!);
+    expect(listAccounts).toHaveBeenCalledTimes(3);
+
+    latest.resolve(latestPage);
+    await flush();
+    expect(view.container.textContent).toContain("admin");
+    expect(view.container.textContent).not.toContain("alice");
+
+    older.reject(new Error("stale failure"));
+    await flush();
+    expect(view.container.textContent).not.toContain("账号列表加载失败");
+    expect(view.container.textContent).toContain("admin");
   });
 });

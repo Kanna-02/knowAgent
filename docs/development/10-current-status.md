@@ -15,10 +15,10 @@
 ## 2. 当前阶段
 
 ```text
-当前阶段：Phase 1 进行中（2/6）
+当前阶段：Phase 1 进行中（3/6）
 阶段目标：认证、系统管理、双端基础界面和四类文档可恢复入库
-当前任务：REQ-002 多业务系统管理、负责人配置和前台系统选择基础切片
-任务状态：基础切片已完成；知识/检索强隔离仍为 gap
+当前任务：REQ-003 双端基础导航、状态和错误处理
+任务状态：Phase 1 基础切片已完成；完整业务页面随对应模块继续实现
 ```
 
 ## 3. 已完成
@@ -42,16 +42,19 @@
 17. `business_systems` 与 `account_system_roles` ORM/迁移已落地；负责人账号必须为有效 `SYSTEM_OWNER`，当前用户响应返回类型化系统角色映射。
 18. 管理后台已新增业务系统表格、编辑/启停和负责人配置抽屉；用户问答首页要求显式选择启用中的业务系统。
 19. 已修复系统切片评审问题：负责人映射变更撤销旧 Session，管理员系统列表服务端分页，负责人候选支持搜索和独立重试，普通用户不接收负责人详情，编辑表单不复用旧说明。
+20. REQ-003 的 Phase 1 基础切片已完成：双端复用响应式壳层，支持桌面侧栏、移动抽屉、当前路由状态、独立退出入口和路由级懒加载。
+21. 已新增统一 loading/empty/error 反馈、API 请求追踪 ID、列表与系统选择原位重试，以及不暴露内部异常的应用错误边界。
+22. 已完成 REQ-003 评审修复：管理列表忽略过期请求、重试期间禁止重复提交，工作区在 `<1024px` 使用抽屉导航并通过高 DPI 临界视口验证。
 
 ## 4. 正在进行
 
-1. Phase 1 下一项为用户端与管理后台基础导航、状态和错误处理。
+1. Phase 1 下一项为统一 `SourceLocator` 与 `.docx`、文本型 `.pdf`、`.md`、`.xlsx` 结构化解析基础。
 2. 等待 DBA 验证 `pgvector` 与 `pg_trgm` 扩展。
 3. 等待目标 Linux 服务器资源信息以确定模型推理后端、量化方式和 Python 传递依赖锁。
 
 ## 5. 未完成 / 下一步
 
-1. 使用 `feature` 完成 Phase 1 双端基础导航、状态和错误处理。
+1. 使用 `feature` 完成 Phase 1 统一 `SourceLocator` 与四类文档结构化解析基础。
 2. 在数据库功能落地前确认 PostgreSQL 扩展和版本。
 3. 在类生产 Linux 环境验证 Python 3.11 完整安装、模型运行和发布回滚。
 4. 在 `knowledge` 与 `retrieval` 模块落地后完成 REQ-002 的系统级强隔离和 AC-002 零跨系统泄漏验收。
@@ -71,7 +74,7 @@
 | --- | --- | --- |
 | `docs/product/01-requirements-clarification.md` | 同步双登录、账号来源、默认密码规则并清理框架待确认旧状态 | 已完成 |
 | `docs/engineering/04-tech-decisions.md` | 记录正式架构决策并将运行时调整为 Python 3.11 | 已完成 |
-| `docs/product/06-roadmap.md` | Phase 1 推进为进行中（2/6） | 已完成 |
+| `docs/product/06-roadmap.md` | Phase 1 推进为进行中（3/6） | 已完成 |
 | `docs/product/15-frontend-design.md` | 增加双登录流程和 TD-010 前端组件策略 | 已完成 |
 | `docs/development/17-traceability-matrix.md` | 18 项需求映射实现模块并推进到 `skeleton` | 已完成 |
 | `AI_DEVELOPMENT_RULES.md` | 更新本项目账号与会话规则 | 已完成 |
@@ -93,6 +96,10 @@
 | `frontend/src/features/auth/UserHomePage.tsx` | 前台启用系统加载与显式选择 | 已完成 |
 | `backend/src/knowagent/systems/`、`backend/src/knowagent/identity/` | 映射变更会话撤销、管理员分页、候选搜索和普通用户数据最小化 | 已完成 |
 | `frontend/src/features/admin/SystemsPage.tsx` | 服务端分页、负责人搜索/重试和编辑表单清理 | 已完成 |
+| `frontend/src/shared/WorkspaceShell.tsx`、`frontend/src/features/auth/UserShell.tsx`、`frontend/src/features/admin/AdminShell.tsx` | 双端响应式壳层、导航、上下文标题和账号菜单 | 已完成 |
+| `frontend/src/shared/FeedbackState.tsx`、`frontend/src/shared/uiError.ts`、`frontend/src/app/AppErrorBoundary.tsx` | 统一局部状态、请求追踪与全局错误兜底 | 已完成 |
+| `frontend/src/features/auth/UserHomePage.tsx`、`frontend/src/features/admin/AccountsPage.tsx`、`frontend/src/features/admin/SystemsPage.tsx` | 可恢复加载/空/错状态、最新请求胜出和原位重试锁定 | 已完成 |
+| `frontend/src/**/*.test.ts(x)` | 导航、移动抽屉、错误边界、追踪 ID、恢复路径和乱序请求回归测试 | 已完成 |
 
 ## 8. 已运行验证
 
@@ -117,10 +124,12 @@
 | REQ-002 Alembic autogenerate/upgrade/check | 通过 | 自动生成两表迁移并人工核对列、枚举、外键、唯一约束和索引；`check` 无差异 |
 | REQ-002 前端 test/coverage/typecheck/lint/format/build | 通过 | 34 个测试；全局语句/分支/函数/行覆盖率 93.36%/80.00%/88.72%/95.98%；生产构建成功 |
 | REQ-002 评审修复全量验证 | 通过 | 后端 39 项测试、覆盖率 92.07%；前端 35 项测试，语句/分支/函数/行覆盖率 92.56%/81.73%/87.50%/95.34%；TypeScript、ESLint、Prettier 和 Vite 构建通过 |
+| REQ-003 前端 test/coverage/typecheck/lint/format/build | 通过 | 42 项测试；语句/分支/函数/行覆盖率 92.49%/85.11%/85.62%/94.63%；TypeScript、ESLint、Prettier 和 Vite 生产构建无错误 |
+| REQ-003 浏览器响应式检查 | 通过 | 1440x900、390x844 及 1023px/1024px 临界视口通过；`<1024px` 使用抽屉、`>=1024px` 使用固定侧栏，页面均无横向溢出或控件重叠 |
 
 ## 9. 未运行验证与风险
 
-1. 尚未完成业务系统页面的桌面/移动端真实浏览器截图和交互检查；需启动 PostgreSQL、Redis、API 与前端后补充。
+1. 双端壳层和业务系统页面已使用隔离测试 API 完成桌面/移动浏览器截图与交互检查；真实 PostgreSQL/Redis 后端的完整页面链路仍待集成环境补充。
 2. 默认密码批量导入仍有共享密码泄露风险；实现已强制摘要、首次改密、限流、会话撤销和审计，凭据分发流程仍需组织侧控制。
 3. 核心、解析器和质量工具直接版本已固定；Python 传递依赖锁仍需在目标 Linux/Python 3.11 环境生成。
 4. 模型运行时和目标 Linux 完整安装尚未验证；本轮前端生产构建已通过。
@@ -129,13 +138,14 @@
 7. Python 静态工具安装审批服务再次返回 503，因此当前虚拟环境仍未执行 Black/isort/mypy/Pylint/Bandit；测试、覆盖率和 Python 编译导入已通过。
 8. `npm audit` 的公告接口访问审批同样返回 503；`npm ci` 报告现有锁文件有 2 个 high 漏洞，未在未评估 breaking change 的情况下执行自动升级。
 9. 本轮静态工具安装和 `npm audit` 外部执行审批均再次返回 503，因此未取得 Black/isort/mypy/Pylint/Bandit 与最新 npm 公告结果。
+10. 本轮 `npm audit` 沙箱内无法访问公告接口；外部执行因会向公共 npm 服务发送依赖元数据而被安全策略拒绝，未取得最新公告结果。
 
 ## 10. 继续开发建议
 
 新对话或新开发者接手时，建议下一步：
 
-1. 先阅读 REQ-001 实现、TD-006 和本地开发文档。
-2. 使用 `feature` 完成 Phase 1 用户端与管理后台基础导航、状态和错误处理。
+1. 先阅读 REQ-001/REQ-002 实现、TD-007 和项目结构中的 `SourceLocator` 契约。
+2. 使用 `feature` 完成 Phase 1 四类文档结构化解析基础。
 
 ## 11. 接手时必须先读
 

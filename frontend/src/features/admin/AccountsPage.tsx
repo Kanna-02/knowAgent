@@ -14,10 +14,12 @@ import {
 import type { TablePaginationConfig } from "antd/es/table";
 import { Plus, Power, RefreshCw, ShieldCheck, UserRoundPlus } from "lucide-react";
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import { ApiError, apiClient } from "../../api/client";
+import { apiClient } from "../../api/client";
 import type { AccountRole, AccountStatus, AccountView } from "../../api/types";
+import { FeedbackState } from "../../shared/FeedbackState";
+import { toUiError, type UiError } from "../../shared/uiError";
 import { passwordViolations } from "../auth/authPolicy";
 
 interface AdminFormValues {
@@ -48,10 +50,13 @@ export function AccountsPage(): ReactNode {
   const [role, setRole] = useState<AccountRole | null>(null);
   const [status, setStatus] = useState<AccountStatus | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<UiError | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const loadRequestId = useRef(0);
 
   const load = useCallback(async (): Promise<void> => {
+    const requestId = ++loadRequestId.current;
     setLoading(true);
     try {
       const result = await apiClient.listAccounts({
@@ -60,41 +65,27 @@ export function AccountsPage(): ReactNode {
         ...(role ? { role } : {}),
         ...(status ? { status } : {}),
       });
-      setItems(result.items);
-      setTotal(result.total);
-    } catch (error: unknown) {
-      void message.error(error instanceof ApiError ? error.message : "账号列表加载失败");
-    } finally {
-      setLoading(false);
-    }
-  }, [message, page, pageSize, role, status]);
-
-  useEffect(() => {
-    let active = true;
-    void apiClient
-      .listAccounts({
-        page,
-        pageSize,
-        ...(role ? { role } : {}),
-        ...(status ? { status } : {}),
-      })
-      .then((result) => {
-        if (!active) return;
+      if (requestId === loadRequestId.current) {
         setItems(result.items);
         setTotal(result.total);
-      })
-      .catch((error: unknown) => {
-        if (active) {
-          void message.error(error instanceof ApiError ? error.message : "账号列表加载失败");
-        }
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
+        setLoadError(null);
+      }
+    } catch (error: unknown) {
+      if (requestId === loadRequestId.current) {
+        setLoadError(toUiError(error, "账号列表加载失败"));
+      }
+    } finally {
+      if (requestId === loadRequestId.current) setLoading(false);
+    }
+  }, [page, pageSize, role, status]);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => void load(), 0);
     return () => {
-      active = false;
+      window.clearTimeout(timeoutId);
+      loadRequestId.current += 1;
     };
-  }, [message, page, pageSize, role, status]);
+  }, [load]);
 
   const createAdmin = async (values: AdminFormValues): Promise<void> => {
     setSaving(true);
@@ -109,7 +100,7 @@ export function AccountsPage(): ReactNode {
       form.resetFields();
       await load();
     } catch (error: unknown) {
-      void message.error(error instanceof ApiError ? error.message : "新增管理员失败");
+      void message.error(toUiError(error, "新增管理员失败").message);
     } finally {
       setSaving(false);
     }
@@ -122,7 +113,7 @@ export function AccountsPage(): ReactNode {
       void message.success(nextStatus === "ACTIVE" ? "账号已启用" : "账号已禁用");
       await load();
     } catch (error: unknown) {
-      void message.error(error instanceof ApiError ? error.message : "账号状态更新失败");
+      void message.error(toUiError(error, "账号状态更新失败").message);
     }
   };
 
@@ -178,10 +169,21 @@ export function AccountsPage(): ReactNode {
           />
         </Tooltip>
       </div>
+      {loadError ? (
+        <FeedbackState
+          status="error"
+          title="账号列表加载失败"
+          error={loadError}
+          retryLabel="重试加载账号列表"
+          retrying={loading}
+          onRetry={() => void load()}
+        />
+      ) : null}
       <Table<AccountView>
         rowKey="id"
         loading={loading}
         dataSource={items}
+        locale={{ emptyText: "暂无账号" }}
         scroll={{ x: 920 }}
         pagination={{
           current: page,

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError, apiClient } from "../../api/client";
 import type { CurrentUser } from "../../api/types";
-import { flush, mountWithAuth, mouseDown, type MountedView } from "../../test/renderTestApp";
+import { click, flush, mountWithAuth, mouseDown, type MountedView } from "../../test/renderTestApp";
 import type { AuthContextValue } from "./authContextValue";
 import { UserHomePage } from "./UserHomePage";
 
@@ -61,7 +61,7 @@ describe("UserHomePage", () => {
     expect(view.container.textContent).toContain("当前系统：企业服务总线");
   });
 
-  it("shows empty and error states without inventing a selection", async () => {
+  it("shows empty and recoverable error states without inventing a selection", async () => {
     vi.spyOn(apiClient, "listSystems").mockResolvedValue([]);
     view = await mountWithAuth(<UserHomePage />, auth, "/app");
     await flush();
@@ -70,15 +70,23 @@ describe("UserHomePage", () => {
     view = null;
 
     vi.restoreAllMocks();
-    vi.spyOn(apiClient, "listSystems").mockRejectedValue(
-      new ApiError(503, {
-        code: "DEPENDENCY_UNAVAILABLE",
-        message: "服务暂时不可用",
-        request_id: "request-id",
-      }),
-    );
+    const listSystems = vi
+      .spyOn(apiClient, "listSystems")
+      .mockRejectedValueOnce(
+        new ApiError(503, {
+          code: "DEPENDENCY_UNAVAILABLE",
+          message: "服务暂时不可用",
+          request_id: "request-id",
+        }),
+      )
+      .mockResolvedValueOnce([]);
     view = await mountWithAuth(<UserHomePage />, auth, "/app");
     await flush();
     expect(view.container.textContent).toContain("服务暂时不可用");
+    expect(view.container.textContent).toContain("request-id");
+    await click(view.container.querySelector('[aria-label="重试加载业务系统"]')!);
+    await flush();
+    expect(listSystems).toHaveBeenCalledTimes(2);
+    expect(view.container.textContent).toContain("暂无可用业务系统");
   });
 });

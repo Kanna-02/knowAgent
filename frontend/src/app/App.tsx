@@ -5,6 +5,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider } from "../features/auth/AuthContext";
 import { LoginPage } from "../features/auth/LoginPage";
 import { ProtectedRoute } from "../features/auth/ProtectedRoute";
+import { AppErrorBoundary } from "./AppErrorBoundary";
 import { theme } from "./theme";
 
 const AccountsPage = lazy(() =>
@@ -32,57 +33,80 @@ const UserHomePage = lazy(() =>
     default: component,
   })),
 );
+const UserShell = lazy(() =>
+  import("../features/auth/UserShell").then(({ UserShell: component }) => ({
+    default: component,
+  })),
+);
 
 export function App(): ReactNode {
   return (
     <ConfigProvider theme={theme}>
       <AntApp>
-        <BrowserRouter>
-          <AuthProvider>
-            <Suspense fallback={<div className="route-loading" aria-label="正在加载页面" />}>
-              <Routes>
-                <Route path="/login" element={<LoginPage entry="user" />} />
-                <Route path="/admin/login" element={<LoginPage entry="admin" />} />
-                <Route
-                  path="/change-password"
-                  element={
-                    <ProtectedRoute>
-                      <ChangePasswordPage />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/app"
-                  element={
-                    <ProtectedRoute>
-                      <UserHomePage />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/admin"
-                  element={
-                    <ProtectedRoute>
-                      <AdminShell />
-                    </ProtectedRoute>
-                  }
-                >
-                  <Route index element={<Navigate replace to="accounts" />} />
-                  <Route path="accounts" element={<AccountsPage />} />
-                  <Route path="systems" element={<SystemsPage />} />
-                </Route>
-                <Route
-                  path="/forbidden"
-                  element={
-                    <Result status="403" title="无权访问" subTitle="当前账号不能进入此区域。" />
-                  }
-                />
-                <Route path="/" element={<Navigate replace to="/login" />} />
-                <Route path="*" element={<Result status="404" title="页面不存在" />} />
-              </Routes>
-            </Suspense>
-          </AuthProvider>
-        </BrowserRouter>
+        <AppErrorBoundary>
+          <BrowserRouter>
+            <AuthProvider>
+              <Suspense fallback={<div className="route-loading" aria-label="正在加载页面" />}>
+                <Routes>
+                  <Route path="/login" element={<LoginPage entry="user" />} />
+                  <Route path="/admin/login" element={<LoginPage entry="admin" />} />
+                  <Route
+                    path="/change-password"
+                    element={
+                      <ProtectedRoute>
+                        <ChangePasswordPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/app"
+                    element={
+                      <ProtectedRoute>
+                        <UserShell />
+                      </ProtectedRoute>
+                    }
+                  >
+                    <Route index element={<Navigate replace to="question" />} />
+                    <Route path="question" element={<UserHomePage />} />
+                  </Route>
+                  <Route
+                    path="/admin"
+                    element={
+                      <ProtectedRoute>
+                        <AdminShell />
+                      </ProtectedRoute>
+                    }
+                  >
+                    <Route index element={<Navigate replace to="accounts" />} />
+                    <Route path="accounts" element={<AccountsPage />} />
+                    <Route path="systems" element={<SystemsPage />} />
+                  </Route>
+                  <Route
+                    path="/forbidden"
+                    element={
+                      <Result
+                        status="403"
+                        title="无权访问"
+                        subTitle="当前账号不能进入此区域，请返回对应入口。"
+                      />
+                    }
+                  />
+                  <Route path="/" element={<Navigate replace to="/login" />} />
+                  <Route
+                    path="*"
+                    element={
+                      <Result
+                        status="404"
+                        title="页面不存在"
+                        subTitle="请检查地址，或返回应用入口。"
+                      />
+                    }
+                  />
+                </Routes>
+              </Suspense>
+            </AuthProvider>
+          </BrowserRouter>
+        </AppErrorBoundary>
       </AntApp>
     </ConfigProvider>
   );

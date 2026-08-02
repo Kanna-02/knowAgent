@@ -164,7 +164,7 @@ export class ApiClient {
     const csrfToken = response.headers.get("X-CSRF-Token");
     if (csrfToken) this.csrfToken = csrfToken;
     if (!response.ok) {
-      const body = (await response.json()) as ApiErrorBody;
+      const body = await this.readErrorBody(response);
       if (response.status === 401) {
         this.csrfToken = null;
         window.dispatchEvent(new Event(AUTH_UNAUTHORIZED_EVENT));
@@ -173,6 +173,29 @@ export class ApiClient {
     }
     if (response.status === 204) return undefined as T;
     return (await response.json()) as T;
+  }
+
+  private async readErrorBody(response: Response): Promise<ApiErrorBody> {
+    const fallback: ApiErrorBody = {
+      code: "HTTP_ERROR",
+      message: response.status >= 500 ? "服务暂时不可用，请稍后重试" : "请求未完成，请稍后重试",
+      request_id: response.headers.get("X-Request-ID") ?? "",
+    };
+    const text = await response.text();
+    if (!text) return fallback;
+    try {
+      const candidate = JSON.parse(text) as Partial<ApiErrorBody>;
+      if (
+        typeof candidate.code === "string" &&
+        typeof candidate.message === "string" &&
+        typeof candidate.request_id === "string"
+      ) {
+        return candidate as ApiErrorBody;
+      }
+      return fallback;
+    } catch {
+      return fallback;
+    }
   }
 }
 
