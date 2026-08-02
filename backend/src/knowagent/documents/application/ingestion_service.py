@@ -7,7 +7,7 @@ from pathlib import PurePosixPath
 from typing import BinaryIO, Callable
 from uuid import UUID, uuid4
 
-from knowagent.common.errors import ConflictError, ValidationError
+from knowagent.common.errors import ConflictError, NotFoundError, ValidationError
 from knowagent.documents.domain.ingestion import (
     Document,
     DocumentVersion,
@@ -46,6 +46,7 @@ class DocumentIngestionService:  # pylint: disable=too-few-public-methods
         *,
         actor_id: UUID,
         system_id: UUID,
+        document_id: UUID | None = None,
         document_name: str,
         filename: str,
         media_type: str,
@@ -55,7 +56,16 @@ class DocumentIngestionService:  # pylint: disable=too-few-public-methods
         idempotency_key: str,
         on_persisted: Callable[[IngestionBundle], None] | None = None,
     ) -> IngestionBundle:
-        normalized_name = document_name.strip()
+        existing_document = (
+            self._repository.get_document(system_id=system_id, document_id=document_id)
+            if document_id is not None
+            else None
+        )
+        if document_id is not None and existing_document is None:
+            raise NotFoundError("DOCUMENT_NOT_FOUND", "文档不存在")
+        normalized_name = (
+            existing_document.name if existing_document is not None else document_name.strip()
+        )
         normalized_filename = PurePosixPath(filename.strip()).name
         normalized_media_type = media_type.split(";", maxsplit=1)[0].strip().lower()
         self._validate_upload(
@@ -77,6 +87,7 @@ class DocumentIngestionService:  # pylint: disable=too-few-public-methods
                 actor_id=actor_id,
                 system_id=system_id,
                 document_name=normalized_name,
+                document_id=document_id,
                 filename=normalized_filename,
                 media_type=normalized_media_type,
                 content_length=content_length,
@@ -87,43 +98,11 @@ class DocumentIngestionService:  # pylint: disable=too-few-public-methods
             return existing
 
         now = datetime.now(UTC)
-        document_id = uuid4()
+        resolved_document_id = document_id or uuid4()
         version_id = uuid4()
         object_key = (
-            f"documents/{system_id}/{document_id}/{version_id}/"
+            f"documents/{system_id}/{resolved_document_id}/{version_id}/"
             f"source{PurePosixPath(normalized_filename).suffix.lower()}"
-        )
-        bundle = IngestionBundle(
-            document=Document(
-                id=document_id,
-                system_id=system_id,
-                name=normalized_name,
-                created_by=actor_id,
-                created_at=now,
-                updated_at=now,
-            ),
-            version=DocumentVersion(
-                id=version_id,
-                document_id=document_id,
-                version_no=1,
-                object_key=object_key,
-                filename=normalized_filename,
-                media_type=normalized_media_type,
-                size_bytes=content_length,
-                sha256=sha256,
-                status=DocumentVersionStatus.UPLOADED,
-                created_by=actor_id,
-                created_at=now,
-                updated_at=now,
-            ),
-            job=IngestionJob.new(
-                document_version_id=version_id,
-                actor_id=actor_id,
-                system_id=system_id,
-                idempotency_key=idempotency_key,
-                max_attempts=self._max_attempts,
-                now=now,
-            ),
         )
         self._object_store.put(
             key=object_key,
@@ -132,6 +111,49 @@ class DocumentIngestionService:  # pylint: disable=too-few-public-methods
             content_length=content_length,
         )
         try:
+            version_no = (
+                self._repository.next_version_no(
+                    system_id=system_id,
+                    document_id=resolved_document_id,
+                )
+                if existing_document is not None
+                else 1
+            )
+            bundle = IngestionBundle(
+                document=existing_document
+                or Document(
+                    id=resolved_document_id,
+                    system_id=system_id,
+                    name=normalized_name,
+                    created_by=actor_id,
+                    created_at=now,
+                    updated_at=now,
+                ),
+                version=DocumentVersion(
+                    id=version_id,
+                    document_id=resolved_document_id,
+                    system_id=system_id,
+                    version_no=version_no,
+                    object_key=object_key,
+                    filename=normalized_filename,
+                    media_type=normalized_media_type,
+                    size_bytes=content_length,
+                    sha256=sha256,
+                    status=DocumentVersionStatus.UPLOADED,
+                    created_by=actor_id,
+                    created_at=now,
+                    updated_at=now,
+                ),
+                job=IngestionJob.new(
+                    document_version_id=version_id,
+                    actor_id=actor_id,
+                    system_id=system_id,
+                    requested_document_id=document_id,
+                    idempotency_key=idempotency_key,
+                    max_attempts=self._max_attempts,
+                    now=now,
+                ),
+            )
             stored = self._repository.add(bundle)
             if stored.job.id != bundle.job.id:
                 self._delete_best_effort(object_key)
@@ -140,6 +162,7 @@ class DocumentIngestionService:  # pylint: disable=too-few-public-methods
                     actor_id=actor_id,
                     system_id=system_id,
                     document_name=normalized_name,
+                    document_id=document_id,
                     filename=normalized_filename,
                     media_type=normalized_media_type,
                     content_length=content_length,
@@ -192,6 +215,7 @@ class DocumentIngestionService:  # pylint: disable=too-few-public-methods
         actor_id: UUID,
         system_id: UUID,
         document_name: str,
+        document_id: UUID | None,
         filename: str,
         media_type: str,
         content_length: int,
@@ -199,8 +223,9 @@ class DocumentIngestionService:  # pylint: disable=too-few-public-methods
     ) -> None:
         version = existing.version
         stored_request = (
-            existing.document.created_by,
-            existing.document.system_id,
+            existing.job.actor_id,
+            existing.job.system_id,
+            existing.job.requested_document_id,
             existing.document.name,
             version.filename,
             version.media_type,
@@ -210,6 +235,7 @@ class DocumentIngestionService:  # pylint: disable=too-few-public-methods
         current_request = (
             actor_id,
             system_id,
+            document_id,
             document_name,
             filename,
             media_type,

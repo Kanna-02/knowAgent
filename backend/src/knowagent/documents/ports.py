@@ -5,6 +5,7 @@ from typing import BinaryIO, Protocol
 from uuid import UUID
 
 from knowagent.documents.domain.ingestion import (
+    Document,
     DocumentVersionStatus,
     IngestionBundle,
     IngestionJob,
@@ -44,6 +45,10 @@ class ObjectStore(Protocol):
 
 
 class IngestionRepository(Protocol):
+    def get_document(self, *, system_id: UUID, document_id: UUID) -> Document | None: ...
+
+    def next_version_no(self, *, system_id: UUID, document_id: UUID) -> int: ...
+
     def get_by_idempotency_key(
         self, key: str, *, actor_id: UUID, system_id: UUID
     ) -> IngestionBundle | None: ...

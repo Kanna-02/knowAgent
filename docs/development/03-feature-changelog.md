@@ -17,6 +17,33 @@
 
 ## 功能变更记录
 
+### 2026-08-02 - 完成 Phase 1 文档版本、发布状态与知识强隔离基础模型
+
+类型：新功能
+
+相关需求：REQ-002、REQ-004、REQ-011；AC-002/AC-003 的真实基础设施验收仍待集成环境。
+
+变更说明：
+
+1. 现有文档上传支持可选 `document_id` 创建 v2+，版本号在逻辑文档内递增；跨系统复用文档 ID 按不存在处理，响应增加 `version_no` 与 `publish_status`。
+2. 新增独立 `DRAFT/PUBLISHED/RETIRED` 发布状态、文档当前发布指针、知识来源和知识片段模型；处理状态与发布状态分离，退役不会丢失解析结果。
+3. 文档版本、知识来源、知识片段均持久化 `system_id`，使用 `document_id + system_id`、`document_version_id + system_id`、`source_id + system_id` 复合外键形成数据库隔离链；所有知识读取仓储方法强制接收 `system_id`。
+4. 新增事务发布服务：发布新版本时原子切换当前指针并退役旧版本/来源/片段；退役后片段立即退出只读发布查询，历史数据不物理删除。
+5. 新增 Alembic 迁移，先从文档回填版本 `system_id` 再收紧约束，并为 `system_id + publish_status` 查询建立索引；知识 locator/结构路径在 PostgreSQL 使用 JSONB。
+
+review 修复（6 阻塞 + 2 建议 + 1 提醒）：
+
+1. 入库任务持久化原始 nullable `document_id`，幂等校验改用任务上传者和完整操作类型，避免跨上传者重放失败或创建/追加版本请求互相复用。
+2. 对象写入完成后才短事务锁定文档并分配下一版本号；追加版本同步刷新逻辑文档 `updated_at`，避免 S3 延迟长期占用数据库行锁。
+3. 当前发布版本增加 `(version_id, document_id, system_id)` 可延迟复合外键，阻止跨文档或跨系统指针；发布与退役统一先锁文档再锁版本，消除相反锁序死锁。
+4. Pylint 相似代码阈值调整为 30 行，过滤 SQLAlchemy 声明式短映射噪音并保留实质重复检测；补充 6 个幂等、事务顺序、持久化和约束回归测试。
+5. Alembic downgrade 显式删除发布状态检查约束，修复 SQLite 批量重建时约束引用已删除列的问题。
+6. Alembic/Pylint 本地产物纳入 `.gitignore`，防止误纳入提交。
+
+验证方式：后端 129 项测试通过，总覆盖率 91.54%；本次 39 个 Python 文件 Black/isort 清洁，相关 32 个源文件 `mypy --strict` 零错误，Pylint 10.00/10，Bandit 中高危 0；隔离 SQLite 空库完成 `upgrade head -> downgrade d1a97d2e451b -> upgrade head` 往返且 `alembic check` 无差异。
+
+后续注意：尚未在公司真实 PostgreSQL/Redis/S3 和目标 Python 3.11/Linux 环境执行双系统、四格式、迁移锁时长和查询计划验收；向量列与 Embedding/重建索引编排需在 DBA 扩展门禁及 Phase 2 检索实现中补充。
+
 ### 2026-08-02 - 确认架构并调整为 Python 3.11
 
 类型：架构确认 / 技术基线变更

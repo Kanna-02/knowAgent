@@ -38,6 +38,7 @@ def make_bundle() -> IngestionBundle:
         version=DocumentVersion(
             id=version_id,
             document_id=document_id,
+            system_id=system_id,
             version_no=1,
             object_key="documents/source.md",
             filename="guide.md",

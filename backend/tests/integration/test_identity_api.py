@@ -607,3 +607,30 @@ def test_owner_upload_is_idempotent_queryable_and_failed_job_can_be_retried(
         UUID(scoped_idempotency.json()["job_id"]),
         job_id,
     ]
+
+    next_version = client.post(
+        f"/api/v1/systems/{system['id']}/documents",
+        headers={
+            "X-CSRF-Token": str(owner_session["csrf_token"]),
+            "Idempotency-Key": "docs-upload-version-002",
+        },
+        data={"document_id": first.json()["document_id"]},
+        files={"file": ("guide-v2.md", b"# Guide v2\n", "text/markdown")},
+    )
+    admin_for_cross = _login(client, "admin", "admin")
+    cross_system_version = client.post(
+        f"/api/v1/systems/{other_system['id']}/documents",
+        headers={
+            "X-CSRF-Token": str(admin_for_cross["csrf_token"]),
+            "Idempotency-Key": "docs-cross-system-version",
+        },
+        data={"document_id": first.json()["document_id"]},
+        files={"file": ("guide-v2.md", b"# Guide v2\n", "text/markdown")},
+    )
+
+    assert next_version.status_code == 202
+    assert next_version.json()["document_id"] == first.json()["document_id"]
+    assert next_version.json()["version_no"] == 2
+    assert next_version.json()["publish_status"] == "DRAFT"
+    assert cross_system_version.status_code == 404
+    assert cross_system_version.json()["code"] == "DOCUMENT_NOT_FOUND"

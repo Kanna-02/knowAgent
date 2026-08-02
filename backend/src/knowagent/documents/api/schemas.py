@@ -5,6 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from knowagent.common.lifecycle import PublicationStatus
 from knowagent.documents.domain.ingestion import (
     DocumentVersionStatus,
     IngestionBundle,
@@ -19,11 +20,13 @@ class IngestionJobView(BaseModel):
     job_id: UUID
     document_id: UUID
     document_version_id: UUID
+    version_no: int = Field(ge=1)
     system_id: UUID
     document_name: str
     filename: str
     media_type: str
     version_status: DocumentVersionStatus
+    publish_status: PublicationStatus
     status: IngestionStatus
     stage: IngestionStage
     progress: int = Field(ge=0, le=100)
@@ -43,11 +46,13 @@ class IngestionJobView(BaseModel):
             job_id=bundle.job.id,
             document_id=bundle.document.id,
             document_version_id=bundle.version.id,
+            version_no=bundle.version.version_no,
             system_id=bundle.document.system_id,
             document_name=bundle.document.name,
             filename=bundle.version.filename,
             media_type=bundle.version.media_type,
             version_status=bundle.version.status,
+            publish_status=bundle.version.publish_status,
             status=bundle.job.status,
             stage=bundle.job.stage,
             progress=bundle.job.progress,

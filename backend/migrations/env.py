@@ -7,10 +7,11 @@ from sqlalchemy import engine_from_config, pool
 
 from knowagent.documents.infrastructure import sqlalchemy_models as document_models
 from knowagent.identity.infrastructure.sqlalchemy_models import Base
+from knowagent.knowledge.infrastructure import sqlalchemy_models as knowledge_models
 from knowagent.platform.settings import Settings
 from knowagent.systems.infrastructure import sqlalchemy_models as systems_models
 
-del document_models, systems_models
+del document_models, knowledge_models, systems_models
 
 config = context.config
 if config.config_file_name is not None:

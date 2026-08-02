@@ -60,6 +60,7 @@ def upload_document(  # pylint: disable=too-many-arguments,too-many-locals,too-m
     file: Annotated[UploadFile, File()],
     idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=128)],
     document_name: Annotated[str | None, Form(max_length=255)] = None,
+    document_id: Annotated[UUID | None, Form()] = None,
 ) -> IngestionJobView:
     _require_system_access(
         system_id=system_id,
@@ -98,6 +99,7 @@ def upload_document(  # pylint: disable=too-many-arguments,too-many-locals,too-m
         bundle = service.create_upload(
             actor_id=context.account.id,
             system_id=system_id,
+            document_id=document_id,
             document_name=document_name or filename,
             filename=filename,
             media_type=media_type,

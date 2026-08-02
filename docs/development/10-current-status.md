@@ -15,10 +15,10 @@
 ## 2. 当前阶段
 
 ```text
-当前阶段：Phase 1 进行中（5/6）
+当前阶段：Phase 1 功能完成（6/6），待集成验收
 阶段目标：认证、系统管理、双端基础界面和四类文档可恢复入库
-当前任务：Phase 1 文档版本、发布状态和基于 `system_id` 强过滤的知识隔离基础模型
-任务状态：REQ-004 的解析、对象存储和可恢复持久任务已完成；可检索知识索引与发布链路待下一项实现
+当前任务：Phase 1 双系统、四格式和真实基础设施集成验收
+任务状态：文档多版本、发布状态、知识来源/片段及复合 `system_id` 强隔离基础模型已完成；真实 PostgreSQL/Redis/S3 验收未执行
 ```
 
 ## 3. 已完成
@@ -53,19 +53,24 @@
 28. 已实现 `documents`、`document_versions`、`ingestion_jobs` 持久模型和迁移，以及上传/查询/人工重试 API；数据库事实记录幂等键、任务/版本状态、阶段进度、尝试次数、租约、派发和错误信息。
 29. 已实现 Celery 入库 Worker 与 Beat 恢复扫描：消息只携带 `job_id`，任务按数据库租约领取，解析与切分 manifest 使用确定性对象 key；自动退避重试、耗尽失败、人工重置预算和进程重启恢复均由 PostgreSQL 状态机驱动。
 30. 已完成持久入库 review 修复：Worker 写入使用 owner/attempt 租约 fencing，解析完成停在 `CHUNKED`，非法重试返回稳定 409，API/Worker 共用同一 Broker 配置，安全布尔值严格解析，幂等键按账号+系统隔离，审计失败执行对象补偿。
+31. 已完成文档多版本上传：现有上传接口可带 `document_id` 创建 v2+，版本号按逻辑文档递增，跨系统文档 ID 按不存在处理。
+32. 已新增 `DRAFT/PUBLISHED/RETIRED` 独立发布状态、文档当前发布指针、`knowledge_sources` 和 `knowledge_chunks`，处理状态与发布状态不再混用。
+33. 已实现发布/退役事务：新版本发布会原子切换当前指针并退役旧版本、来源和片段；发布查询只返回指定 `system_id` 下的 `PUBLISHED` 片段。
+34. 已通过复合外键将文档、版本、来源和片段的 `system_id` 串成数据库隔离链，并为系统+发布状态查询建立索引；REQ-002/REQ-011 追溯状态已推进为 `implementing`。
+35. 已完成版本/发布 review 修复：幂等请求保存原始父文档 ID并使用任务上传者校验；当前发布指针同时约束文档和系统；发布/退役统一锁序；对象上传不再长期持有版本分配行锁。
 
 ## 4. 正在进行
 
-1. Phase 1 下一项为文档版本、发布状态和基于 `system_id` 强过滤的知识隔离基础模型。
+1. Phase 1 功能范围 6/6 已实现，等待真实 PostgreSQL/Redis/S3 双系统集成验收后关闭阶段。
 2. 等待 DBA 验证 `pgvector` 与 `pg_trgm` 扩展。
 3. 等待目标 Linux 服务器资源信息以确定模型推理后端、量化方式和 Python 传递依赖锁。
 
 ## 5. 未完成 / 下一步
 
-1. 使用 `feature` 完成 Phase 1 文档版本、发布状态和知识隔离基础模型。
-2. 在数据库功能落地前确认 PostgreSQL 扩展和版本。
-3. 在类生产 Linux 环境验证 Python 3.11 完整安装、模型运行和发布回滚。
-4. 在 `knowledge` 与 `retrieval` 模块落地后完成 REQ-002 的系统级强隔离和 AC-002 零跨系统泄漏验收。
+1. 使用 `integration-test` 在隔离 PostgreSQL Schema、Redis namespace 和 S3 Bucket 验证两个系统、四种格式、v2 发布切换、跨系统零泄漏和任务重启恢复。
+2. 由 DBA 确认 PostgreSQL 版本及 `pgvector`、`pg_trgm` 扩展后进入 Phase 2 检索实现。
+3. 在类生产 Linux 环境验证 Python 3.11 完整安装、迁移锁时长、模型运行和发布回滚。
+4. Phase 2 接入 Embedding、基础关键词/向量召回后完成 AC-002/AC-003 的端到端验收。
 
 ## 6. 阻塞点
 
@@ -82,7 +87,7 @@
 | --- | --- | --- |
 | `docs/product/01-requirements-clarification.md` | 同步双登录、账号来源、默认密码规则并清理框架待确认旧状态 | 已完成 |
 | `docs/engineering/04-tech-decisions.md` | 记录正式架构决策并将运行时调整为 Python 3.11 | 已完成 |
-| `docs/product/06-roadmap.md` | Phase 1 推进为进行中（5/6） | 已完成 |
+| `docs/product/06-roadmap.md` | Phase 1 功能推进至 6/6，并保留真实基础设施集成验收门禁 | 已完成 |
 | `docs/product/15-frontend-design.md` | 增加双登录流程和 TD-010 前端组件策略 | 已完成 |
 | `docs/development/17-traceability-matrix.md` | 18 项需求映射实现模块并推进到 `skeleton` | 已完成 |
 | `AI_DEVELOPMENT_RULES.md` | 更新本项目账号与会话规则 | 已完成 |
@@ -121,6 +126,12 @@
 | `backend/migrations/versions/d1a97d2e451b_create_document_ingestion_tables.py` | 文档、版本和入库任务表及约束/索引 | 已完成 |
 | `backend/tests/unit/test_*ingestion*.py`、`test_s3_object_store.py`、`backend/tests/integration/test_identity_api.py` | 状态机、幂等、重试、恢复、对象存储、权限和 API 回归测试 | 已完成 |
 | `backend/tests/unit/test_worker_tasks.py`、入库相关回归测试 | Worker 装配、租约 fencing、Broker 一致性、非法重试、幂等作用域和对象补偿 review 回归 | 已完成 |
+| `backend/src/knowagent/knowledge/` | 知识来源/片段领域模型、发布事务与强制系统过滤仓储 | 已完成 |
+| `backend/src/knowagent/documents/` | 文档 v2+ 上传、版本 `system_id` 与独立发布状态 | 已完成 |
+| `backend/migrations/versions/3ba86a4c3d35_add_knowledge_publication_isolation_.py` | 版本回填、请求父文档指纹、发布状态、当前指针与隔离链复合外键、知识表和索引迁移 | 已完成 |
+| `backend/tests/unit/test_knowledge_publication.py`、相关入库/API 测试 | 发布切换、统一锁序、幂等重放、操作类型、文档更新时间和复合约束回归 | 已完成 |
+| `backend/pyproject.toml`、`.gitignore` | 保留实质重复检测并过滤声明式短映射噪音；忽略本地 Alembic/Pylint 产物 | 已完成 |
+| `docs/operations/08-deployment.md` | 非 Docker 发布、迁移、验证与回滚基线 | 已完成（真实部署待 Phase 4） |
 
 ## 8. 已运行验证
 
@@ -158,6 +169,9 @@
 | Phase 1 持久入库 `mypy --strict` | 通过（本次模块） | `documents`、object store、settings、worker 和 API 共 30 个源文件零错误；全仓仍为 identity/systems 既有 6 文件 26 错误 |
 | Phase 1 持久入库 Pylint/Bandit | 通过 | 本次源文件 Pylint 10.00/10；全仓 Bandit 中高危 0 |
 | Phase 1 持久入库 Alembic | 通过 | 隔离 SQLite 空库 `upgrade head` 与 `alembic check` 通过；人工核对三表列、枚举、外键、唯一/检查约束和索引与 ORM 一致 |
+| Phase 1 版本/发布/隔离全量测试 | 通过 | review 修复后端 129 项测试通过，总覆盖率 91.54%；覆盖跨上传者幂等、创建/追加操作切换、对象写入与版本锁顺序、请求指纹持久化及当前指针复合约束 |
+| Phase 1 版本/发布/隔离静态检查 | 通过 | 本次 39 个 Python 文件 Black/isort 清洁；相关 32 个源文件 mypy strict 零错误；Pylint 10.00/10；Bandit 中高危 0 |
+| Phase 1 版本/发布/隔离 Alembic | 通过 | 全新隔离 SQLite 空库完成 `upgrade head -> downgrade d1a97d2e451b -> upgrade head` 往返，`alembic check` 确认 ORM/迁移无差异 |
 
 ## 9. 未运行验证与风险
 
@@ -170,14 +184,16 @@
 7. `npm audit` 的公告接口访问审批同样返回 503；`npm ci` 报告现有锁文件有 2 个 high 漏洞，未在未评估 breaking change 的情况下执行自动升级。
 8. 本轮 `npm audit` 沙箱内无法访问公告接口；外部执行因会向公共 npm 服务发送依赖元数据而被安全策略拒绝，未取得最新公告结果。
 9. 四类解析器已接入 S3/PostgreSQL/Celery 端口和持久任务，但尚未连接公司真实 PostgreSQL、Redis、S3 兼容端点或 ESB 文档；当前证明来自单元/SQLite 集成验证，不替代隔离基础设施核心链路测试。扫描 PDF 仅返回 `OCR_REQUIRED`，首版不执行 OCR。
-10. 本轮依赖和测试仍运行于内置 Python 3.12.13；`py -0p` 确认本机没有已安装 Python，无法执行目标 Python 3.11/Linux 验证。全仓 mypy 仍有此前 identity/systems 6 文件 26 个错误，本次 30 个相关源文件无新增错误。
+10. 本轮依赖和测试仍运行于内置 Python 3.12.13；`py -0p` 确认本机没有已安装 Python，无法执行目标 Python 3.11/Linux 验证。全仓 mypy 既有错误本轮未复查；本次 `documents`/`knowledge` 等 32 个相关源文件 strict 检查零错误。
+11. 新迁移尚未在真实 PostgreSQL 上验证锁时长、回填计划、JSONB 和复合外键行为；当前证据来自隔离 SQLite 迁移与 SQLAlchemy 测试。
+12. 本轮只实现知识隔离与发布基础模型，未接入 Embedding、向量列、Worker 索引阶段或实际检索；`READY_DRAFT` 片段写入端口供 Phase 2 调用。
 
 ## 10. 继续开发建议
 
 新对话或新开发者接手时，建议下一步：
 
-1. 先阅读 TD-005、TD-007、TD-011、`documents` 入库契约和 Phase 1 文档入库数据流。
-2. 使用 `feature` 完成文档版本、发布状态和基于 `system_id` 强过滤的知识隔离基础模型。
+1. 先阅读 TD-002、TD-005、TD-007、知识发布事务和 `3ba86a4c3d35` 迁移。
+2. 使用 `integration-test` 完成 Phase 1 双系统/四格式/真实基础设施验收；验收通过后关闭 Phase 1 并进入 Phase 2。
 
 ## 11. 接手时必须先读
 

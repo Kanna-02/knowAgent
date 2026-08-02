@@ -178,7 +178,7 @@ class SourceLocator(BaseModel):
 | `POST /admin/systems` | `SystemCreateRequest` | `SystemView` | 平台管理员 |
 | `PATCH /admin/systems/{system_id}` | `SystemUpdateRequest` | `SystemView` | 平台管理员 |
 | `PUT /admin/systems/{system_id}/owners` | `OwnerAssignmentRequest` | `list[OwnerView]` | 平台管理员 |
-| `POST /systems/{system_id}/documents` | multipart 文件 + `Idempotency-Key` | `202 IngestionJobView` | 负责人/管理员；格式、大小、系统授权和幂等校验 |
+| `POST /systems/{system_id}/documents` | multipart 文件 + `Idempotency-Key`；可选 `document_id` 创建下一版本 | `202 IngestionJobView` | 负责人/管理员；格式、大小、系统授权和幂等校验；跨系统 `document_id` 按不存在处理 |
 | `GET /systems/{system_id}/documents` | 分页/状态/关键词 | `Page[DocumentView]` | 负责人/管理员；强制系统授权 |
 | `GET /document-versions/{version_id}` | 无 | `DocumentVersionView` | 所属系统授权 |
 | `GET /ingestion-jobs/{job_id}` | 无 | `IngestionJobView` | 所属系统授权 |
@@ -324,11 +324,11 @@ Provider 可由内部 HTTP、自建运行时或后续公司 API 实现；领域�
 | 认证 | `account_system_roles` | `account_id + system_id + role` 唯一；负责人权限来源 |
 | 系统 | `business_systems` | 唯一 `code`、名称、状态、默认负责人策略 |
 | 系统 | `system_access_rules` | P2 部门/用户组可见性；首版默认启用系统级公开策略 |
-| 文档 | `documents` | `system_id`、逻辑文档名、当前发布版本、状态 |
-| 文档 | `document_versions` | 对象键、文件名、媒体类型、SHA-256、版本号、解析/发布状态；`document_id + version_no` 唯一 |
-| 文档 | `ingestion_jobs` | 任务类型、阶段、状态、进度、attempt、租约、错误码、Celery task id；`actor_id + system_id + idempotency_key` 唯一 |
-| 知识 | `knowledge_sources` | 来源类型 `DOCUMENT/TICKET`、`system_id`、源版本/工单、发布状态 |
-| 知识 | `knowledge_chunks` | `system_id`、source、文本、`SourceLocator` JSONB、结构路径、序号、token 数、模型版本、向量、检索文本 |
+| 文档 | `documents` | `system_id`、逻辑文档名、`current_published_version_id`；当前指针以 `version_id + document_id + system_id` 复合引用版本 |
+| 文档 | `document_versions` | 冗余 `system_id`、对象键、文件名、媒体类型、SHA-256、版本号、解析/发布状态；`document_id + version_no` 唯一，`document_id + system_id` 复合引用文档 |
+| 文档 | `ingestion_jobs` | 原始 nullable `requested_document_id`、阶段、状态、进度、attempt、租约、错误码、Celery task id；`actor_id + system_id + idempotency_key` 唯一 |
+| 知识 | `knowledge_sources` | 来源类型 `DOCUMENT/TICKET`、`system_id`、源版本/工单、发布状态；文档来源以 `document_version_id + system_id` 复合外键约束 |
+| 知识 | `knowledge_chunks` | `system_id`、source、文本、`SourceLocator` JSONB、结构路径、序号、token 数、模型版本和检索文本；以 `source_id + system_id` 复合外键约束；向量列在检索阶段经 DBA 扩展门禁后补充 |
 | 会话 | `conversations` | `owner_id`、不可变 `system_id`、标题、状态、最近活动时间 |
 | 会话 | `messages` | 会话、角色、内容、状态、序号；`conversation_id + sequence` 唯一 |
 | 问答 | `question_runs` | 问题消息、状态、意图、查询改写、模型/提示词/检索配置版本、降级标记、错误分类 |
@@ -352,11 +352,14 @@ Provider 可由内部 HTTP、自建运行时或后续公司 API 实现；领域�
 ### 6.1 状态机
 
 ```text
-DocumentVersion:
-UPLOADED -> PARSING -> CHUNKING -> CHUNKED -> INDEXING -> READY_DRAFT -> PUBLISHED -> RETIRED
-               |          |                    |             |
-               +-------> FAILED <---------------+-------------+
+DocumentVersion processing:
+UPLOADED -> PARSING -> CHUNKING -> CHUNKED -> INDEXING -> READY_DRAFT
+               |          |                    |
+               +-------> FAILED <---------------+
                +-------> OCR_REQUIRED
+
+DocumentVersion publication:
+DRAFT -> PUBLISHED -> RETIRED
 
 QuestionRun:
 ACCEPTED -> RUNNING -> COMPLETED | REFUSED | FAILED | CANCELLED
@@ -371,19 +374,20 @@ DRAFT -> SUBMITTED -> APPROVED -> PUBLISHING -> PUBLISHED
                     -> REJECTED
 ```
 
-状态转换必须由领域方法完成并写审计；不允许 API 直接写任意状态。发布新文档版本时，同一事务切换当前发布指针，旧片段退出检索但保留历史引用记录。
+处理状态与发布状态独立，避免退役版本丢失解析结果。状态转换必须由领域服务完成并写审计；不允许 API 直接写任意状态。发布新文档版本时，同一事务切换当前发布指针，旧版本、来源和片段同步退役，但历史引用记录保留快照。
 
 ## 7. 核心数据流
 
 ### 7.1 文档入库
 
 1. API 校验角色、`system_id` 权限、扩展名、MIME、大小和 SHA-256，并以流式方式写入 S3 兼容对象存储；该阶段已实现。
-2. PostgreSQL 事务创建 `document`、`document_version` 和 `ingestion_job`；幂等键按账号与业务系统划分作用域，作用域内重复请求返回已有任务；提交后仅向 Celery 投递 `job_id`，该阶段已实现。
+2. 对象写入后由 PostgreSQL 短事务创建 `document`、`document_version` 和 `ingestion_job`；追加版本在文档行锁内分配版本号并刷新逻辑文档时间。幂等键按账号与业务系统划分作用域，请求指纹包含原始 nullable `document_id`，完全相同的重复请求返回已有任务；提交后仅向 Celery 投递 `job_id`，该阶段已实现。
 3. Worker 通过数据库租约领取任务，选择格式专用 Parser，输出结构块和统一 `SourceLocator`；任务阶段、进度、尝试次数和可诊断错误持续入库。每次状态写入都校验租约 owner、attempt 与有效期，过期 Worker 不得覆盖新执行，该阶段已实现。
 4. Chunker 按标题、段落、页、工作表和 token 上限切分，不跨越不可追溯的结构边界，并将确定性 `chunks-v1.json` manifest 写入对象存储；完成后版本停在 `CHUNKED`，不得提前标记 `READY_DRAFT`，该阶段已实现。
-5. Worker 批量调用 Embedding 服务；校验模型名、版本、维度与归一化契约。
-6. 在暂存状态批量写入 chunks；全部成功后将版本置为 `READY_DRAFT`，失败则记录阶段和可诊断错误，不暴露半成品索引。
-7. 负责人发布后事务切换可检索版本。扫描 PDF 进入 `OCR_REQUIRED`，旧 `.doc/.xls` 返回明确不支持。
+5. `knowledge_sources`/`knowledge_chunks`、独立发布状态、复合 `system_id` 外键和事务发布/退役服务已实现；所有仓储读取均要求显式系统过滤。
+6. Worker 批量调用 Embedding 服务并校验模型名、版本、维度与归一化契约；该步骤随 Phase 2 检索实现补充。
+7. 在暂存状态批量写入 chunks；全部成功后将版本置为 `READY_DRAFT`，失败则记录阶段和可诊断错误，不暴露半成品索引。基础写入与发布事务已实现，Embedding 编排尚未接入 Worker。
+8. 负责人发布后事务切换可检索版本。扫描 PDF 进入 `OCR_REQUIRED`，旧 `.doc/.xls` 返回明确不支持。
 
 恢复策略：Beat 定时扫描未派发、到期重试和租约过期的未终态任务，根据数据库事实重新排队；恢复时版本同步回到 `UPLOADED`，自动重试耗尽后进入 `FAILED`，人工重试重置尝试预算。Celery 状态不用于决定业务是否完成。
 

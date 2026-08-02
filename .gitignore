@@ -9,11 +9,12 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
-backend/.alembic-phase1.db
+backend/.alembic-*.db
 .coverage
 .pytest_cache/
 .mypy_cache/
 .pylint.d/
+.pylint-cache/
 .venv/
 venv/
 htmlcov/

@@ -34,6 +34,8 @@ alembic upgrade head
 uvicorn knowagent.api.app:app --reload --host 127.0.0.1 --port 8000
 ```
 
+迁移 `3ba86a4c3d35` 会从 `documents.system_id` 回填已有 `document_versions.system_id`，为入库任务增加原始父文档请求指纹，再收紧版本隔离与当前发布指针复合外键，并创建 `knowledge_sources`、`knowledge_chunks`。应用迁移前需备份目标 Schema；不得跳过回填直接手工加 `NOT NULL`。
+
 健康检查：`GET http://127.0.0.1:8000/health/live`。
 
 另开终端启动入库 Worker 和恢复调度器；两者与 API 使用同一组数据库、Redis 和对象存储环境变量：

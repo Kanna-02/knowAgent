@@ -5,6 +5,8 @@ from datetime import datetime, timedelta
 from enum import StrEnum
 from uuid import UUID, uuid4
 
+from knowagent.common.lifecycle import PublicationStatus
+
 
 class DocumentVersionStatus(StrEnum):
     UPLOADED = "UPLOADED"
@@ -47,12 +49,14 @@ class Document:
     created_by: UUID
     created_at: datetime
     updated_at: datetime
+    current_published_version_id: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class DocumentVersion:  # pylint: disable=too-many-instance-attributes
     id: UUID
     document_id: UUID
+    system_id: UUID
     version_no: int
     object_key: str
     filename: str
@@ -68,6 +72,9 @@ class DocumentVersion:  # pylint: disable=too-many-instance-attributes
     parser_name: str | None = None
     parser_version: str | None = None
     schema_version: str | None = None
+    publish_status: PublicationStatus = PublicationStatus.DRAFT
+    published_at: datetime | None = None
+    retired_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +91,7 @@ class IngestionJob:  # pylint: disable=too-many-instance-attributes
     max_attempts: int
     created_at: datetime
     updated_at: datetime
+    requested_document_id: UUID | None = None
     lease_owner: str | None = None
     lease_expires_at: datetime | None = None
     next_retry_at: datetime | None = None
@@ -101,6 +109,7 @@ class IngestionJob:  # pylint: disable=too-many-instance-attributes
         document_version_id: UUID,
         actor_id: UUID,
         system_id: UUID,
+        requested_document_id: UUID | None = None,
         idempotency_key: str,
         max_attempts: int,
         now: datetime,
@@ -112,6 +121,7 @@ class IngestionJob:  # pylint: disable=too-many-instance-attributes
             document_version_id=document_version_id,
             actor_id=actor_id,
             system_id=system_id,
+            requested_document_id=requested_document_id,
             idempotency_key=idempotency_key,
             status=IngestionStatus.QUEUED,
             stage=IngestionStage.STORED,

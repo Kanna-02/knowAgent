@@ -71,6 +71,10 @@ disable = ["C0114", "C0115", "C0116"]
 [tool.pylint.format]
 max-line-length = 100
 
+[tool.pylint.similarities]
+# Declarative SQLAlchemy fields and explicit domain-record mappings repeat short metadata blocks.
+min-similarity-lines = 30
+
 [tool.bandit]
 exclude_dirs = ["tests"]
 severity = "MEDIUM"

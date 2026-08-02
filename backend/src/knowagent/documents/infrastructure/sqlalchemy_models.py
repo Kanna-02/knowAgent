@@ -9,6 +9,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -18,6 +19,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
+from knowagent.common.lifecycle import PublicationStatus
 from knowagent.documents.domain.ingestion import (
     DocumentVersionStatus,
     IngestionStage,
@@ -38,7 +40,22 @@ def enum_values(enum_type: type[PythonEnum]) -> list[str]:
 
 class DocumentRecord(Base):
     __tablename__ = "documents"
-    __table_args__ = (Index("ix_documents_system_updated", "system_id", "updated_at"),)
+    __table_args__ = (
+        UniqueConstraint("id", "system_id", name="uq_documents_id_system"),
+        ForeignKeyConstraint(
+            ["current_published_version_id", "id", "system_id"],
+            [
+                "document_versions.id",
+                "document_versions.document_id",
+                "document_versions.system_id",
+            ],
+            name="fk_documents_current_published_version_scope",
+            use_alter=True,
+            deferrable=True,
+            initially="DEFERRED",
+        ),
+        Index("ix_documents_system_updated", "system_id", "updated_at"),
+    )
 
     id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
     system_id: Mapped[UUID] = mapped_column(
@@ -47,6 +64,15 @@ class DocumentRecord(Base):
         nullable=False,
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    current_published_version_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey(
+            "document_versions.id",
+            name="fk_documents_current_published_version",
+            ondelete="SET NULL",
+            use_alter=True,
+        ),
+    )
     created_by: Mapped[UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("accounts.id", ondelete="RESTRICT"), nullable=False
     )
@@ -65,7 +91,26 @@ class DocumentVersionRecord(Base):  # pylint: disable=too-many-instance-attribut
     __tablename__ = "document_versions"
     __table_args__ = (
         UniqueConstraint("document_id", "version_no", name="uq_document_versions_number"),
+        UniqueConstraint("id", "system_id", name="uq_document_versions_id_system"),
+        UniqueConstraint(
+            "id",
+            "document_id",
+            "system_id",
+            name="uq_document_versions_id_document_system",
+        ),
         UniqueConstraint("object_key", name="uq_document_versions_object_key"),
+        ForeignKeyConstraint(
+            ["document_id", "system_id"],
+            ["documents.id", "documents.system_id"],
+            name="fk_document_versions_document_system",
+            ondelete="CASCADE",
+        ),
+        Index(
+            "ix_document_versions_system_publish",
+            "system_id",
+            "publish_status",
+            "updated_at",
+        ),
         Index("ix_document_versions_status_updated", "status", "updated_at"),
     )
 
@@ -73,6 +118,7 @@ class DocumentVersionRecord(Base):  # pylint: disable=too-many-instance-attribut
     document_id: Mapped[UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
     )
+    system_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
     version_no: Mapped[int] = mapped_column(Integer, nullable=False)
     object_key: Mapped[str] = mapped_column(String(1024), nullable=False)
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -90,6 +136,20 @@ class DocumentVersionRecord(Base):  # pylint: disable=too-many-instance-attribut
         ),
         nullable=False,
     )
+    publish_status: Mapped[PublicationStatus] = mapped_column(
+        Enum(
+            PublicationStatus,
+            values_callable=enum_values,
+            native_enum=False,
+            create_constraint=True,
+            length=32,
+            name="publication_status",
+        ),
+        nullable=False,
+        default=PublicationStatus.DRAFT,
+    )
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    retired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     chunk_manifest_key: Mapped[str | None] = mapped_column(String(1024))
     chunk_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     parser_name: Mapped[str | None] = mapped_column(String(100))
@@ -140,6 +200,7 @@ class IngestionJobRecord(Base):  # pylint: disable=too-many-instance-attributes
         ForeignKey("business_systems.id", ondelete="RESTRICT"),
         nullable=False,
     )
+    requested_document_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))
     idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
     status: Mapped[IngestionStatus] = mapped_column(
         Enum(

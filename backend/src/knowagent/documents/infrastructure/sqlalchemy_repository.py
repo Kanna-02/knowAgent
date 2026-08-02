@@ -4,7 +4,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -42,16 +42,53 @@ class SqlAlchemyIngestionRepository:
         )
         return self._bundle_from_job(job) if job is not None else None
 
+    def get_document(self, *, system_id: UUID, document_id: UUID) -> Document | None:
+        record = self._session.scalar(
+            select(DocumentRecord).where(
+                DocumentRecord.id == document_id,
+                DocumentRecord.system_id == system_id,
+            )
+        )
+        return self._to_document(record) if record is not None else None
+
+    def next_version_no(self, *, system_id: UUID, document_id: UUID) -> int:
+        document = self._session.scalar(
+            select(DocumentRecord)
+            .where(
+                DocumentRecord.id == document_id,
+                DocumentRecord.system_id == system_id,
+            )
+            .with_for_update()
+        )
+        if document is None:
+            raise ValidationError("DOCUMENT_NOT_FOUND", "文档不存在")
+        current = self._session.scalar(
+            select(func.max(DocumentVersionRecord.version_no)).where(
+                DocumentVersionRecord.document_id == document_id,
+                DocumentVersionRecord.system_id == system_id,
+            )
+        )
+        return int(current or 0) + 1
+
     def get_by_job_id(self, job_id: UUID) -> IngestionBundle | None:
         job = self._session.get(IngestionJobRecord, job_id)
         return self._bundle_from_job(job) if job is not None else None
 
     def add(self, bundle: IngestionBundle) -> IngestionBundle:
-        records = (
-            self._document_record(bundle.document),
-            self._version_record(bundle.version),
-            self._job_record(bundle.job),
+        existing_document = self._session.scalar(
+            select(DocumentRecord).where(
+                DocumentRecord.id == bundle.document.id,
+                DocumentRecord.system_id == bundle.document.system_id,
+            )
         )
+        records = [self._version_record(bundle.version), self._job_record(bundle.job)]
+        if existing_document is None:
+            records.insert(0, self._document_record(bundle.document))
+        else:
+            existing_document.updated_at = max(
+                _aware(existing_document.updated_at),
+                bundle.version.created_at,
+            )
         try:
             with self._session.begin_nested():
                 self._session.add_all(records)
@@ -133,6 +170,7 @@ class SqlAlchemyIngestionRepository:
             id=document.id,
             system_id=document.system_id,
             name=document.name,
+            current_published_version_id=document.current_published_version_id,
             created_by=document.created_by,
             created_at=document.created_at,
             updated_at=document.updated_at,
@@ -143,6 +181,7 @@ class SqlAlchemyIngestionRepository:
         return DocumentVersionRecord(
             id=version.id,
             document_id=version.document_id,
+            system_id=version.system_id,
             version_no=version.version_no,
             object_key=version.object_key,
             filename=version.filename,
@@ -150,6 +189,9 @@ class SqlAlchemyIngestionRepository:
             size_bytes=version.size_bytes,
             sha256=version.sha256,
             status=version.status,
+            publish_status=version.publish_status,
+            published_at=version.published_at,
+            retired_at=version.retired_at,
             chunk_manifest_key=version.chunk_manifest_key,
             chunk_count=version.chunk_count,
             parser_name=version.parser_name,
@@ -167,6 +209,7 @@ class SqlAlchemyIngestionRepository:
             document_version_id=job.document_version_id,
             actor_id=job.actor_id,
             system_id=job.system_id,
+            requested_document_id=job.requested_document_id,
             idempotency_key=job.idempotency_key,
             status=job.status,
             stage=job.stage,
@@ -211,6 +254,9 @@ class SqlAlchemyIngestionRepository:
     def _apply_version(record: DocumentVersionRecord, version: DocumentVersion) -> None:
         for name in (
             "status",
+            "publish_status",
+            "published_at",
+            "retired_at",
             "chunk_manifest_key",
             "chunk_count",
             "parser_name",
@@ -229,6 +275,7 @@ class SqlAlchemyIngestionRepository:
             created_by=record.created_by,
             created_at=_aware(record.created_at),
             updated_at=_aware(record.updated_at),
+            current_published_version_id=record.current_published_version_id,
         )
 
     @staticmethod
@@ -236,6 +283,7 @@ class SqlAlchemyIngestionRepository:
         return DocumentVersion(
             id=record.id,
             document_id=record.document_id,
+            system_id=record.system_id,
             version_no=record.version_no,
             object_key=record.object_key,
             filename=record.filename,
@@ -243,6 +291,9 @@ class SqlAlchemyIngestionRepository:
             size_bytes=record.size_bytes,
             sha256=record.sha256,
             status=record.status,
+            publish_status=record.publish_status,
+            published_at=_aware_or_none(record.published_at),
+            retired_at=_aware_or_none(record.retired_at),
             created_by=record.created_by,
             created_at=_aware(record.created_at),
             updated_at=_aware(record.updated_at),
@@ -260,6 +311,7 @@ class SqlAlchemyIngestionRepository:
             document_version_id=record.document_version_id,
             actor_id=record.actor_id,
             system_id=record.system_id,
+            requested_document_id=record.requested_document_id,
             idempotency_key=record.idempotency_key,
             status=record.status,
             stage=record.stage,

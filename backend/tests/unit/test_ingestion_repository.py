@@ -52,6 +52,7 @@ def make_bundle() -> IngestionBundle:
         version=DocumentVersion(
             id=version_id,
             document_id=document_id,
+            system_id=system_id,
             version_no=1,
             object_key="documents/source.md",
             filename="guide.md",
@@ -91,6 +92,49 @@ def test_repository_round_trips_bundle_by_idempotency_key_and_job_id() -> None:
             == bundle
         )
         assert repository.get_by_job_id(bundle.job.id) == bundle
+
+
+def test_repository_persists_requested_document_and_updates_logical_document_time() -> None:
+    factory = make_factory()
+    first = make_bundle()
+    later = NOW + timedelta(minutes=5)
+    second_version_id = uuid4()
+    second = IngestionBundle(
+        document=first.document,
+        version=replace(
+            first.version,
+            id=second_version_id,
+            version_no=2,
+            object_key="documents/source-v2.md",
+            filename="guide-v2.md",
+            sha256="b" * 64,
+            created_at=later,
+            updated_at=later,
+        ),
+        job=IngestionJob.new(
+            document_version_id=second_version_id,
+            actor_id=first.job.actor_id,
+            system_id=first.job.system_id,
+            requested_document_id=first.document.id,
+            idempotency_key="upload-002",
+            max_attempts=3,
+            now=later,
+        ),
+    )
+    with factory.begin() as session:
+        repository = SqlAlchemyIngestionRepository(session)
+        repository.add(first)
+        repository.add(second)
+    with factory() as session:
+        repository = SqlAlchemyIngestionRepository(session)
+        stored = repository.get_by_job_id(second.job.id)
+        document = repository.get_document(
+            system_id=first.document.system_id,
+            document_id=first.document.id,
+        )
+
+    assert stored is not None and stored.job.requested_document_id == first.document.id
+    assert document is not None and document.updated_at == later
 
 
 def test_coordinator_persists_claim_progress_and_completion_across_sessions() -> None:
