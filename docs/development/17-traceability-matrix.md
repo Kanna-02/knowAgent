@@ -9,8 +9,8 @@
 | REQ-001 | 双登录入口、统一认证、用户批量导入、管理员后台新增、首次改密、三角色 RBAC 和 SSO 适配边界 | P0 | AC-001, AC-010, AC-012 | `identity`, `audit`, `web` | `backend/src/knowagent/identity/`, `backend/src/knowagent/api/app.py`, `backend/migrations/versions/3f5d51a53981_create_phase1_identity_tables.py`, `frontend/src/api/client.ts`, `frontend/src/features/auth/`, `frontend/src/features/admin/`, `backend/tests/`, `frontend/src/**/*.test.ts(x)` | done |
 | REQ-002 | 多业务系统管理、选择和知识隔离 | P0 | AC-002 | `systems`, `knowledge`, `retrieval`, `web` | `backend/src/knowagent/systems/`, `backend/migrations/versions/baaf88cba66a_create_business_systems_and_owner_roles.py`, `backend/tests/unit/test_system_service.py`, `backend/tests/integration/test_identity_api.py`, `frontend/src/api/client.ts`, `frontend/src/features/admin/SystemsPage.tsx`, `frontend/src/features/auth/UserHomePage.tsx`；`knowledge`/`retrieval` 待实现 | gap（系统管理与选择基础已完成；知识检索强隔离待实现） |
 | REQ-003 | 用户端与管理后台 | P0 | AC-001, AC-009 | `web`, API 各业务模块 | `frontend/src/app/App.tsx`, `frontend/src/app/AppErrorBoundary.tsx`, `frontend/src/shared/WorkspaceShell.tsx`, `frontend/src/shared/FeedbackState.tsx`, `frontend/src/shared/uiError.ts`, `frontend/src/features/auth/UserShell.tsx`, `frontend/src/features/admin/AdminShell.tsx`, `frontend/src/features/auth/UserHomePage.tsx`, `frontend/src/features/admin/AccountsPage.tsx`, `frontend/src/features/admin/SystemsPage.tsx`, `frontend/src/**/*.test.ts(x)` | implementing（Phase 1 基础导航、状态和错误处理及评审修复已完成；问答、工单、知识和审计业务页面随对应模块实现） |
-| REQ-004 | 四类文档结构化解析、精确定位和可恢复索引 | P0 | AC-003, AC-009 | `documents`, `knowledge`, `worker`, `model-service` | 待实现 | skeleton |
-| REQ-005 | 基于证据回答、引用溯源与历史引用快照 | P0 | AC-004, AC-008 | `retrieval`, `agent`, `conversations`, `knowledge`, `web` | 待实现 | skeleton |
+| REQ-004 | 四类文档结构化解析、精确定位和可恢复索引 | P0 | AC-003, AC-009 | `documents`, `knowledge`, `worker`, `model-service` | `backend/src/knowagent/documents/`, `backend/src/knowagent/platform/settings.py`, `backend/.env.example`, `backend/tests/unit/test_source_locator.py`, `backend/tests/unit/test_document_parsers.py`, `backend/tests/unit/test_document_chunking.py`, `backend/tests/unit/test_document_configuration.py`；对象存储、持久任务与索引待实现 | implementing（四类解析、结构化切分、精确定位及评审修复已完成；可恢复索引待实现） |
+| REQ-005 | 基于证据回答、引用溯源与历史引用快照 | P0 | AC-004, AC-008 | `retrieval`, `agent`, `conversations`, `knowledge`, `web` | `backend/src/knowagent/documents/domain/models.py`, `backend/src/knowagent/documents/application/chunking.py`；回答引用与快照持久化待实现 | implementing（统一来源定位与 chunk locator 集合已完成；问答引用链待实现） |
 | REQ-006 | 证据充分性判定、可靠拒答并创建内置工单 | P0 | AC-005, AC-008 | `retrieval`, `agent`, `tickets` | 待实现 | skeleton |
 | REQ-007 | 工单处理、追加、关闭/重开和审核入库 | P0 | AC-006, AC-007 | `tickets`, `knowledge`, `documents`, `audit`, `web` | 待实现 | skeleton |
 | REQ-008 | 多轮对话上下文 | P1 | AC-004, AC-005 | `conversations`, `agent` | 待实现 | skeleton |
@@ -29,7 +29,7 @@
 
 | 迁移输入 | 影响需求 | 架构阶段必须验证 | 当前结论 |
 | --- | --- | --- | --- |
-| `parser/chunker` 缺少 Excel 与结构定位 | REQ-004, REQ-005 | `SourceLocator` 能覆盖四类格式，切分不丢失定位 | 不直接迁移；TD-007 已确认格式专用解析器组合 |
+| `parser/chunker` 缺少 Excel 与结构定位 | REQ-004, REQ-005 | `SourceLocator` 能覆盖四类格式，切分不丢失定位 | 已按 TD-007 重写并完成评审修复：严格联合定位、四类格式适配、精确源行、硬 token 预算和结构感知切分测试通过 |
 | `owner_id/kb_id` 与 1024 维硬编码 | REQ-002, REQ-009 | `system_id` 强过滤，向量维度由模型契约唯一配置 | 重构后迁移 |
 | 进程内 `@Async` 入库 | REQ-004, REQ-011 | 任务持久化、租约、幂等、重试和重启恢复 | 不直接迁移 |
 | SSE 阶段事件与前端流式状态机 | REQ-003, REQ-005, REQ-008 | 事件协议、取消、错误优先级和历史消息刷新 | 重构后迁移 |

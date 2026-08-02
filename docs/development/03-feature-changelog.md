@@ -212,3 +212,40 @@
 验证方式：前端 42 项测试通过；全局语句/分支/函数/行覆盖率 92.49%/85.11%/85.62%/94.63%；TypeScript、ESLint、Prettier 和 Vite 生产构建通过。浏览器在 1440x900、390x844 以及 1023px/1024px 临界视口完成用户端、管理端、抽屉切换、长系统名、表格横向滚动和保留数据的错误状态检查，页面无横向溢出或控件重叠。`npm audit` 的首次沙箱请求无法访问公告接口，外部执行因会向公共 npm 服务发送依赖元数据而被安全策略拒绝。
 
 后续注意：浏览器检查使用仅绑定本机的隔离测试 API 和虚构数据，不替代真实 PostgreSQL/Redis 集成验证；Phase 1 下一项为统一 `SourceLocator` 与四类文档结构化解析基础。
+
+### 2026-08-02 - 完成 Phase 1 统一来源定位与四类结构化解析基础
+
+类型：新功能
+
+相关需求：REQ-004 的解析/切分/定位部分、REQ-005 的来源定位基础；AC-003 的持久化索引部分随下一项完成。
+
+变更说明：
+
+1. 新增严格联合校验的 `SourceLocator`，统一携带文档、版本、来源类型和块序号；分别保存 PDF 页码/坐标、Word 标题与段落/表格行、Markdown 标题与源行、Excel 工作表与单元格范围。
+2. 新增 PyMuPDF、python-docx、markdown-it-py、openpyxl 格式适配器和 parser registry，领域契约不暴露第三方对象；解析结果记录 parser/schema 版本。
+3. 新增集中式资源限制和稳定解析错误码，拒绝超大/异常压缩 Office、损坏或加密文件、非 UTF-8 Markdown 和超页数 PDF；无可提取文本的 PDF 返回 `OCR_REQUIRED`。
+4. 新增结构感知 chunker，页、标题路径、工作表和表格边界优先于预算；表格按行组合并重复表头，超长块拆分后仍直接继承原始 locator，不在切分后反推来源。
+5. 新增运行时生成的 `.docx`、文本型 `.pdf`、`.md`、`.xlsx` 样本测试，覆盖结构、精确定位、扫描 PDF、损坏文件、资源上限和切分边界。
+
+验证方式：后端 68 个测试全部通过，总覆盖率 89.46%；本次 `documents` 15 个源文件 `mypy --strict` 零错误，Pylint 10.00/10，Black/isort 检查通过；全仓 Bandit 中高危问题 0。全仓 mypy 仍有 identity/systems 既有 26 个错误，未计为本功能通过。
+
+后续注意：本轮未接入对象存储、PostgreSQL/Celery 持久任务和真实 ESB 文件，AC-003 尚未完整验收；测试环境为内置 Python 3.12.13，目标 Python 3.11/Linux 仍需集成验证。Phase 1 下一项为对象存储与可恢复文档入库任务。
+
+### 2026-08-02 - 修复统一来源定位与解析评审问题
+
+类型：缺陷修复
+
+相关需求：REQ-004、REQ-005；TD-007。
+
+review 修复（5 阻塞 + 3 建议 + 3 提醒）：
+
+1. 中文 token 预算改为逐 CJK 字符保守计数，超长表头和仅表头表格统一遵守硬预算；补齐普通块 overlap、超长表格行重复表头和完整 locator 传播测试，chunker 覆盖率提升到 90%。
+2. Markdown 表格行直接使用 AST token 的源行映射，不再根据表头和分隔行算术反推；多数据行引用可精确回到原始行。
+3. `SourceLocator` 补齐格式内联合约束：Word 段落/表格位置互斥，Markdown/XLSX 表格字段成组出现，PDF 坐标必须为有限值。
+4. 损坏 DOCX/XLSX 内部 XML 统一映射为 `INVALID_FILE`；文件、归档展开、压缩比、归档条目、PDF 页/块、Word/Markdown 块及 Excel 结构上限均可配置并增量生效。
+5. parser port 改为同步 worker 契约，避免 CPU 密集解析被误放入 FastAPI 事件循环；MIME 匹配支持 `charset` 等参数。
+6. 新增 `DocumentProcessingSettings` 和 `KNOWAGENT_DOCUMENT_*` 环境变量，本地开发与架构文档同步配置和 worker 资源边界。
+
+验证方式：后端 81 个测试全部通过，总覆盖率 90.80%，`chunking.py` 覆盖率 90%；Black/isort 检查通过，`documents` 与平台 settings 共 16 个源文件 `mypy --strict` 零错误，Pylint 10.00/10，全仓 Bandit 中高危问题 0；目标 Python 3.11 未运行，`py -0p` 确认本机没有已安装 Python。
+
+后续注意：本轮仍使用 Python 3.12.13；Celery 任务软/硬超时、进程内存限制和真实 Office/PDF 样本需在下一项持久入库任务及目标 Python 3.11/Linux 集成环境验证。

@@ -21,6 +21,10 @@ Copy-Item .env.example .env
 
 将 `.env` 中的数据库和 Redis 地址改为本地测试实例，再把变量加载到当前终端。应用不会自动读取 `.env`，可使用公司统一的环境加载方式或在 PowerShell 中显式设置。
 
+文档解析和切分参数统一使用 `KNOWAGENT_DOCUMENT_*` 环境变量。默认值已列在 `backend/.env.example`，包括上传字节数、Office 展开大小/压缩比/归档条目数、PDF 页数与块数、Word/Markdown 块数、Excel 工作表/行/列/单元格上限，以及 chunk token 预算和块重叠数。所有上限必须为正整数，只有 `KNOWAGENT_DOCUMENT_CHUNK_OVERLAP_BLOCKS` 可以为 `0`；无效值会在配置加载时失败，不应在生产环境静默回退。
+
+parser 是同步的 CPU/内存密集端口，只能由后续独立文档 worker 调用，不得直接放入 FastAPI `async` 请求链。目标 worker 还需在任务层配置软/硬超时和进程内存边界。
+
 应用数据库迁移并启动 API：
 
 ```powershell

@@ -133,17 +133,26 @@ class ApiError(BaseModel):
     details: dict[str, str | int | bool] | None = None
 
 class SourceLocator(BaseModel):
+    document_id: UUID
+    document_version_id: UUID
     source_type: Literal["pdf", "docx", "markdown", "xlsx", "ticket"]
+    block_index: int
     page_number: int | None = None
+    bounding_box: tuple[float, float, float, float] | None = None
     heading_path: tuple[str, ...] = ()
     paragraph_start: int | None = None
     paragraph_end: int | None = None
+    line_start: int | None = None
+    line_end: int | None = None
+    table_index: int | None = None
+    table_row_start: int | None = None
+    table_row_end: int | None = None
     sheet_name: str | None = None
     cell_range: str | None = None
     ticket_id: UUID | None = None
 ```
 
-`SourceLocator` 按 `source_type` 做联合校验：PDF 必须有页码，Word/Markdown 必须保留标题路径和段落范围，Excel 必须有工作表与单元格范围，工单知识必须有 `ticket_id`。
+`SourceLocator` 按 `source_type` 做联合校验并始终绑定文档、版本和原始块序号：PDF 必须有页码且可带有限坐标，Word 的段落位置与完整表格行位置互斥，Markdown 同时保留标题路径、语义段落和精确源行且表格字段必须成组出现，Excel 必须有工作表与单元格范围且可选表格字段必须成组出现，工单知识必须有 `ticket_id`。格式专属字段不能混入其他来源类型。
 
 ### 4.2 用户与认证 API
 
@@ -261,7 +270,7 @@ class ObjectStore(Protocol):
 
 class DocumentParser(Protocol):
     def supports(self, *, media_type: str, filename: str) -> bool: ...
-    async def parse(self, *, object_key: str, version_id: UUID) -> "ParsedDocument": ...
+    def parse(self, *, content: bytes, document_id: UUID, document_version_id: UUID) -> "ParsedDocument": ...
 
 class EmbeddingProvider(Protocol):
     async def embed(self, *, texts: Sequence[str]) -> "EmbeddingBatch": ...
@@ -291,6 +300,8 @@ class TicketService(Protocol):
 class AuthorizationService(Protocol):
     async def require_system_permission(self, *, actor_id: UUID, system_id: UUID, permission: str) -> None: ...
 ```
+
+`DocumentParser` 是 CPU/内存密集的同步 worker 端口，不得在 FastAPI 事件循环中直接执行；持久入库任务在独立 Celery worker 中调用，并由任务层配置软/硬超时和进程资源边界。
 
 统一异常族：`ValidationError`、`AuthenticationError`、`AuthorizationError`、`ConflictError`、`NotFoundError`、`RateLimitError`、`ProviderUnavailableError`、`InfrastructureError`。只有 `EvidenceDecision.outcome` 为 `INSUFFICIENT` 或 `CONFLICTING` 时允许自动建单。
 
@@ -529,7 +540,7 @@ API、Worker、Beat、Model 使用独立低权限系统账号或最小共享组�
 
 ## 13. 目标目录结构
 
-项目按以下目录推进。当前已创建依赖、静态检查配置和最小包标记；业务模块目录在对应 feature 开始时按需建立。
+项目按以下目录推进。当前已创建依赖、静态检查配置、账号/系统模块，以及 `documents` 的统一定位、四类解析器和结构感知切分基础；其余业务模块在对应 feature 开始时按需建立。
 
 ```text
 knowAgent/
@@ -541,7 +552,7 @@ knowAgent/
       platform/            # settings、db、redis、object store、outbox
       identity/
       systems/
-      documents/
+      documents/           # SourceLocator、parser port/registry、格式适配器、chunker
       knowledge/
       conversations/
       retrieval/

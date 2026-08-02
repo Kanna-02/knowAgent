@@ -15,10 +15,10 @@
 ## 2. 当前阶段
 
 ```text
-当前阶段：Phase 1 进行中（3/6）
+当前阶段：Phase 1 进行中（4/6）
 阶段目标：认证、系统管理、双端基础界面和四类文档可恢复入库
-当前任务：REQ-003 双端基础导航、状态和错误处理
-任务状态：Phase 1 基础切片已完成；完整业务页面随对应模块继续实现
+当前任务：REQ-004 统一来源定位、四类结构化解析和切分
+任务状态：解析基础已完成；对象存储、持久任务和可恢复索引待下一项实现
 ```
 
 ## 3. 已完成
@@ -45,16 +45,20 @@
 20. REQ-003 的 Phase 1 基础切片已完成：双端复用响应式壳层，支持桌面侧栏、移动抽屉、当前路由状态、独立退出入口和路由级懒加载。
 21. 已新增统一 loading/empty/error 反馈、API 请求追踪 ID、列表与系统选择原位重试，以及不暴露内部异常的应用错误边界。
 22. 已完成 REQ-003 评审修复：管理列表忽略过期请求、重试期间禁止重复提交，工作区在 `<1024px` 使用抽屉导航并通过高 DPI 临界视口验证。
+23. 已实现统一 `SourceLocator`，所有格式均绑定文档、版本和原始块序号，并按 PDF 页码/坐标、Word 标题与段落/表格、Markdown 标题与源行、Excel 工作表与单元格范围做严格联合校验。
+24. 已实现 PyMuPDF、python-docx、markdown-it-py、openpyxl 四个隔离解析适配器及 registry；扫描/空 PDF 标记 `OCR_REQUIRED`，旧格式、损坏、加密、编码和资源超限均使用稳定错误码。
+25. 已实现结构感知 chunker：不跨 PDF 页、标题路径、工作表或表格边界，超长块按预算拆分，表格分组重复表头，每个 chunk 保留完整 locator 集合。
+26. 已完成 REQ-004/REQ-005 评审修复：中文与表头严格遵守 chunk 预算，Markdown 表格使用 AST 精确源行，locator 格式内组合严格校验，损坏 OOXML 统一错误，解析限制配置化并改为同步 worker 契约。
 
 ## 4. 正在进行
 
-1. Phase 1 下一项为统一 `SourceLocator` 与 `.docx`、文本型 `.pdf`、`.md`、`.xlsx` 结构化解析基础。
+1. Phase 1 下一项为对象存储、持久化入库任务、幂等、阶段进度、失败重试和进程重启恢复。
 2. 等待 DBA 验证 `pgvector` 与 `pg_trgm` 扩展。
 3. 等待目标 Linux 服务器资源信息以确定模型推理后端、量化方式和 Python 传递依赖锁。
 
 ## 5. 未完成 / 下一步
 
-1. 使用 `feature` 完成 Phase 1 统一 `SourceLocator` 与四类文档结构化解析基础。
+1. 使用 `feature` 完成 Phase 1 对象存储与可恢复文档入库任务。
 2. 在数据库功能落地前确认 PostgreSQL 扩展和版本。
 3. 在类生产 Linux 环境验证 Python 3.11 完整安装、模型运行和发布回滚。
 4. 在 `knowledge` 与 `retrieval` 模块落地后完成 REQ-002 的系统级强隔离和 AC-002 零跨系统泄漏验收。
@@ -100,6 +104,13 @@
 | `frontend/src/shared/FeedbackState.tsx`、`frontend/src/shared/uiError.ts`、`frontend/src/app/AppErrorBoundary.tsx` | 统一局部状态、请求追踪与全局错误兜底 | 已完成 |
 | `frontend/src/features/auth/UserHomePage.tsx`、`frontend/src/features/admin/AccountsPage.tsx`、`frontend/src/features/admin/SystemsPage.tsx` | 可恢复加载/空/错状态、最新请求胜出和原位重试锁定 | 已完成 |
 | `frontend/src/**/*.test.ts(x)` | 导航、移动抽屉、错误边界、追踪 ID、恢复路径和乱序请求回归测试 | 已完成 |
+| `backend/src/knowagent/documents/domain/models.py` | `SourceLocator`、语义块、解析文档和知识 chunk 契约 | 已完成 |
+| `backend/src/knowagent/documents/infrastructure/parsers/` | 四类格式解析器、资源限制、错误分类和 parser registry | 已完成 |
+| `backend/src/knowagent/documents/application/chunking.py` | 结构边界优先的预算切分与 locator 传播 | 已完成 |
+| `backend/tests/unit/test_source_locator.py`、`test_document_parsers.py`、`test_document_chunking.py` | 四类真实生成样本、定位、异常和切分回归测试 | 已完成 |
+| `backend/src/knowagent/platform/settings.py`、`backend/.env.example` | 文档解析、归档、格式结构和 chunk 预算环境配置 | 已完成 |
+| `backend/tests/unit/test_document_configuration.py` | 文档配置加载与非法边界回归测试 | 已完成 |
+| `docs/operations/07-local-development.md` | 文档解析配置与同步 worker 执行边界 | 已完成 |
 
 ## 8. 已运行验证
 
@@ -126,6 +137,11 @@
 | REQ-002 评审修复全量验证 | 通过 | 后端 39 项测试、覆盖率 92.07%；前端 35 项测试，语句/分支/函数/行覆盖率 92.56%/81.73%/87.50%/95.34%；TypeScript、ESLint、Prettier 和 Vite 构建通过 |
 | REQ-003 前端 test/coverage/typecheck/lint/format/build | 通过 | 42 项测试；语句/分支/函数/行覆盖率 92.49%/85.11%/85.62%/94.63%；TypeScript、ESLint、Prettier 和 Vite 生产构建无错误 |
 | REQ-003 浏览器响应式检查 | 通过 | 1440x900、390x844 及 1023px/1024px 临界视口通过；`<1024px` 使用抽屉、`>=1024px` 使用固定侧栏，页面均无横向溢出或控件重叠 |
+| REQ-004 后端全量测试/覆盖率 | 通过 | 81 个测试通过，总覆盖率 90.80%，`chunking.py` 覆盖率 90%；四类运行时生成样本及评审回归全部通过 |
+| REQ-004 Black/isort | 通过 | 本次 `documents`、平台 settings 源码和 4 个新增测试文件检查通过 |
+| REQ-004 `mypy --strict` | 通过（本模块） | `documents` 与平台 settings 共 16 个源文件零错误；全仓仍有 identity/systems 既有 26 个错误 |
+| REQ-004 Pylint/Bandit | 通过 | `documents` 与平台 settings 的 Pylint 10.00/10；全仓 Bandit 中高危 0 |
+| REQ-004 评审修复定向验证 | 通过 | 42 项 locator/parser/chunker/config 定向测试通过；损坏 OOXML、MIME 参数、中文预算、超长表头、多行 Markdown 表格和非法配置均已覆盖 |
 
 ## 9. 未运行验证与风险
 
@@ -135,17 +151,17 @@
 4. 模型运行时和目标 Linux 完整安装尚未验证；本轮前端生产构建已通过。
 5. 本轮曾按 Python 3.12 跨版本 dry-run；因本机 pip 对本地项目跨版本校验受限，且 PyMuPDF wheel 下载速度约 47 KB/s，用户已终止并明确改用 Python 3.11。
 6. Python 3.11 本地无依赖 metadata dry-run 因当前环境缺少 `wheel` 的 `bdist_wheel` 命令未完成；配置约束已单独验证，未为此安装全局构建工具。
-7. Python 静态工具安装审批服务再次返回 503，因此当前虚拟环境仍未执行 Black/isort/mypy/Pylint/Bandit；测试、覆盖率和 Python 编译导入已通过。
-8. `npm audit` 的公告接口访问审批同样返回 503；`npm ci` 报告现有锁文件有 2 个 high 漏洞，未在未评估 breaking change 的情况下执行自动升级。
-9. 本轮静态工具安装和 `npm audit` 外部执行审批均再次返回 503，因此未取得 Black/isort/mypy/Pylint/Bandit 与最新 npm 公告结果。
-10. 本轮 `npm audit` 沙箱内无法访问公告接口；外部执行因会向公共 npm 服务发送依赖元数据而被安全策略拒绝，未取得最新公告结果。
+7. `npm audit` 的公告接口访问审批同样返回 503；`npm ci` 报告现有锁文件有 2 个 high 漏洞，未在未评估 breaking change 的情况下执行自动升级。
+8. 本轮 `npm audit` 沙箱内无法访问公告接口；外部执行因会向公共 npm 服务发送依赖元数据而被安全策略拒绝，未取得最新公告结果。
+9. 四类解析器已通过内存生成样本测试，但尚未接入对象存储、PostgreSQL/Celery 或公司真实 ESB 文档；扫描 PDF 仅返回 `OCR_REQUIRED`，首版不执行 OCR。
+10. 本轮依赖和测试仍运行于内置 Python 3.12.13；`py -0p` 确认本机没有已安装 Python，无法执行目标 Python 3.11 验证。全仓 mypy/Pylint 仍有此前 identity/systems 基线问题，本次 `documents` 与平台 settings 无新增错误。
 
 ## 10. 继续开发建议
 
 新对话或新开发者接手时，建议下一步：
 
-1. 先阅读 REQ-001/REQ-002 实现、TD-007 和项目结构中的 `SourceLocator` 契约。
-2. 使用 `feature` 完成 Phase 1 四类文档结构化解析基础。
+1. 先阅读 TD-005、TD-007、`documents` 解析契约和 Phase 1 文档入库数据流。
+2. 使用 `feature` 完成对象存储、持久化入库任务、幂等、进度、重试和重启恢复。
 
 ## 11. 接手时必须先读
 
