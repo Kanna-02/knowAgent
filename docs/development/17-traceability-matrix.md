@@ -6,7 +6,7 @@
 
 | 需求点 ID | 描述 | P 级 | AC 编号 | 实现模块 | 代码文件 | 状态 |
 | --- | --- | --- | --- | --- | --- | --- |
-| REQ-001 | 双登录入口、统一认证、用户批量导入、管理员后台新增、首次改密、三角色 RBAC 和 SSO 适配边界 | P0 | AC-001, AC-010, AC-012 | `identity`, `audit`, `web` | 待实现 | skeleton |
+| REQ-001 | 双登录入口、统一认证、用户批量导入、管理员后台新增、首次改密、三角色 RBAC 和 SSO 适配边界 | P0 | AC-001, AC-010, AC-012 | `identity`, `audit`, `web` | `backend/src/knowagent/identity/`, `backend/src/knowagent/api/app.py`, `backend/migrations/versions/3f5d51a53981_create_phase1_identity_tables.py`, `frontend/src/api/client.ts`, `frontend/src/features/auth/`, `frontend/src/features/admin/`, `backend/tests/`, `frontend/src/**/*.test.ts(x)` | done |
 | REQ-002 | 多业务系统管理、选择和知识隔离 | P0 | AC-002 | `systems`, `knowledge`, `retrieval`, `web` | 待实现 | skeleton |
 | REQ-003 | 用户端与管理后台 | P0 | AC-001, AC-009 | `web`, API 各业务模块 | 待实现 | skeleton |
 | REQ-004 | 四类文档结构化解析、精确定位和可恢复索引 | P0 | AC-003, AC-009 | `documents`, `knowledge`, `worker`, `model-service` | 待实现 | skeleton |
