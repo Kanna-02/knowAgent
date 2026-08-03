@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import cast
 from uuid import UUID
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import Table, bindparam, delete, func, select, update
 from sqlalchemy.orm import Session
 
 from knowagent.common.lifecycle import PublicationStatus
@@ -14,6 +15,7 @@ from knowagent.documents.infrastructure.sqlalchemy_models import (
     DocumentVersionRecord,
 )
 from knowagent.knowledge.domain.models import (
+    ChunkEmbeddingUpdate,
     KnowledgeChunk,
     KnowledgeChunkDraft,
     KnowledgeSource,
@@ -137,6 +139,66 @@ class SqlAlchemyKnowledgeRepository:
         ).all()
         return [self._to_chunk(record) for record in records]
 
+    def list_source_chunks(self, *, system_id: UUID, source_id: UUID) -> list[KnowledgeChunk]:
+        records = self._session.scalars(
+            select(KnowledgeChunkRecord)
+            .where(
+                KnowledgeChunkRecord.system_id == system_id,
+                KnowledgeChunkRecord.source_id == source_id,
+            )
+            .order_by(KnowledgeChunkRecord.ordinal)
+        ).all()
+        return [self._to_chunk(record) for record in records]
+
+    def set_chunk_embeddings(  # pylint: disable=too-many-arguments
+        self,
+        *,
+        system_id: UUID,
+        source_id: UUID,
+        updates: tuple[ChunkEmbeddingUpdate, ...],
+        model: str,
+        model_version: str,
+        now: datetime,
+    ) -> int:
+        if not updates:
+            return 0
+        chunk_table = cast(Table, KnowledgeChunkRecord.__table__)
+        statement = (
+            update(chunk_table)
+            .where(
+                chunk_table.c.id == bindparam("target_chunk_id"),
+                chunk_table.c.system_id == bindparam("target_system_id"),
+                chunk_table.c.source_id == bindparam("target_source_id"),
+            )
+            .values(
+                embedding=bindparam("target_embedding"),
+                embedding_model=bindparam("target_model"),
+                embedding_model_version=bindparam("target_model_version"),
+                updated_at=bindparam("target_updated_at"),
+            )
+        )
+        parameters: list[dict[str, object]] = [
+            {
+                "target_chunk_id": item.chunk_id,
+                "target_system_id": system_id,
+                "target_source_id": source_id,
+                "target_embedding": list(item.vector),
+                "target_model": model,
+                "target_model_version": model_version,
+                "target_updated_at": now,
+            }
+            for item in updates
+        ]
+        self._session.execute(statement, parameters)
+        updated = self._session.scalar(
+            select(func.count(KnowledgeChunkRecord.id)).where(
+                KnowledgeChunkRecord.id.in_(item.chunk_id for item in updates),
+                KnowledgeChunkRecord.system_id == system_id,
+                KnowledgeChunkRecord.source_id == source_id,
+            )
+        )
+        return int(updated or 0)
+
     def locked_version(
         self, *, system_id: UUID, document_version_id: UUID
     ) -> DocumentVersionRecord | None:
@@ -232,6 +294,7 @@ class SqlAlchemyKnowledgeRepository:
                     retrieval_text=draft.retrieval_text or draft.text,
                     embedding_model=draft.embedding_model,
                     embedding_model_version=draft.embedding_model_version,
+                    embedding=list(draft.embedding) if draft.embedding is not None else None,
                     publish_status=PublicationStatus.DRAFT,
                     created_at=now,
                     updated_at=now,
@@ -354,6 +417,7 @@ class SqlAlchemyKnowledgeRepository:
             publish_status=record.publish_status,
             embedding_model=record.embedding_model,
             embedding_model_version=record.embedding_model_version,
+            embedding=tuple(record.embedding) if record.embedding is not None else None,
             created_at=_aware(record.created_at),
             updated_at=_aware(record.updated_at),
         )

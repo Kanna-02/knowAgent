@@ -27,7 +27,7 @@ npm run typecheck
 npm run build
 ```
 
-发布前还必须确认：目标 Python 3.11 依赖锁可安装、PostgreSQL 备份可恢复、Redis/S3 配置有效、迁移已在 staging 演练，且没有把未通过的检查记为成功。
+发布前还必须确认：目标 Python 3.11 依赖锁可安装、PostgreSQL 备份可恢复、Redis/S3 配置有效、`vector`/`pg_trgm` 扩展可加载、Embedding 与 Qwen Provider 健康、迁移已在 staging 演练，且没有把未通过的检查记为成功。
 
 ## 3. 数据库迁移
 
@@ -45,13 +45,23 @@ alembic check
 
 迁移前必须备份目标 Schema。禁止手工跳过回填或复合外键；这会破坏知识隔离保证。
 
+迁移 `c8784d439b23` 需要 PostgreSQL 服务端已安装兼容版本的 pgvector，并执行：
+
+1. `CREATE EXTENSION IF NOT EXISTS vector` 与 `CREATE EXTENSION IF NOT EXISTS pg_trgm`。
+2. 为 `knowledge_chunks` 增加 nullable、无固定维度的 `embedding` 向量列。
+3. 为 `retrieval_text` 创建 GIN `gin_trgm_ops` 索引。
+
+扩展不可用时迁移必须失败，不能跳过向量列后继续发布。当前不创建 HNSW；待 Embedding 模型维度锁定后用单独的向后兼容迁移增加。扩展由 DBA 预装时，应先用只读查询确认 `pg_extension`，再使用权限收紧的应用迁移账号。
+
 ## 4. 发布与验证
 
 1. 解压构建产物到新的 `/opt/knowagent/releases/<release-id>`。
 2. 以迁移专用账号执行 `alembic upgrade head`，确认 `alembic check` 无差异。
 3. 切换 `current` 软链接并依次重启 API、交互 Worker、批处理 Worker 和 Beat。
 4. 验证 `/health/live`、登录、文档上传、v2 上传和任务状态查询。
-5. 在两个业务系统分别发布同名知识，验证跨系统 chunk 查询结果为 0。
+5. 验证 Embedding `/v1/embeddings` 返回模型/版本/维度契约，Qwen `/chat/completions` 可流式返回结构化 JSON；日志不得包含 API Key 或响应正文中的敏感内容。
+6. 在两个业务系统分别发布同名知识，完成索引并验证关键词/向量通道均只返回所选系统的 `PUBLISHED` 文档 chunk。
+7. 验证 Embedding 故障时降级为关键词，LLM 故障时返回系统错误而不创建知识不足工单。
 
 ## 5. 回滚
 
@@ -67,4 +77,5 @@ alembic downgrade d1a97d2e451b
 
 - 尚未在目标 Linux/Python 3.11 环境执行安装和发布。
 - 尚未在真实 PostgreSQL 验证迁移锁时长、查询计划和复合外键行为。
+- 尚未在可加载 pgvector 的 PostgreSQL、真实 Embedding 服务和 Qwen API 上完成 Phase 2 核心链路。
 - systemd unit、Nginx 配置、备份恢复演练和监控告警在 Phase 4 补齐。

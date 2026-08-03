@@ -84,10 +84,10 @@ conversations/tickets/documents <- analytics
 | `identity` | 双入口登录、Argon2id、首次改密、Redis Session、RBAC、SSO 边界 | `AuthService`、`AuthorizationService` | `common`, `platform` |
 | `systems` | 业务系统、负责人、可见性、启停状态 | `SystemAccessService`、系统管理用例 | `identity` |
 | `documents` | 上传、版本、解析、结构化切分、入库任务、发布/下线 | `DocumentService`、`DocumentParser` | `systems`, `platform` |
-| `knowledge` | 文档片段、工单知识、来源定位、索引版本和发布视图 | `KnowledgeIndexService`、`CitationResolver` | `documents`, `systems` |
+| `knowledge` | 文档片段、工单知识、来源定位、索引版本和发布视图 | `KnowledgeIndexService`（基础 Embedding 写回已实现）、`CitationResolver` | `documents`, `systems` |
 | `conversations` | 会话、消息、回答、引用快照、运行记录、多轮上下文 | `ConversationService`、`RunEventStream` | `identity`, `systems` |
-| `retrieval` | 查询改写、关键词/向量混合召回、Rerank、证据充分性 | `RetrievalService`、`EvidencePolicy` | `knowledge`, `conversations` |
-| `agent` | LangGraph 问答流程、意图分类、降级分流、回答与引用校验 | `QuestionWorkflow` | `retrieval`, `conversations`, Provider ports |
+| `retrieval` | 查询改写、关键词/向量混合召回、Rerank、证据充分性 | `BasicRetrievalService`、`EvidenceOrganizer` 已实现；`EvidencePolicy` 待补 | `knowledge`, `conversations` |
+| `agent` | LangGraph 问答流程、意图分类、降级分流、回答与引用校验 | `GroundedAnswerService` 基础链路已实现；`QuestionWorkflow` 待补 | `retrieval`, `conversations`, Provider ports |
 | `tickets` | 自动建单、分派、回复、追加、关闭/重开、候选知识审核回流 | `TicketService`、`KnowledgeCandidateService` | `systems`, `conversations`, `knowledge` |
 | `notifications` | Outbox 消费、模板、公司通知 API、重试和人工重试 | `NotificationDispatcher` | `tickets`, `platform` |
 | `analytics` | 高频问题、知识缺口、使用统计、离线评测和版本对比 | 查询服务与聚合任务 | `conversations`, `tickets`, `documents` |
@@ -328,7 +328,7 @@ Provider 可由内部 HTTP、自建运行时或后续公司 API 实现；领域�
 | 文档 | `document_versions` | 冗余 `system_id`、对象键、文件名、媒体类型、SHA-256、版本号、解析/发布状态；`document_id + version_no` 唯一，`document_id + system_id` 复合引用文档 |
 | 文档 | `ingestion_jobs` | 原始 nullable `requested_document_id`、阶段、状态、进度、attempt、租约、错误码、Celery task id；`actor_id + system_id + idempotency_key` 唯一 |
 | 知识 | `knowledge_sources` | 来源类型 `DOCUMENT/TICKET`、`system_id`、源版本/工单、发布状态；文档来源以 `document_version_id + system_id` 复合外键约束 |
-| 知识 | `knowledge_chunks` | `system_id`、source、文本、`SourceLocator` JSONB、结构路径、序号、token 数、模型版本和检索文本；以 `source_id + system_id` 复合外键约束；向量列在检索阶段经 DBA 扩展门禁后补充 |
+| 知识 | `knowledge_chunks` | `system_id`、source、文本、`SourceLocator` JSONB、结构路径、序号、token 数、模型版本、检索文本和 nullable 无固定维度向量；以 `source_id + system_id` 复合外键约束；固定维度/HNSW 在模型契约最终确认后补充 |
 | 会话 | `conversations` | `owner_id`、不可变 `system_id`、标题、状态、最近活动时间 |
 | 会话 | `messages` | 会话、角色、内容、状态、序号；`conversation_id + sequence` 唯一 |
 | 问答 | `question_runs` | 问题消息、状态、意图、查询改写、模型/提示词/检索配置版本、降级标记、错误分类 |
@@ -385,13 +385,15 @@ DRAFT -> SUBMITTED -> APPROVED -> PUBLISHING -> PUBLISHED
 3. Worker 通过数据库租约领取任务，选择格式专用 Parser，输出结构块和统一 `SourceLocator`；任务阶段、进度、尝试次数和可诊断错误持续入库。每次状态写入都校验租约 owner、attempt 与有效期，过期 Worker 不得覆盖新执行，该阶段已实现。
 4. Chunker 按标题、段落、页、工作表和 token 上限切分，不跨越不可追溯的结构边界，并将确定性 `chunks-v1.json` manifest 写入对象存储；完成后版本停在 `CHUNKED`，不得提前标记 `READY_DRAFT`，该阶段已实现。
 5. `knowledge_sources`/`knowledge_chunks`、独立发布状态、复合 `system_id` 外键和事务发布/退役服务已实现；所有仓储读取均要求显式系统过滤。
-6. Worker 批量调用 Embedding 服务并校验模型名、版本、维度与归一化契约；该步骤随 Phase 2 检索实现补充。
+6. `KnowledgeIndexService` 已实现批量调用 Embedding、模型名/版本/维度/归一化/数量校验和单事务向量写回；接入入库 Worker 的索引阶段仍待补充。
 7. 在暂存状态批量写入 chunks；全部成功后将版本置为 `READY_DRAFT`，失败则记录阶段和可诊断错误，不暴露半成品索引。基础写入与发布事务已实现，Embedding 编排尚未接入 Worker。
 8. 负责人发布后事务切换可检索版本。扫描 PDF 进入 `OCR_REQUIRED`，旧 `.doc/.xls` 返回明确不支持。
 
 恢复策略：Beat 定时扫描未派发、到期重试和租约过期的未终态任务，根据数据库事实重新排队；恢复时版本同步回到 `UPLOADED`，自动重试耗尽后进入 `FAILED`，人工重试重置尝试预算。Celery 状态不用于决定业务是否完成。
 
 ### 7.2 问答、引用和拒答
+
+Phase 2 第 1 项当前实现边界：`retrieval` 已提供 PostgreSQL 关键词/向量查询、数据库层系统/发布状态过滤、RRF、数据库异常降级日志和指标端口；`agent` 已提供版本化问答 Prompt、Qwen OpenAI 兼容流、证据预算、声明级结构化回答和逐字支撑校验。当前声明/引用快照只作为领域结果返回，尚未写入 `answers`/`answer_citations`；`QuestionWorkflow`、问答 API/SSE、证据充分性和工单分支仍按下述完整流程实现。
 
 1. 创建会话时固定 `system_id`；每次提问再次校验用户对该系统的访问权限。
 2. 事务持久化问题消息、`question_run` 和任务派发事实，提交后投递 Celery `qa` 队列并立即返回 run id。

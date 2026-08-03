@@ -2,10 +2,13 @@
 
 ## 1. 前置条件
 
-- Python 3.11.x
-- Node.js 24.x
-- PostgreSQL 与 Redis 测试实例
-- 数据库账号具有目标 Schema 的建表和迁移权限
+- Python 3.11.x；后端依赖以 `backend/pyproject.toml` 的 `[project]` 和 `[project.optional-dependencies.dev]` 为准。
+- Node.js 24.x；只用于前端安装、测试和构建。
+- PostgreSQL 16+ 测试实例，服务端必须能加载 `vector` 与 `pg_trgm` 扩展。
+- Redis 7 测试实例，用于 Session、Celery broker 和恢复调度。
+- 数据库迁移账号必须具有目标 Schema 建表/索引权限，以及 `CREATE EXTENSION vector`、`CREATE EXTENSION pg_trgm` 权限；若扩展由 DBA 预装，应用账号不需要扩展创建权限。
+- 一个 OpenAI 兼容的 Embedding HTTP 服务，提供 `POST /v1/embeddings`，返回 `model`、`model_version`、`dimension`、`normalized` 和 `vectors`。它可以是项目后续自托管的内网 `model-service`，不要求购买外部 API，但当前仓库尚未实现实际模型运行时。
+- Qwen OpenAI 兼容 API 的完整 Key、Base URL 和模型名；没有 Key 时可运行关键词/向量之外的单测，但不能完成真实回答生成。
 
 本地 HTTP 调试可设置 `KNOWAGENT_COOKIE_SECURE=false`；类生产和生产环境必须使用 HTTPS，并保持 `true`。
 
@@ -19,7 +22,25 @@ python -m pip install -e ".[dev]"
 Copy-Item .env.example .env
 ```
 
-将 `.env` 中的数据库、Redis 和 S3 兼容对象存储配置改为本地测试实例，再把变量加载到当前终端。应用不会自动读取 `.env`，可使用公司统一的环境加载方式或在 PowerShell 中显式设置。
+macOS/Linux 对应命令是 `cp .env.example .env`。`.env` 是隐藏文件，在 Finder 默认不可见；可在 `backend` 目录执行 `ls -la .env` 查看。本仓库已忽略该文件，禁止把真实 Key 提交到 Git。
+
+将 `.env` 中的数据库、Redis、S3、Embedding 和 LLM 配置改为本地测试值，再把变量加载到当前终端。应用不会自动读取 `.env`；可使用公司统一的环境加载方式，或在 macOS/Linux 的 `zsh` 中执行 `set -a; source .env; set +a`。兼容用户现有的 `LLM_API_BASE`、`LLM_API_KEY`、`LLM_MODEL`，项目前缀变量 `KNOWAGENT_LLM_*` 优先。
+
+Phase 2 关键变量：
+
+| 变量 | 是否必需 | 说明 |
+| --- | --- | --- |
+| `KNOWAGENT_DATABASE_URL` | 是 | 必须指向安装 `vector`/`pg_trgm` 的 PostgreSQL；SQLite 仅用于单测和迁移语法检查 |
+| `KNOWAGENT_EMBEDDING_API_BASE` | 向量链路必需 | 默认 `http://127.0.0.1:8100/v1` |
+| `KNOWAGENT_EMBEDDING_MODEL` | 向量链路必需 | 默认 `bge-m3`；响应模型名必须一致 |
+| `KNOWAGENT_EMBEDDING_TIMEOUT_SECONDS` | 否 | 默认 15 秒 |
+| `KNOWAGENT_EMBEDDING_BATCH_SIZE` | 否 | 索引批大小，默认 32 |
+| `KNOWAGENT_RETRIEVAL_*` | 否 | 关键词/向量/result top-k 与 RRF 参数 |
+| `KNOWAGENT_EVIDENCE_*` | 否 | 证据条数和字符预算 |
+| `KNOWAGENT_LLM_API_BASE` / `LLM_API_BASE` | 生成链路必需 | Qwen OpenAI 兼容 `/v1` Base URL |
+| `KNOWAGENT_LLM_API_KEY` / `LLM_API_KEY` | 生成链路必需 | 只放本地 `.env` 或密钥设施；不能使用 `sk-` 占位值 |
+| `KNOWAGENT_LLM_MODEL` / `LLM_MODEL` | 生成链路必需 | 当前测试目标为 `qwen3.6-plus` |
+| `KNOWAGENT_LLM_PROMPT_VERSION` | 生成链路必需 | 默认 `grounded-answer-v1`；必须对应随包发布且启用的 Prompt 资源 |
 
 对象存储使用 `KNOWAGENT_S3_*` 环境变量。至少配置 endpoint、bucket、region、access key 和 secret key；内部 CA 使用 `KNOWAGENT_S3_CA_BUNDLE`，不得通过关闭 TLS 校验绕过证书问题。`KNOWAGENT_S3_VERIFY_TLS` 和 `KNOWAGENT_COOKIE_SECURE` 只接受明确的 `true/false`、`yes/no`、`on/off` 或 `1/0`，拼写错误会让应用启动失败。连接/读取超时、SDK 重试次数和 multipart 阈值/分片大小均可配置，凭据只能由环境或公司密钥设施提供。
 
@@ -35,6 +56,14 @@ uvicorn knowagent.api.app:app --reload --host 127.0.0.1 --port 8000
 ```
 
 迁移 `3ba86a4c3d35` 会从 `documents.system_id` 回填已有 `document_versions.system_id`，为入库任务增加原始父文档请求指纹，再收紧版本隔离与当前发布指针复合外键，并创建 `knowledge_sources`、`knowledge_chunks`。应用迁移前需备份目标 Schema；不得跳过回填直接手工加 `NOT NULL`。
+
+迁移 `c8784d439b23` 在 PostgreSQL 上创建 `vector`、`pg_trgm` 扩展，增加 `knowledge_chunks.embedding` 和 `retrieval_text` GIN trigram 索引。可先确认扩展可用：
+
+```sql
+SELECT extname, extversion FROM pg_extension WHERE extname IN ('vector', 'pg_trgm');
+```
+
+当前向量列不固定维度，因此可以保存 Provider 返回的模型维度，但暂不创建 HNSW。模型和维度最终确认后再通过独立迁移增加固定维度/HNSW，并用类生产数据验证查询计划。
 
 健康检查：`GET http://127.0.0.1:8000/health/live`。
 

@@ -47,6 +47,9 @@ dev = [
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"knowagent.agent.prompts" = ["*.json"]
+
 [tool.black]
 line-length = 100
 target-version = ["py311"]

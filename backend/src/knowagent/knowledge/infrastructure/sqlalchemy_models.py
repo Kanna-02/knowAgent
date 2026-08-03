@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID, uuid4
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     JSON,
     CheckConstraint,
@@ -29,6 +30,7 @@ from knowagent.knowledge.domain.models import KnowledgeSourceType
 del document_models
 
 JSON_VALUE = JSON().with_variant(JSONB(), "postgresql")
+EMBEDDING_VALUE = JSON().with_variant(Vector(), "postgresql")
 
 # SQLAlchemy's dynamic func namespace and declarative records trigger false positives.
 # pylint: disable=not-callable,too-few-public-methods
@@ -116,6 +118,12 @@ class KnowledgeChunkRecord(Base):
             "publish_status",
             "source_id",
         ),
+        Index(
+            "ix_knowledge_chunks_retrieval_trgm",
+            "retrieval_text",
+            postgresql_using="gin",
+            postgresql_ops={"retrieval_text": "gin_trgm_ops"},
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
@@ -129,6 +137,7 @@ class KnowledgeChunkRecord(Base):
     retrieval_text: Mapped[str] = mapped_column(Text, nullable=False)
     embedding_model: Mapped[str | None] = mapped_column(String(255))
     embedding_model_version: Mapped[str | None] = mapped_column(String(255))
+    embedding: Mapped[list[float] | None] = mapped_column(EMBEDDING_VALUE)
     publish_status: Mapped[PublicationStatus] = mapped_column(
         Enum(
             PublicationStatus,

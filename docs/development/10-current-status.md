@@ -15,10 +15,10 @@
 ## 2. 当前阶段
 
 ```text
-当前阶段：Phase 1 集成验收有条件通过，等待真实 S3 补验后关闭
-阶段目标：认证、系统管理、双端基础界面和四类文档可恢复入库
-当前任务：Phase 1 双系统、四格式和真实基础设施集成验收
-任务状态：真实 PostgreSQL/Redis 双系统、v2、零泄漏和任务恢复验收已通过；真实 S3 与四格式完整持久化链路待补
+当前阶段：Phase 2 问答与工单闭环（Phase 1 真实 S3 补验并行待办）
+阶段目标：系统隔离检索、带引用回答、可靠拒答、内置工单和审核回流
+当前任务：Phase 2 第 1/4 项，关键词/向量基础召回、证据组织、回答生成与来源引用
+任务状态：基础代码与自动化验证完成；真实 pgvector、Embedding、Qwen 集成及问答 API/持久化待补
 ```
 
 ## 3. 已完成
@@ -59,27 +59,34 @@
 34. 已通过复合外键将文档、版本、来源和片段的 `system_id` 串成数据库隔离链，并为系统+发布状态查询建立索引；REQ-002/REQ-011 追溯状态已推进为 `implementing`。
 35. 已完成版本/发布 review 修复：幂等请求保存原始父文档 ID并使用任务上传者校验；当前发布指针同时约束文档和系统；发布/退役统一锁序；对象上传不再长期持有版本分配行锁。
 36. 已完成 Phase 1 PostgreSQL/Redis 集成预验收：Python 3.11.11 下 129 项测试通过，PostgreSQL 16 迁移/Schema 一致性、真实 Redis Session、双系统越权拒绝、Markdown 入库、v2 发布切换、跨系统零泄漏及租约恢复派发均通过。
+37. 已实现 PostgreSQL `pg_trgm` 关键词召回、pgvector 余弦召回和 RRF 融合；两个查询均在排序前强制限定 `system_id`、`PUBLISHED` 和文档来源，Embedding 故障时只降级到关键词。
+38. 已实现批量 Embedding 索引与原子写回，模型名、版本、维度、归一化、数量、超时和批大小均有契约或配置校验；新增 `vector`/`pg_trgm` 迁移和 trigram 索引。
+39. 已实现证据条数/字符预算、稳定证据编号、Qwen OpenAI 兼容 SSE 生成、结构化回答解析和引用白名单/逐字验证，引用结果携带不可变来源与 locator 快照。
+40. 已完成 Phase 2 第 1 项 review 修复：数据库向量异常可观测降级、版本化 Prompt、成功流终止校验、声明级引用支撑、批量向量写回和超预算证据跳过均有回归测试。
 
 ## 4. 正在进行
 
-1. Phase 1 功能范围 6/6 已实现且 PostgreSQL/Redis 预验收通过；等待真实 S3 与四格式完整持久化链路补验后关闭阶段。
-2. 等待 DBA 验证 `pgvector` 与 `pg_trgm` 扩展。
-3. 等待目标 Linux 服务器资源信息以确定模型推理后端、量化方式和 Python 传递依赖锁。
+1. Phase 2 功能范围 1/4 的基础代码已完成；正在等待真实服务条件以完成该项集成验收。
+2. Phase 1 功能范围 6/6 已实现且 PostgreSQL/Redis 预验收通过；真实 S3 与四格式完整持久化链路仍是并行补验项。
+3. 等待可加载 `vector` 的 PostgreSQL、真实 Embedding 服务和完整 Qwen Key。
+4. 等待目标 Linux 服务器资源信息以确定 Embedding/Rerank 推理后端、量化方式和 Python 传递依赖锁。
 
 ## 5. 未完成 / 下一步
 
 1. 提供隔离 S3 endpoint/Bucket 后，补跑四种格式的 S3→PostgreSQL→Worker 完整链路和页面手测；仅需复验对象存储相关集成点。
-2. 由 DBA 确认 PostgreSQL 版本及 `pgvector`、`pg_trgm` 扩展后进入 Phase 2 检索实现。
-3. 在类生产 Linux 环境验证 Python 3.11 完整安装、迁移锁时长、模型运行和发布回滚。
-4. Phase 2 接入 Embedding、基础关键词/向量召回后完成 AC-002/AC-003 的端到端验收。
+2. 在支持 `vector`/`pg_trgm` 的 PostgreSQL 执行 `c8784d439b23`，启动真实 `/v1/embeddings` 服务并配置完整 Qwen Key，跑通索引、双通道检索、生成和引用集成样例。
+3. 实现 Phase 2 第 2/4 项：证据充分性决策、可靠拒答、原因留痕和自动创建/合并内置工单。
+4. 接入问答 API/SSE、会话/答案/引用持久化和索引 Worker 阶段，完成 AC-004 的端到端验收。
+5. 在类生产 Linux 环境验证 Python 3.11 完整安装、迁移锁时长、模型运行和发布回滚。
 
 ## 6. 阻塞点
 
 | 问题 | 影响 | 需要谁处理 | 当前状态 |
 | --- | --- | --- | --- |
-| PostgreSQL 是否允许安装 `vector`、`pg_trgm` | 影响 TD-002 实施 | DBA | 待验证 |
+| 当前 PostgreSQL 16 无可加载的 `vector` 扩展 | 阻塞真实向量列迁移和 pgvector 查询；代码与 SQLite 迁移测试不受影响 | 用户/DBA | 本机 Homebrew pgvector 仅含 PG17/18 构件，待提供兼容实例 |
 | 模型服务器 CPU/内存/GPU 信息未知 | 影响 Embedding/Rerank 运行时和量化 | 运维/用户 | 待提供 |
-| 公司 LLM、通知协议及真实对象存储端点契约待验证 | 影响 provider 实现和 S3 兼容性证明 | 用户/第三方 | 待提供/验证 |
+| Qwen 完整 API Key 与真实 Embedding 服务未配置 | 阻塞真实生成和向量生成联调 | 用户/运维 | Qwen base/model 已知；Key 与 Embedding endpoint 待提供/启动 |
+| 公司通知协议及真实对象存储端点契约待验证 | 影响后续通知 provider 和 S3 兼容性证明 | 用户/第三方 | 待提供/验证 |
 | 本机无 S3 兼容服务或测试 Bucket | 阻塞 Phase 1 真实对象存储与四格式完整链路关闭门禁 | 用户/运维 | 待提供隔离 endpoint、Bucket 和凭据 |
 
 ## 7. 最近改动文件
@@ -134,6 +141,11 @@
 | `backend/tests/unit/test_knowledge_publication.py`、相关入库/API 测试 | 发布切换、统一锁序、幂等重放、操作类型、文档更新时间和复合约束回归 | 已完成 |
 | `backend/pyproject.toml`、`.gitignore` | 保留实质重复检测并过滤声明式短映射噪音；忽略本地 Alembic/Pylint 产物 | 已完成 |
 | `docs/operations/08-deployment.md` | 非 Docker 发布、迁移、验证与回滚基线 | 已完成（真实部署待 Phase 4） |
+| `backend/src/knowagent/retrieval/` | Embedding Provider、关键词/向量检索、RRF、证据组织、可观测降级与指标端口 | 基础代码与 review 修复已完成；真实服务待验收 |
+| `backend/src/knowagent/agent/` | 版本化 Prompt、Qwen 兼容流式生成、声明级回答和引用验证 | 基础代码与 review 修复已完成；API/持久化待后续 |
+| `backend/src/knowagent/knowledge/application/indexing.py` | 批量 Embedding、模型契约校验与原子向量写回 | 基础代码已完成；Worker 接线待后续 |
+| `backend/migrations/versions/c8784d439b23_add_phase2_vector_and_lexical_retrieval.py` | `vector`/`pg_trgm`、向量列和 trigram 索引 | SQLite 往返通过；真实 pgvector 待验收 |
+| `backend/tests/unit/test_*retrieval.py`、`test_*embedding*.py`、`test_evidence_organizer.py`、`test_answer_generation.py`、`test_grounded_answer.py`、`test_knowledge_indexing.py` | Phase 2 第 1 项正常、边界、异常与隔离回归 | 已完成 |
 
 ## 8. 已运行验证
 
@@ -178,6 +190,10 @@
 | Phase 1 PostgreSQL 16 迁移 | 通过 | 隔离数据库 `upgrade head` 与 `alembic check` 通过，无 ORM/Schema 差异 |
 | Phase 1 PostgreSQL/Redis 核心链路 | 通过 | 双系统授权、未授权上传 403、幂等、Markdown 入库、v2 发布切换、B 系统 0 发布 chunk、Redis Session 和 1 个过期任务恢复派发通过 |
 | Phase 1 S3/四格式完整链路 | 跳过 | 本机没有 S3 兼容服务或测试 Bucket；详见集成验收报告 |
+| Phase 2 第 1 项后端全量测试 | 通过 | review 修复后 167 项测试通过，总覆盖率 91.06%；45 项相关测试覆盖召回、数据库异常降级/指标、索引、证据预算、Prompt、流终止、声明支撑和引用异常 |
+| Phase 2 第 1 项静态检查 | 通过 | 相关 27 个源文件 mypy strict 零错误；本次 36 个 Python 文件 Black/isort 清洁；Pylint 10.00/10；全仓 Bandit 中高危 0 |
+| Phase 2 第 1 项 Alembic | 通过（SQLite） | `upgrade head -> downgrade 3ba86a4c3d35 -> upgrade head` 和 `alembic check` 通过；真实 PostgreSQL 因 `vector` 扩展不兼容未运行 |
+| pgvector/Embedding/Qwen 真实链路 | 未运行 | 缺少可加载 `vector` 的 PostgreSQL、运行中的 Embedding 服务和完整 Qwen Key，不宣称外部集成成功 |
 
 ## 9. 未运行验证与风险
 
@@ -189,14 +205,15 @@
 6. 四类解析器已接入 S3/PostgreSQL/Celery 端口和持久任务；PostgreSQL/Redis/Markdown 核心链路已在真实服务验证，但 S3 签名、TLS、Bucket 权限、multipart、对象补偿及四格式完整组合仍待隔离 S3 环境。扫描 PDF 仅返回 `OCR_REQUIRED`，首版不执行 OCR。
 7. 本轮使用现有 Python 3.11.11 环境并在 `/tmp` 补充四个锁定依赖；FastAPI、Redis client、pytest/pytest-cov 小版本低于项目锁定版本，结果不替代目标 Linux 按完整锁定依赖安装的发布证明。
 8. 新迁移已在真实 PostgreSQL 16.14 完成 `upgrade head` 和 `alembic check`，JSONB 与复合外键成功落库；迁移锁时长、已有生产量级回填和查询计划仍待类生产数据验证。
-9. 本轮只实现知识隔离与发布基础模型，未接入 Embedding、向量列、Worker 索引阶段或实际检索；`READY_DRAFT` 片段写入端口供 Phase 2 调用。
+9. Phase 2 第 1 项基础代码已实现，但真实 PostgreSQL `vector` 扩展、Embedding 和 Qwen 尚未联调；HNSW 在模型维度最终确认前不创建。问答 API/SSE、答案引用持久化、Worker 索引接线、证据充分性和工单闭环仍未实现。
 
 ## 10. 继续开发建议
 
 新对话或新开发者接手时，建议下一步：
 
-1. 先阅读 TD-002、TD-005、TD-007、知识发布事务和 `3ba86a4c3d35` 迁移。
-2. 按 `docs/development/20-phase1-integration-acceptance.md` 仅补跑 S3/四格式完整链路；通过后关闭 Phase 1 并进入 Phase 2。
+1. 先阅读 TD-002、TD-003、TD-009、`retrieval`/`agent` 模块和 `c8784d439b23` 迁移。
+2. 环境可用时先完成 pgvector + Embedding + Qwen 的单条真实问答集成验收；随后实现证据充分性、拒答和内置工单。
+3. Phase 1 的真实 S3/四格式补验独立按 `docs/development/20-phase1-integration-acceptance.md` 执行，不阻塞 Phase 2 代码开发。
 
 ## 11. 接手时必须先读
 

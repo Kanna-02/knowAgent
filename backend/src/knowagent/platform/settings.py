@@ -175,6 +175,88 @@ class IngestionSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class LlmSettings:
+    base_url: str = ""
+    api_key: str = field(default="", repr=False)
+    model: str = ""
+    prompt_version: str = "grounded-answer-v1"
+    timeout_seconds: int = 60
+
+    def __post_init__(self) -> None:
+        if self.timeout_seconds <= 0:
+            raise ValueError("LLM timeout must be positive")
+        if not self.prompt_version.strip():
+            raise ValueError("LLM prompt version must not be blank")
+
+    @property
+    def configured(self) -> bool:
+        return all((self.base_url, self.api_key, self.model))
+
+    @classmethod
+    def from_environment(cls) -> LlmSettings:
+        return cls(
+            base_url=_preferred_environment("KNOWAGENT_LLM_API_BASE", "LLM_API_BASE"),
+            api_key=_preferred_environment("KNOWAGENT_LLM_API_KEY", "LLM_API_KEY"),
+            model=_preferred_environment("KNOWAGENT_LLM_MODEL", "LLM_MODEL"),
+            prompt_version=os.getenv("KNOWAGENT_LLM_PROMPT_VERSION", "grounded-answer-v1").strip(),
+            timeout_seconds=int(os.getenv("KNOWAGENT_LLM_TIMEOUT_SECONDS", "60")),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class RetrievalSettings:  # pylint: disable=too-many-instance-attributes
+    embedding_base_url: str = "http://127.0.0.1:8100/v1"
+    embedding_model: str = "bge-m3"
+    embedding_timeout_seconds: int = 15
+    embedding_batch_size: int = 32
+    keyword_top_k: int = 20
+    vector_top_k: int = 20
+    result_top_k: int = 10
+    rrf_k: int = 60
+    evidence_max_items: int = 6
+    evidence_max_characters: int = 12_000
+
+    def __post_init__(self) -> None:
+        values = (
+            self.embedding_timeout_seconds,
+            self.embedding_batch_size,
+            self.keyword_top_k,
+            self.vector_top_k,
+            self.result_top_k,
+            self.rrf_k,
+            self.evidence_max_items,
+            self.evidence_max_characters,
+        )
+        if any(value <= 0 for value in values):
+            raise ValueError("retrieval settings must be positive")
+        if self.result_top_k > self.keyword_top_k + self.vector_top_k:
+            raise ValueError("result_top_k exceeds the available retrieval candidates")
+        if not self.embedding_base_url.strip() or not self.embedding_model.strip():
+            raise ValueError("embedding provider settings must not be blank")
+
+    @classmethod
+    def from_environment(cls) -> RetrievalSettings:
+        return cls(
+            embedding_base_url=os.getenv(
+                "KNOWAGENT_EMBEDDING_API_BASE", "http://127.0.0.1:8100/v1"
+            ).strip(),
+            embedding_model=os.getenv("KNOWAGENT_EMBEDDING_MODEL", "bge-m3").strip(),
+            embedding_timeout_seconds=int(os.getenv("KNOWAGENT_EMBEDDING_TIMEOUT_SECONDS", "15")),
+            embedding_batch_size=int(os.getenv("KNOWAGENT_EMBEDDING_BATCH_SIZE", "32")),
+            keyword_top_k=int(os.getenv("KNOWAGENT_RETRIEVAL_KEYWORD_TOP_K", "20")),
+            vector_top_k=int(os.getenv("KNOWAGENT_RETRIEVAL_VECTOR_TOP_K", "20")),
+            result_top_k=int(os.getenv("KNOWAGENT_RETRIEVAL_RESULT_TOP_K", "10")),
+            rrf_k=int(os.getenv("KNOWAGENT_RETRIEVAL_RRF_K", "60")),
+            evidence_max_items=int(os.getenv("KNOWAGENT_EVIDENCE_MAX_ITEMS", "6")),
+            evidence_max_characters=int(os.getenv("KNOWAGENT_EVIDENCE_MAX_CHARACTERS", "12000")),
+        )
+
+
+def _preferred_environment(primary: str, compatible: str) -> str:
+    return os.getenv(primary, os.getenv(compatible, "")).strip()
+
+
+@dataclass(frozen=True, slots=True)
 class Settings:  # pylint: disable=too-many-instance-attributes
     database_url: str
     redis_url: str
@@ -190,6 +272,8 @@ class Settings:  # pylint: disable=too-many-instance-attributes
     )
     object_storage: ObjectStorageSettings = field(default_factory=ObjectStorageSettings)
     ingestion: IngestionSettings = field(default_factory=IngestionSettings)
+    llm: LlmSettings = field(default_factory=LlmSettings)
+    retrieval: RetrievalSettings = field(default_factory=RetrievalSettings)
 
     @classmethod
     def from_environment(cls) -> Settings:
@@ -212,4 +296,6 @@ class Settings:  # pylint: disable=too-many-instance-attributes
             document_processing=DocumentProcessingSettings.from_environment(),
             object_storage=ObjectStorageSettings.from_environment(),
             ingestion=IngestionSettings.from_environment(),
+            llm=LlmSettings.from_environment(),
+            retrieval=RetrievalSettings.from_environment(),
         )

@@ -63,3 +63,13 @@ class DependencyUnavailableError(KnowAgentError):
             status_code=503,
             details={"dependency": dependency},
         )
+
+
+class ProviderUnavailableError(KnowAgentError):
+    def __init__(self, provider: str) -> None:
+        super().__init__(
+            "PROVIDER_UNAVAILABLE",
+            "模型服务暂时不可用，请稍后重试",
+            status_code=503,
+            details={"provider": provider},
+        )

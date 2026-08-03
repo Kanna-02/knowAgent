@@ -8,7 +8,9 @@ from knowagent.documents.infrastructure.parsers import ParserLimits
 from knowagent.platform.settings import (
     DocumentProcessingSettings,
     IngestionSettings,
+    LlmSettings,
     ObjectStorageSettings,
+    RetrievalSettings,
     Settings,
 )
 from knowagent.worker.celery_app import build_celery_app
@@ -121,3 +123,36 @@ def test_api_dispatcher_uses_the_resolved_application_broker() -> None:
 
     assert application.state.ingestion_dispatcher.broker_url == settings.redis_url
     application.state.engine.dispose()
+
+
+def test_llm_and_retrieval_settings_load_user_compatible_environment_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+    monkeypatch.setenv("LLM_API_KEY", "local-secret")
+    monkeypatch.setenv("LLM_MODEL", "qwen3.6-plus")
+    monkeypatch.setenv("KNOWAGENT_LLM_PROMPT_VERSION", "grounded-answer-v1")
+    monkeypatch.setenv("KNOWAGENT_EMBEDDING_API_BASE", "http://model-service:8100/v1")
+    monkeypatch.setenv("KNOWAGENT_EMBEDDING_MODEL", "bge-m3")
+    monkeypatch.setenv("KNOWAGENT_EMBEDDING_BATCH_SIZE", "16")
+    monkeypatch.setenv("KNOWAGENT_RETRIEVAL_RESULT_TOP_K", "6")
+
+    settings = Settings.from_environment()
+
+    assert settings.llm.base_url.endswith("/v1")
+    assert settings.llm.model == "qwen3.6-plus"
+    assert settings.llm.prompt_version == "grounded-answer-v1"
+    assert settings.llm.configured is True
+    assert settings.retrieval.embedding_base_url == "http://model-service:8100/v1"
+    assert settings.retrieval.embedding_batch_size == 16
+    assert settings.retrieval.result_top_k == 6
+    assert "local-secret" not in repr(settings.llm)
+
+
+def test_llm_and_retrieval_settings_reject_invalid_boundaries() -> None:
+    with pytest.raises(ValueError, match="LLM timeout"):
+        LlmSettings(timeout_seconds=0)
+    with pytest.raises(ValueError, match="retrieval"):
+        RetrievalSettings(result_top_k=0)
+    with pytest.raises(ValueError, match="result_top_k"):
+        RetrievalSettings(keyword_top_k=2, vector_top_k=2, result_top_k=5)
