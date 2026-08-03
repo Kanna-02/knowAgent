@@ -5,20 +5,20 @@
 ## 1. 快照时间
 
 ```text
-更新时间：2026-08-02
+更新时间：2026-08-03
 更新人/助手：Codex
 当前分支：master
 远程仓库：git@github.com:Kanna-02/knowAgent.git
-当前环境：目标 Python 3.11；本轮测试使用内置 Python 3.12.13；Node.js 24.16.0
+当前环境：Python 3.11.11；PostgreSQL 16.14；Redis 7；Node.js 24.16.0
 ```
 
 ## 2. 当前阶段
 
 ```text
-当前阶段：Phase 1 功能完成（6/6），待集成验收
+当前阶段：Phase 1 集成验收有条件通过，等待真实 S3 补验后关闭
 阶段目标：认证、系统管理、双端基础界面和四类文档可恢复入库
 当前任务：Phase 1 双系统、四格式和真实基础设施集成验收
-任务状态：文档多版本、发布状态、知识来源/片段及复合 `system_id` 强隔离基础模型已完成；真实 PostgreSQL/Redis/S3 验收未执行
+任务状态：真实 PostgreSQL/Redis 双系统、v2、零泄漏和任务恢复验收已通过；真实 S3 与四格式完整持久化链路待补
 ```
 
 ## 3. 已完成
@@ -58,16 +58,17 @@
 33. 已实现发布/退役事务：新版本发布会原子切换当前指针并退役旧版本、来源和片段；发布查询只返回指定 `system_id` 下的 `PUBLISHED` 片段。
 34. 已通过复合外键将文档、版本、来源和片段的 `system_id` 串成数据库隔离链，并为系统+发布状态查询建立索引；REQ-002/REQ-011 追溯状态已推进为 `implementing`。
 35. 已完成版本/发布 review 修复：幂等请求保存原始父文档 ID并使用任务上传者校验；当前发布指针同时约束文档和系统；发布/退役统一锁序；对象上传不再长期持有版本分配行锁。
+36. 已完成 Phase 1 PostgreSQL/Redis 集成预验收：Python 3.11.11 下 129 项测试通过，PostgreSQL 16 迁移/Schema 一致性、真实 Redis Session、双系统越权拒绝、Markdown 入库、v2 发布切换、跨系统零泄漏及租约恢复派发均通过。
 
 ## 4. 正在进行
 
-1. Phase 1 功能范围 6/6 已实现，等待真实 PostgreSQL/Redis/S3 双系统集成验收后关闭阶段。
+1. Phase 1 功能范围 6/6 已实现且 PostgreSQL/Redis 预验收通过；等待真实 S3 与四格式完整持久化链路补验后关闭阶段。
 2. 等待 DBA 验证 `pgvector` 与 `pg_trgm` 扩展。
 3. 等待目标 Linux 服务器资源信息以确定模型推理后端、量化方式和 Python 传递依赖锁。
 
 ## 5. 未完成 / 下一步
 
-1. 使用 `integration-test` 在隔离 PostgreSQL Schema、Redis namespace 和 S3 Bucket 验证两个系统、四种格式、v2 发布切换、跨系统零泄漏和任务重启恢复。
+1. 提供隔离 S3 endpoint/Bucket 后，补跑四种格式的 S3→PostgreSQL→Worker 完整链路和页面手测；仅需复验对象存储相关集成点。
 2. 由 DBA 确认 PostgreSQL 版本及 `pgvector`、`pg_trgm` 扩展后进入 Phase 2 检索实现。
 3. 在类生产 Linux 环境验证 Python 3.11 完整安装、迁移锁时长、模型运行和发布回滚。
 4. Phase 2 接入 Embedding、基础关键词/向量召回后完成 AC-002/AC-003 的端到端验收。
@@ -79,7 +80,7 @@
 | PostgreSQL 是否允许安装 `vector`、`pg_trgm` | 影响 TD-002 实施 | DBA | 待验证 |
 | 模型服务器 CPU/内存/GPU 信息未知 | 影响 Embedding/Rerank 运行时和量化 | 运维/用户 | 待提供 |
 | 公司 LLM、通知协议及真实对象存储端点契约待验证 | 影响 provider 实现和 S3 兼容性证明 | 用户/第三方 | 待提供/验证 |
-| 本机无 Python 3.11、未连接 PostgreSQL/Redis/S3 测试实例 | 影响目标运行时和真实基础设施验证 | 开发/DBA | 待在集成环境验证 |
+| 本机无 S3 兼容服务或测试 Bucket | 阻塞 Phase 1 真实对象存储与四格式完整链路关闭门禁 | 用户/运维 | 待提供隔离 endpoint、Bucket 和凭据 |
 
 ## 7. 最近改动文件
 
@@ -94,6 +95,7 @@
 | `docs/README.md` | 修正需求和技术选型状态及下一步门禁 | 已完成 |
 | `docs/development/16-retrospective.md` | 将来源项目认证迁移结论同步到 TD-006 | 已完成 |
 | `docs/development/03-feature-changelog.md` | 记录架构确认和 Python 3.11 调整 | 已完成 |
+| `docs/development/20-phase1-integration-acceptance.md` | 记录 Phase 1 PostgreSQL/Redis 验收证据、跳过项和 S3 复验计划 | 已完成 |
 | `docs/engineering/11-project-structure.md` | 完整架构方案通过确认 | 已完成 |
 | `backend/pyproject.toml` | Python 3.11 后端依赖和质量工具配置 | 已完成 |
 | `model-service/pyproject.toml` | Python 3.11 模型服务边界和质量工具配置 | 已完成；模型运行时待硬件门禁 |
@@ -172,6 +174,10 @@
 | Phase 1 版本/发布/隔离全量测试 | 通过 | review 修复后端 129 项测试通过，总覆盖率 91.54%；覆盖跨上传者幂等、创建/追加操作切换、对象写入与版本锁顺序、请求指纹持久化及当前指针复合约束 |
 | Phase 1 版本/发布/隔离静态检查 | 通过 | 本次 39 个 Python 文件 Black/isort 清洁；相关 32 个源文件 mypy strict 零错误；Pylint 10.00/10；Bandit 中高危 0 |
 | Phase 1 版本/发布/隔离 Alembic | 通过 | 全新隔离 SQLite 空库完成 `upgrade head -> downgrade d1a97d2e451b -> upgrade head` 往返，`alembic check` 确认 ORM/迁移无差异 |
+| Phase 1 Python 3.11 全量测试 | 通过 | 129 项测试通过，总覆盖率 91.54%；四类运行时生成样本及边界/异常回归通过 |
+| Phase 1 PostgreSQL 16 迁移 | 通过 | 隔离数据库 `upgrade head` 与 `alembic check` 通过，无 ORM/Schema 差异 |
+| Phase 1 PostgreSQL/Redis 核心链路 | 通过 | 双系统授权、未授权上传 403、幂等、Markdown 入库、v2 发布切换、B 系统 0 发布 chunk、Redis Session 和 1 个过期任务恢复派发通过 |
+| Phase 1 S3/四格式完整链路 | 跳过 | 本机没有 S3 兼容服务或测试 Bucket；详见集成验收报告 |
 
 ## 9. 未运行验证与风险
 
@@ -179,21 +185,18 @@
 2. 默认密码批量导入仍有共享密码泄露风险；实现已强制摘要、首次改密、限流、会话撤销和审计，凭据分发流程仍需组织侧控制。
 3. 核心、解析器和质量工具直接版本已固定；Python 传递依赖锁仍需在目标 Linux/Python 3.11 环境生成。
 4. 模型运行时和目标 Linux 完整安装尚未验证；本轮前端生产构建已通过。
-5. 本轮曾按 Python 3.12 跨版本 dry-run；因本机 pip 对本地项目跨版本校验受限，且 PyMuPDF wheel 下载速度约 47 KB/s，用户已终止并明确改用 Python 3.11。
-6. Python 3.11 本地无依赖 metadata dry-run 因当前环境缺少 `wheel` 的 `bdist_wheel` 命令未完成；配置约束已单独验证，未为此安装全局构建工具。
-7. `npm audit` 的公告接口访问审批同样返回 503；`npm ci` 报告现有锁文件有 2 个 high 漏洞，未在未评估 breaking change 的情况下执行自动升级。
-8. 本轮 `npm audit` 沙箱内无法访问公告接口；外部执行因会向公共 npm 服务发送依赖元数据而被安全策略拒绝，未取得最新公告结果。
-9. 四类解析器已接入 S3/PostgreSQL/Celery 端口和持久任务，但尚未连接公司真实 PostgreSQL、Redis、S3 兼容端点或 ESB 文档；当前证明来自单元/SQLite 集成验证，不替代隔离基础设施核心链路测试。扫描 PDF 仅返回 `OCR_REQUIRED`，首版不执行 OCR。
-10. 本轮依赖和测试仍运行于内置 Python 3.12.13；`py -0p` 确认本机没有已安装 Python，无法执行目标 Python 3.11/Linux 验证。全仓 mypy 既有错误本轮未复查；本次 `documents`/`knowledge` 等 32 个相关源文件 strict 检查零错误。
-11. 新迁移尚未在真实 PostgreSQL 上验证锁时长、回填计划、JSONB 和复合外键行为；当前证据来自隔离 SQLite 迁移与 SQLAlchemy 测试。
-12. 本轮只实现知识隔离与发布基础模型，未接入 Embedding、向量列、Worker 索引阶段或实际检索；`READY_DRAFT` 片段写入端口供 Phase 2 调用。
+5. `npm audit` 的公告接口访问审批返回 503；`npm ci` 曾报告现有锁文件有 2 个 high 漏洞，未在未评估 breaking change 的情况下执行自动升级。
+6. 四类解析器已接入 S3/PostgreSQL/Celery 端口和持久任务；PostgreSQL/Redis/Markdown 核心链路已在真实服务验证，但 S3 签名、TLS、Bucket 权限、multipart、对象补偿及四格式完整组合仍待隔离 S3 环境。扫描 PDF 仅返回 `OCR_REQUIRED`，首版不执行 OCR。
+7. 本轮使用现有 Python 3.11.11 环境并在 `/tmp` 补充四个锁定依赖；FastAPI、Redis client、pytest/pytest-cov 小版本低于项目锁定版本，结果不替代目标 Linux 按完整锁定依赖安装的发布证明。
+8. 新迁移已在真实 PostgreSQL 16.14 完成 `upgrade head` 和 `alembic check`，JSONB 与复合外键成功落库；迁移锁时长、已有生产量级回填和查询计划仍待类生产数据验证。
+9. 本轮只实现知识隔离与发布基础模型，未接入 Embedding、向量列、Worker 索引阶段或实际检索；`READY_DRAFT` 片段写入端口供 Phase 2 调用。
 
 ## 10. 继续开发建议
 
 新对话或新开发者接手时，建议下一步：
 
 1. 先阅读 TD-002、TD-005、TD-007、知识发布事务和 `3ba86a4c3d35` 迁移。
-2. 使用 `integration-test` 完成 Phase 1 双系统/四格式/真实基础设施验收；验收通过后关闭 Phase 1 并进入 Phase 2。
+2. 按 `docs/development/20-phase1-integration-acceptance.md` 仅补跑 S3/四格式完整链路；通过后关闭 Phase 1 并进入 Phase 2。
 
 ## 11. 接手时必须先读
 

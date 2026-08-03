@@ -17,6 +17,18 @@
 
 ## 功能变更记录
 
+### 2026-08-03 - Phase 1 集成验收有条件通过
+
+类型：集成验收 / 质量门禁
+
+相关需求：REQ-001、REQ-002、REQ-003、REQ-004、REQ-011；AC-001、AC-002、AC-003、AC-009 的 Phase 1 范围。
+
+变更说明：在隔离 PostgreSQL 16.14 数据库和 Redis 7 DB/namespace 上验证双系统授权、上传越权拒绝、真实 Session、幂等重放、Markdown 持久入库、v2 发布切换、跨系统知识零泄漏、租约过期恢复和 Celery broker 派发；未修改功能代码。
+
+验证方式：目标 Python 3.11.11 下后端 129 项测试全部通过、总覆盖率 91.54%；PostgreSQL `upgrade head` 和 `alembic check` 通过；真实 PG/Redis 验收脚本返回两个系统、v1/v2、B 系统 0 个发布 chunk、1 个恢复任务已派发和 6 个隔离 Redis Session key。
+
+后续注意：本机无 S3 兼容服务或测试 Bucket，真实 S3 `put/get/delete`、四格式 S3→PG→Worker 全链路和真实后端页面手测被跳过，因此 Phase 1 为有条件通过，暂不正式关闭。详见 `docs/development/20-phase1-integration-acceptance.md`。
+
 ### 2026-08-02 - 完成 Phase 1 文档版本、发布状态与知识强隔离基础模型
 
 类型：新功能
