@@ -17,8 +17,8 @@
 ```text
 当前阶段：Phase 2 问答与工单闭环（Phase 1 真实 S3 补验并行待办）
 阶段目标：系统隔离检索、带引用回答、可靠拒答、内置工单和审核回流
-当前任务：Phase 2 第 2/4 项，证据充分性决策、可靠拒答、原因留痕和自动创建/合并内置工单
-任务状态：前两项基础代码与自动化验证完成；第 2 项迁移往返、真实 pgvector/Qwen 组合集成及问答 API/SSE 待补
+当前任务：Phase 2 第 3/4 项，工单分派/处理/追加/关闭/重开/审核入库（基础代码完成，待补工单 API 路由、检索纳入 TICKET 来源与端到端验收）
+任务状态：前三项基础代码与自动化验证完成；第 2 项迁移往返、真实 pgvector/Qwen 组合集成、问答 API/SSE、工单 API 路由、检索层纳入 TICKET 来源与第 4 项待补
 ```
 
 ## 3. 已完成
@@ -71,7 +71,7 @@
 
 ## 4. 正在进行
 
-1. Phase 2 功能范围 2/4 的基础代码已完成；第 2 项单测和静态检查已通过，新迁移往返及真实服务集成验收待补。
+1. Phase 2 功能范围 3/4 的基础代码已完成；第 2 项新迁移往返、问答 API/SSE、答案引用持久化、Worker 索引接线、检索层纳入 TICKET 来源、工单 API 路由与第 4 项仍待补；第 3 项工单工作流与审核入库单测和静态检查已通过。
 2. Phase 1 功能范围 6/6 已实现且 PostgreSQL/Redis 预验收通过；真实 S3 与四格式完整持久化链路仍是并行补验项。
 3. 本地 Ollama Embedding 适配已就绪；等待可加载 `vector` 的 PostgreSQL 和完整 Qwen Key 完成组合联调。
 4. 等待目标 Linux 服务器资源信息以最终确定 Embedding/Rerank 推理后端、量化方式和 Python 传递依赖锁；本地 Ollama 方案不自动等同生产选型。
@@ -81,7 +81,7 @@
 1. 提供隔离 S3 endpoint/Bucket 后，补跑四种格式的 S3→PostgreSQL→Worker 完整链路和页面手测；仅需复验对象存储相关集成点。
 2. 在支持 `vector`/`pg_trgm` 的 PostgreSQL 执行 `c8784d439b23`，启动真实 `/v1/embeddings` 服务并配置完整 Qwen Key，跑通索引、双通道检索、生成和引用集成样例。
 3. 在隔离数据库补跑 `cc99b700f739` 的升级/降级/升级往返与 `alembic check`，再接入问答 API/SSE 和会话/答案/引用持久化。
-4. 实现 Phase 2 第 3/4 项：按系统分派、处理、追加、关闭、重开和审核入库。
+4. 实现 Phase 2 第 3/4 项：按系统分派、处理、追加、关闭、重开和审核入库。（基础代码与 24 项单测已完成，待补工单 API 路由、检索层纳入 TICKET 来源与真实链路验收）
 5. 接入索引 Worker 阶段并完成 AC-004 至 AC-007 的端到端验收；随后在类生产 Linux 环境验证迁移锁时长、模型运行和发布回滚。
 
 ## 6. 阻塞点
@@ -220,7 +220,7 @@
 6. 四类解析器已接入 S3/PostgreSQL/Celery 端口和持久任务；PostgreSQL/Redis/Markdown 核心链路已在真实服务验证，但 S3 签名、TLS、Bucket 权限、multipart、对象补偿及四格式完整组合仍待隔离 S3 环境。扫描 PDF 仅返回 `OCR_REQUIRED`，首版不执行 OCR。
 7. 本轮使用现有 Python 3.11.11 环境并在 `/tmp` 补充四个锁定依赖；FastAPI、Redis client、pytest/pytest-cov 小版本低于项目锁定版本，结果不替代目标 Linux 按完整锁定依赖安装的发布证明。
 8. 新迁移已在真实 PostgreSQL 16.14 完成 `upgrade head` 和 `alembic check`，JSONB 与复合外键成功落库；迁移锁时长、已有生产量级回填和查询计划仍待类生产数据验证。
-9. Phase 2 前两项基础代码已实现，但真实 PostgreSQL `vector` 扩展和 Qwen 尚未完成组合联调；HNSW 在模型维度最终确认前不创建。第 2 项新迁移尚未执行往返与 `alembic check`；问答 API/SSE、答案引用持久化、Worker 索引接线和完整工单处理仍未实现。
+9. Phase 2 前三项基础代码已实现，但真实 PostgreSQL `vector` 扩展和 Qwen 尚未完成组合联调；HNSW 在模型维度最终确认前不创建。第 2 项新迁移尚未执行往返与 `alembic check`；问答 API/SSE、答案引用持久化、Worker 索引接线、检索层纳入 TICKET 来源、工单 API 路由与第 4 项仍待实现。
 
 ## 10. 继续开发建议
 
@@ -228,7 +228,7 @@
 
 1. 先阅读 TD-002、TD-003、TD-009、`retrieval`/`agent`/`tickets` 模块和 `c8784d439b23`、`cc99b700f739` 两个迁移。
 2. 先补跑第 2 项迁移往返与 `alembic check`，再接入问答 API/SSE、会话/答案/引用持久化；环境可用时补 pgvector + Embedding + Qwen 的单条真实问答集成验收。
-3. 随后实现 Phase 2 第 3/4 项完整工单处理与审核入库；Phase 1 的真实 S3/四格式补验继续作为独立并行项。
+3. 随后补齐工单 API 路由、检索层纳入 TICKET 来源并实现 Phase 2 第 4 项（审核发布后重新索引与历史引用快照），再做 AC-004 至 AC-007 端到端验收；Phase 1 的真实 S3/四格式补验继续作为独立并行项。
 
 ## 11. 接手时必须先读
 

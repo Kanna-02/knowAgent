@@ -17,17 +17,28 @@ from knowagent.agent.domain.models import (
 )
 from knowagent.agent.infrastructure.sqlalchemy_models import EvidenceDecisionRecord
 from knowagent.common.errors import NotFoundError
-from knowagent.tickets.domain.models import Ticket, TicketOccurrence
+from knowagent.tickets.domain.models import (
+    CandidateStatus,
+    KnowledgeCandidate,
+    Ticket,
+    TicketOccurrence,
+    TicketReply,
+    TicketStatus,
+    TicketTransition,
+)
 from knowagent.tickets.infrastructure.sqlalchemy_models import (
+    KnowledgeCandidateRecord,
     TicketOccurrenceRecord,
     TicketRecord,
+    TicketReplyRecord,
+    TicketTransitionRecord,
 )
 
 # SQLAlchemy exposes SQL functions dynamically; Pylint cannot infer that call contract.
 # pylint: disable=not-callable
 
 
-class SqlAlchemyTicketRepository:
+class SqlAlchemyTicketRepository:  # pylint: disable=too-many-public-methods
     def __init__(self, session: Session) -> None:
         self._session = session
 
@@ -177,6 +188,252 @@ class SqlAlchemyTicketRepository:
 
     def count_tickets(self) -> int:
         return int(self._session.scalar(select(func.count(TicketRecord.id))) or 0)
+
+    # ---- workflow ----
+
+    def lock_ticket(self, *, ticket_id: UUID) -> Ticket | None:
+        record = self._session.scalar(
+            select(TicketRecord).where(TicketRecord.id == ticket_id).with_for_update()
+        )
+        return self._to_ticket(record) if record is not None else None
+
+    def update_ticket_status(
+        self,
+        *,
+        ticket_id: UUID,
+        status: TicketStatus,
+        assignee_id: UUID | None,
+        now: datetime,
+    ) -> None:
+        record = self._session.get(TicketRecord, ticket_id)
+        if record is None:
+            raise NotFoundError("TICKET_NOT_FOUND", "工单不存在")
+        record.status = status
+        if assignee_id is not None:
+            record.assignee_id = assignee_id
+        record.updated_at = now
+        self._session.flush()
+
+    def add_reply(self, reply: TicketReply) -> TicketReply:
+        self._session.add(
+            TicketReplyRecord(
+                id=reply.id,
+                ticket_id=reply.ticket_id,
+                system_id=reply.system_id,
+                author_id=reply.author_id,
+                author_role=reply.author_role,
+                body=reply.body,
+                created_at=reply.created_at,
+            )
+        )
+        self._session.flush()
+        return reply
+
+    def list_replies(self, *, ticket_id: UUID) -> tuple[TicketReply, ...]:
+        records = self._session.scalars(
+            select(TicketReplyRecord)
+            .where(TicketReplyRecord.ticket_id == ticket_id)
+            .order_by(TicketReplyRecord.created_at)
+        )
+        return tuple(self._to_reply(record) for record in records)
+
+    def add_transition(self, transition: TicketTransition) -> TicketTransition:
+        self._session.add(
+            TicketTransitionRecord(
+                id=transition.id,
+                ticket_id=transition.ticket_id,
+                system_id=transition.system_id,
+                actor_id=transition.actor_id,
+                from_status=transition.from_status,
+                to_status=transition.to_status,
+                action=transition.action,
+                created_at=transition.created_at,
+            )
+        )
+        self._session.flush()
+        return transition
+
+    def list_transitions(self, *, ticket_id: UUID) -> tuple[TicketTransition, ...]:
+        records = self._session.scalars(
+            select(TicketTransitionRecord)
+            .where(TicketTransitionRecord.ticket_id == ticket_id)
+            .order_by(TicketTransitionRecord.created_at)
+        )
+        return tuple(self._to_transition(record) for record in records)
+
+    def add_candidate(self, candidate: KnowledgeCandidate) -> KnowledgeCandidate:
+        self._session.add(
+            KnowledgeCandidateRecord(
+                id=candidate.id,
+                ticket_id=candidate.ticket_id,
+                system_id=candidate.system_id,
+                answer=candidate.answer,
+                author_id=candidate.author_id,
+                reviewer_id=candidate.reviewer_id,
+                status=candidate.status,
+                knowledge_source_id=candidate.knowledge_source_id,
+                created_at=candidate.created_at,
+                updated_at=candidate.updated_at,
+            )
+        )
+        self._session.flush()
+        return candidate
+
+    def get_candidate(self, *, candidate_id: UUID) -> KnowledgeCandidate | None:
+        record = self._session.get(KnowledgeCandidateRecord, candidate_id)
+        return self._to_candidate(record) if record is not None else None
+
+    def get_pending_candidate_by_ticket(self, *, ticket_id: UUID) -> KnowledgeCandidate | None:
+        record = self._session.scalar(
+            select(KnowledgeCandidateRecord).where(
+                KnowledgeCandidateRecord.ticket_id == ticket_id,
+                KnowledgeCandidateRecord.status == CandidateStatus.PENDING,
+            )
+        )
+        return self._to_candidate(record) if record is not None else None
+
+    def approve_candidate(
+        self,
+        *,
+        candidate_id: UUID,
+        reviewer_id: UUID,
+        knowledge_source_id: UUID,
+        now: datetime,
+    ) -> KnowledgeCandidate:
+        record = self._session.get(KnowledgeCandidateRecord, candidate_id)
+        if record is None:
+            raise NotFoundError("KNOWLEDGE_CANDIDATE_NOT_FOUND", "知识候选不存在")
+        record.status = CandidateStatus.APPROVED
+        record.reviewer_id = reviewer_id
+        record.knowledge_source_id = knowledge_source_id
+        record.updated_at = now
+        self._session.flush()
+        return self._to_candidate(record)
+
+    def reject_candidate(
+        self,
+        *,
+        candidate_id: UUID,
+        reviewer_id: UUID,
+        now: datetime,
+    ) -> KnowledgeCandidate:
+        record = self._session.get(KnowledgeCandidateRecord, candidate_id)
+        if record is None:
+            raise NotFoundError("KNOWLEDGE_CANDIDATE_NOT_FOUND", "知识候选不存在")
+        record.status = CandidateStatus.REJECTED
+        record.reviewer_id = reviewer_id
+        record.updated_at = now
+        self._session.flush()
+        return self._to_candidate(record)
+
+    def create_ticket_knowledge_source(
+        self,
+        *,
+        system_id: UUID,
+        ticket_id: UUID,
+        now: datetime,
+    ) -> UUID:
+        # Deferred import: the knowledge ORM module depends on pgvector which
+        # is only available in the deployment environment. Keeping this import
+        # out of the module top level lets the ticket module and its tests run
+        # without pgvector installed.
+        # pylint: disable=import-outside-toplevel
+        from knowagent.common.lifecycle import PublicationStatus
+        from knowagent.knowledge.domain.models import KnowledgeSourceType
+        from knowagent.knowledge.infrastructure.sqlalchemy_models import (
+            KnowledgeSourceRecord,
+        )
+
+        source = KnowledgeSourceRecord(
+            system_id=system_id,
+            source_type=KnowledgeSourceType.TICKET,
+            document_version_id=None,
+            ticket_id=ticket_id,
+            publish_status=PublicationStatus.PUBLISHED,
+            created_at=now,
+            updated_at=now,
+        )
+        self._session.add(source)
+        self._session.flush()
+        return source.id
+
+    def create_published_chunk(
+        self,
+        *,
+        system_id: UUID,
+        source_id: UUID,
+        text: str,
+        now: datetime,
+   ) -> UUID:  # pylint: disable=too-many-positional-arguments
+        # Deferred import: pgvector is only available in the deployment venv.
+        # pylint: disable=import-outside-toplevel
+        from knowagent.common.lifecycle import PublicationStatus
+        from knowagent.knowledge.infrastructure.sqlalchemy_models import (
+            KnowledgeChunkRecord,
+        )
+
+        trimmed = text.strip()
+        if not trimmed:
+            raise ValueError("knowledge chunk text must not be blank")
+        chunk = KnowledgeChunkRecord(
+            system_id=system_id,
+            source_id=source_id,
+            ordinal=0,
+            text=trimmed,
+            token_count=1,
+            structure_path=[],
+            locators=[],
+            retrieval_text=trimmed,
+            embedding_model=None,
+            embedding_model_version=None,
+            embedding=None,
+            publish_status=PublicationStatus.PUBLISHED,
+            created_at=now,
+            updated_at=now,
+        )
+        self._session.add(chunk)
+        self._session.flush()
+        return chunk.id
+
+    @staticmethod
+    def _to_reply(record: TicketReplyRecord) -> TicketReply:
+        return TicketReply(
+            id=record.id,
+            ticket_id=record.ticket_id,
+            system_id=record.system_id,
+            author_id=record.author_id,
+            author_role=record.author_role,
+            body=record.body,
+            created_at=_as_utc(record.created_at),
+        )
+
+    @staticmethod
+    def _to_transition(record: TicketTransitionRecord) -> TicketTransition:
+        return TicketTransition(
+            id=record.id,
+            ticket_id=record.ticket_id,
+            system_id=record.system_id,
+            actor_id=record.actor_id,
+            from_status=record.from_status,
+            to_status=record.to_status,
+            action=record.action,
+            created_at=_as_utc(record.created_at),
+        )
+
+    @staticmethod
+    def _to_candidate(record: KnowledgeCandidateRecord) -> KnowledgeCandidate:
+        return KnowledgeCandidate(
+            id=record.id,
+            ticket_id=record.ticket_id,
+            system_id=record.system_id,
+            answer=record.answer,
+            author_id=record.author_id,
+            reviewer_id=record.reviewer_id,
+            status=record.status,
+            knowledge_source_id=record.knowledge_source_id,
+            created_at=_as_utc(record.created_at),
+            updated_at=_as_utc(record.updated_at),
+        )
 
     def _pg_advisory_xact_lock(self, lock_id: int) -> None:
         bind = self._session.get_bind()

@@ -17,6 +17,23 @@
 
 ## 功能变更记录
 
+### 2026-08-03 - 完成 Phase 2 工单分派、处理、追加、关闭/重开与审核入库
+
+类型：新功能
+
+相关需求：REQ-007；AC-006、AC-007（AC-007"5 分钟内可检索"依赖检索层纳入 TICKET 来源，见后续注意）。
+
+变更说明：
+
+1. 新增工单工作流服务与状态机：`OPEN→ASSIGNED→IN_PROGRESS→RESOLVED→CLOSED→OPEN`，分派、开始处理、回复追加、关闭、重开和解决均加行锁并写入不可变 `ticket_transitions` 审计轨迹；回复区分提问人/处理人/审核人角色并做非空与超长校验。
+2. 新增知识审核服务：处理人提交答案生成 `PENDING` 知识候选并阻止重复待审核提交；审核人批准时创建 `TICKET` 类型知识来源和单条 `PUBLISHED` 知识片段并标记候选已批准，拒绝时不创建任何知识来源；候选记录的 `reviewer_id` 与 `status` 作为审核决策的审计记录。
+3. 新增 `ticket_replies`、`ticket_transitions`、`knowledge_candidates` 持久模型及迁移，均沿用 `ticket_id+system_id` 复合外键链；repository 补充行锁、回复、转换、候选增查与来源/片段创建，知识来源与片段用延迟导入避免 pgvector 硬耦合。
+4. 新增 24 项工单工作流与知识审核单元测试覆盖合法/非法状态转换、角色推断、追加回复、关闭/重开、重复提交、批准后已发布片段可查、拒绝无知识来源、退回后再提交、未知实体和系统隔离；测试基础设施导入全部 ORM 模块避免孤立 `create_all` 漏表。
+
+验证方式：后端 238 项测试全部通过，总覆盖率 90.84%，`tickets/application/review.py` 82%、`workflow.py` 84%、`tickets/infrastructure/sqlalchemy_repository.py` 94%；本次 6 个相关 Python 文件 Black/isort 清洁；4 个相关源文件 `mypy --strict` 零错误；4 个相关源文件 Pylint 10.00/10；相关源文件 Bandit 中高危 0。
+
+后续注意：按用户指定范围，本轮未运行新迁移的 SQLite 往返、`alembic check`、真实 PostgreSQL/pgvector 或端到端集成测试；检索层当前 `source_type == DOCUMENT` 硬过滤尚未纳入 `TICKET` 来源，AC-007"5 分钟内可重新检索"在检索过滤器扩展前不成立；问答 API/SSE、工单 API 路由和真实链路验收仍待后续范围。
+
 ### 2026-08-03 - 完成 Phase 2 证据充分性决策与拒答工单基础代码
 
 类型：新功能
