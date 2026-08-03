@@ -5,13 +5,15 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+from knowagent.agent.infrastructure import sqlalchemy_models as agent_models
 from knowagent.documents.infrastructure import sqlalchemy_models as document_models
 from knowagent.identity.infrastructure.sqlalchemy_models import Base
 from knowagent.knowledge.infrastructure import sqlalchemy_models as knowledge_models
 from knowagent.platform.settings import Settings
 from knowagent.systems.infrastructure import sqlalchemy_models as systems_models
+from knowagent.tickets.infrastructure import sqlalchemy_models as ticket_models
 
-del document_models, knowledge_models, systems_models
+del agent_models, document_models, knowledge_models, systems_models, ticket_models
 
 config = context.config
 if config.config_file_name is not None:

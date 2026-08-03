@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass, field, fields
 
@@ -252,6 +253,57 @@ class RetrievalSettings:  # pylint: disable=too-many-instance-attributes
         )
 
 
+@dataclass(frozen=True, slots=True)
+class EvidencePolicySettings:
+    policy_version: str = "evidence-v1"
+    minimum_fused_score: float = 0.012
+    minimum_score_gap: float = 0.0
+    degraded_score_multiplier: float = 1.25
+
+    def __post_init__(self) -> None:
+        if not self.policy_version.strip():
+            raise ValueError("evidence policy version must not be blank")
+        numeric_values = (
+            self.minimum_fused_score,
+            self.minimum_score_gap,
+            self.degraded_score_multiplier,
+        )
+        if not all(math.isfinite(value) for value in numeric_values):
+            raise ValueError("evidence policy numeric values must be finite")
+        if self.minimum_fused_score < 0 or self.minimum_score_gap < 0:
+            raise ValueError("evidence score thresholds must not be negative")
+        if self.degraded_score_multiplier < 1:
+            raise ValueError("evidence degraded score multiplier must be at least one")
+
+    @classmethod
+    def from_environment(cls) -> EvidencePolicySettings:
+        return cls(
+            policy_version=os.getenv("KNOWAGENT_EVIDENCE_POLICY_VERSION", "evidence-v1").strip(),
+            minimum_fused_score=float(os.getenv("KNOWAGENT_EVIDENCE_MIN_FUSED_SCORE", "0.012")),
+            minimum_score_gap=float(os.getenv("KNOWAGENT_EVIDENCE_MIN_SCORE_GAP", "0")),
+            degraded_score_multiplier=float(
+                os.getenv("KNOWAGENT_EVIDENCE_DEGRADED_SCORE_MULTIPLIER", "1.25")
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class TicketSettings:
+    deduplication_window_hours: int = 24
+
+    def __post_init__(self) -> None:
+        if self.deduplication_window_hours <= 0:
+            raise ValueError("ticket deduplication window must be positive")
+
+    @classmethod
+    def from_environment(cls) -> TicketSettings:
+        return cls(
+            deduplication_window_hours=int(
+                os.getenv("KNOWAGENT_TICKET_DEDUPLICATION_WINDOW_HOURS", "24")
+            )
+        )
+
+
 def _preferred_environment(primary: str, compatible: str) -> str:
     return os.getenv(primary, os.getenv(compatible, "")).strip()
 
@@ -274,6 +326,8 @@ class Settings:  # pylint: disable=too-many-instance-attributes
     ingestion: IngestionSettings = field(default_factory=IngestionSettings)
     llm: LlmSettings = field(default_factory=LlmSettings)
     retrieval: RetrievalSettings = field(default_factory=RetrievalSettings)
+    evidence_policy: EvidencePolicySettings = field(default_factory=EvidencePolicySettings)
+    tickets: TicketSettings = field(default_factory=TicketSettings)
 
     @classmethod
     def from_environment(cls) -> Settings:
@@ -298,4 +352,6 @@ class Settings:  # pylint: disable=too-many-instance-attributes
             ingestion=IngestionSettings.from_environment(),
             llm=LlmSettings.from_environment(),
             retrieval=RetrievalSettings.from_environment(),
+            evidence_policy=EvidencePolicySettings.from_environment(),
+            tickets=TicketSettings.from_environment(),
         )

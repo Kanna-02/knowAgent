@@ -126,7 +126,7 @@ def seed_chunks(factory: sessionmaker[Session], *, system_id: UUID) -> UUID:
         return source.id
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_index_source_batches_and_atomically_persists_model_contract() -> None:
     factory = make_factory()
     system_id = uuid4()
@@ -152,7 +152,7 @@ async def test_index_source_batches_and_atomically_persists_model_contract() -> 
     assert {chunk.embedding_model for chunk in chunks} == {"bge-m3"}
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_index_source_rejects_invalid_provider_count_without_partial_writes() -> None:
     factory = make_factory()
     system_id = uuid4()
@@ -174,7 +174,7 @@ async def test_index_source_rejects_invalid_provider_count_without_partial_write
     assert all(chunk.embedding is None for chunk in chunks)
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_index_source_hides_unknown_or_cross_system_sources() -> None:
     factory = make_factory()
     system_id = uuid4()

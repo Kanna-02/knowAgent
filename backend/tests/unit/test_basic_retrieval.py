@@ -97,7 +97,7 @@ class StubRetrievalMetrics:
         self.degradations.append((system_id, channel, reason))
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_retrieve_fuses_keyword_and_vector_ranks_without_duplicates() -> None:
     shared_id, lexical_only_id, vector_only_id = uuid4(), uuid4(), uuid4()
     lexical = StubLexicalSearch((hit(shared_id, score=0.9), hit(lexical_only_id, score=0.8)))
@@ -124,7 +124,7 @@ async def test_retrieve_fuses_keyword_and_vector_ranks_without_duplicates() -> N
     assert metrics.degradations == []
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_retrieve_falls_back_to_keyword_when_embedding_is_unavailable() -> None:
     keyword_hit = hit(uuid4(), score=0.75)
     vectors = StubVectorSearch(())
@@ -151,7 +151,7 @@ async def test_retrieve_falls_back_to_keyword_when_embedding_is_unavailable() ->
     assert metrics.degradations == [(system_id, "vector", "embedding_unavailable")]
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_retrieve_falls_back_and_records_metric_when_vector_search_is_unavailable(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -177,7 +177,7 @@ async def test_retrieve_falls_back_and_records_metric_when_vector_search_is_unav
     assert "vector retrieval degraded" in caplog.text
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_retrieve_rejects_blank_query_without_calling_providers() -> None:
     vectors = StubVectorSearch(())
     service = BasicRetrievalService(

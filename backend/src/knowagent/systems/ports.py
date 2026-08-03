@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 from typing import Protocol
 from uuid import UUID
 
@@ -26,7 +27,7 @@ class SystemRepository(Protocol):
         *,
         status: BusinessSystemStatus | None,
         include_owners: bool = True,
-    ) -> list[BusinessSystem]: ...
+    ) -> builtins.list[BusinessSystem]: ...
 
     def list_page(
         self,
@@ -34,17 +35,17 @@ class SystemRepository(Protocol):
         page: int,
         page_size: int,
         status: BusinessSystemStatus | None,
-    ) -> tuple[list[BusinessSystem], int]: ...
+    ) -> tuple[builtins.list[BusinessSystem], int]: ...
 
     def assign_owners(
         self,
         system_id: UUID,
-        account_ids: list[UUID],
+        account_ids: builtins.list[UUID],
         *,
         replace_existing: bool,
-    ) -> list[SystemOwner]: ...
+    ) -> builtins.list[SystemOwner]: ...
 
-    def list_system_roles(self, account_id: UUID) -> list[SystemRoleAssignment]: ...
+    def list_system_roles(self, account_id: UUID) -> builtins.list[SystemRoleAssignment]: ...
 
 
 class AccountDirectory(Protocol):

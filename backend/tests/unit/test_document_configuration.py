@@ -7,11 +7,13 @@ from knowagent.documents.application.chunking import ChunkingConfig
 from knowagent.documents.infrastructure.parsers import ParserLimits
 from knowagent.platform.settings import (
     DocumentProcessingSettings,
+    EvidencePolicySettings,
     IngestionSettings,
     LlmSettings,
     ObjectStorageSettings,
     RetrievalSettings,
     Settings,
+    TicketSettings,
 )
 from knowagent.worker.celery_app import build_celery_app
 
@@ -136,6 +138,11 @@ def test_llm_and_retrieval_settings_load_user_compatible_environment_names(
     monkeypatch.setenv("KNOWAGENT_EMBEDDING_MODEL", "bge-m3")
     monkeypatch.setenv("KNOWAGENT_EMBEDDING_BATCH_SIZE", "16")
     monkeypatch.setenv("KNOWAGENT_RETRIEVAL_RESULT_TOP_K", "6")
+    monkeypatch.setenv("KNOWAGENT_EVIDENCE_POLICY_VERSION", "esb-evidence-v2")
+    monkeypatch.setenv("KNOWAGENT_EVIDENCE_MIN_FUSED_SCORE", "0.02")
+    monkeypatch.setenv("KNOWAGENT_EVIDENCE_MIN_SCORE_GAP", "0.001")
+    monkeypatch.setenv("KNOWAGENT_EVIDENCE_DEGRADED_SCORE_MULTIPLIER", "1.4")
+    monkeypatch.setenv("KNOWAGENT_TICKET_DEDUPLICATION_WINDOW_HOURS", "48")
 
     settings = Settings.from_environment()
 
@@ -146,6 +153,11 @@ def test_llm_and_retrieval_settings_load_user_compatible_environment_names(
     assert settings.retrieval.embedding_base_url == "http://model-service:8100/v1"
     assert settings.retrieval.embedding_batch_size == 16
     assert settings.retrieval.result_top_k == 6
+    assert settings.evidence_policy.policy_version == "esb-evidence-v2"
+    assert settings.evidence_policy.minimum_fused_score == 0.02
+    assert settings.evidence_policy.minimum_score_gap == 0.001
+    assert settings.evidence_policy.degraded_score_multiplier == 1.4
+    assert settings.tickets.deduplication_window_hours == 48
     assert "local-secret" not in repr(settings.llm)
 
 
@@ -156,3 +168,13 @@ def test_llm_and_retrieval_settings_reject_invalid_boundaries() -> None:
         RetrievalSettings(result_top_k=0)
     with pytest.raises(ValueError, match="result_top_k"):
         RetrievalSettings(keyword_top_k=2, vector_top_k=2, result_top_k=5)
+    with pytest.raises(ValueError, match="evidence score"):
+        EvidencePolicySettings(minimum_fused_score=-0.1)
+    with pytest.raises(ValueError, match="multiplier"):
+        EvidencePolicySettings(degraded_score_multiplier=0.9)
+    with pytest.raises(ValueError, match="finite"):
+        EvidencePolicySettings(minimum_fused_score=float("nan"))
+    with pytest.raises(ValueError, match="finite"):
+        EvidencePolicySettings(degraded_score_multiplier=float("inf"))
+    with pytest.raises(ValueError, match="deduplication"):
+        TicketSettings(deduplication_window_hours=0)

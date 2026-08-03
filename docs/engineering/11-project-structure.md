@@ -86,9 +86,9 @@ conversations/tickets/documents <- analytics
 | `documents` | 上传、版本、解析、结构化切分、入库任务、发布/下线 | `DocumentService`、`DocumentParser` | `systems`, `platform` |
 | `knowledge` | 文档片段、工单知识、来源定位、索引版本和发布视图 | `KnowledgeIndexService`（基础 Embedding 写回已实现）、`CitationResolver` | `documents`, `systems` |
 | `conversations` | 会话、消息、回答、引用快照、运行记录、多轮上下文 | `ConversationService`、`RunEventStream` | `identity`, `systems` |
-| `retrieval` | 查询改写、关键词/向量混合召回、Rerank、证据充分性 | `BasicRetrievalService`、`EvidenceOrganizer` 已实现；`EvidencePolicy` 待补 | `knowledge`, `conversations` |
-| `agent` | LangGraph 问答流程、意图分类、降级分流、回答与引用校验 | `GroundedAnswerService` 基础链路已实现；`QuestionWorkflow` 待补 | `retrieval`, `conversations`, Provider ports |
-| `tickets` | 自动建单、分派、回复、追加、关闭/重开、候选知识审核回流 | `TicketService`、`KnowledgeCandidateService` | `systems`, `conversations`, `knowledge` |
+| `retrieval` | 查询改写、关键词/向量混合召回、Rerank、证据候选组织 | `BasicRetrievalService`、`EvidenceOrganizer` 已实现 | `knowledge`, `conversations` |
+| `agent` | LangGraph 问答流程、意图分类、证据决策、降级分流、回答与引用校验 | `GroundedAnswerService`、`DeterministicEvidencePolicy`、`ReliableQuestionService` 已实现；`QuestionWorkflow` 待补 | `retrieval`, `conversations`, Provider ports |
+| `tickets` | 自动建单、分派、回复、追加、关闭/重开、候选知识审核回流 | `RefusalTicketService` 与自动建单持久化已实现；完整工单状态机和 `KnowledgeCandidateService` 待补 | `systems`, `conversations`, `knowledge` |
 | `notifications` | Outbox 消费、模板、公司通知 API、重试和人工重试 | `NotificationDispatcher` | `tickets`, `platform` |
 | `analytics` | 高频问题、知识缺口、使用统计、离线评测和版本对比 | 查询服务与聚合任务 | `conversations`, `tickets`, `documents` |
 | `audit` | 认证、权限、知识和工单关键操作审计 | `AuditSink`、审计查询 | `common`, `platform` |
@@ -395,7 +395,7 @@ DRAFT -> SUBMITTED -> APPROVED -> PUBLISHING -> PUBLISHED
 
 ### 7.2 问答、引用和拒答
 
-Phase 2 第 1 项当前实现边界：`retrieval` 已提供 PostgreSQL 关键词/向量查询、数据库层系统/发布状态过滤、RRF、数据库异常降级日志和指标端口；`agent` 已提供版本化问答 Prompt、Qwen OpenAI 兼容流、证据预算、声明级结构化回答和逐字支撑校验。当前声明/引用快照只作为领域结果返回，尚未写入 `answers`/`answer_citations`；`QuestionWorkflow`、问答 API/SSE、证据充分性和工单分支仍按下述完整流程实现。
+Phase 2 前两项当前实现边界：`retrieval` 已提供 PostgreSQL 关键词/向量查询、数据库层系统/发布状态过滤、RRF、数据库异常降级日志和指标端口；`agent` 已提供版本化问答 Prompt、Qwen OpenAI 兼容流、证据预算、声明级结构化回答、逐字支撑校验、确定性证据决策和可靠拒答；`tickets` 已提供拒答判定与自动建单的同事务持久化、运行幂等和系统内时间窗合并。当前声明/引用快照只作为领域结果返回，问答 API/SSE、会话/答案持久化、完整 `QuestionWorkflow` 和工单处理状态机仍待实现。
 
 1. 创建会话时固定 `system_id`；每次提问再次校验用户对该系统的访问权限。
 2. 事务持久化问题消息、`question_run` 和任务派发事实，提交后投递 Celery `qa` 队列并立即返回 run id。
@@ -564,8 +564,8 @@ knowAgent/
       knowledge/
       conversations/
       retrieval/
-      agent/
-      tickets/
+      agent/                # 回答/引用、证据决策、可靠问答编排与判定 ORM
+      tickets/              # 拒答自动建单、幂等/去重仓储；完整处理状态机待补
       notifications/
       analytics/
       audit/

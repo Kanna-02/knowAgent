@@ -9,7 +9,7 @@ from knowagent.common.errors import ProviderUnavailableError
 from knowagent.retrieval.infrastructure.http_embedding import HttpEmbeddingProvider
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_embed_validates_and_returns_model_contract() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url == "http://model-service:8100/v1/embeddings"
@@ -39,7 +39,7 @@ async def test_embed_validates_and_returns_model_contract() -> None:
     assert result.vectors == ((0.1, 0.2, 0.3),)
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_embed_rejects_response_count_or_dimension_mismatch() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         del request
@@ -65,7 +65,7 @@ async def test_embed_rejects_response_count_or_dimension_mismatch() -> None:
             await provider.embed(texts=("问题",))
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_embed_maps_network_and_http_errors_to_provider_unavailable() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         del request

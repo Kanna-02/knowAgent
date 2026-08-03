@@ -4,7 +4,7 @@ import hmac
 from collections.abc import Generator
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Annotated
+from typing import Annotated, cast
 
 from fastapi import Cookie, Depends, Header, Request
 from redis import Redis
@@ -37,11 +37,11 @@ def get_database_session(request: Request) -> Generator[Session, None, None]:
 DatabaseSession = Annotated[Session, Depends(get_database_session)]
 
 
-def get_redis_client(request: Request) -> Redis:  # type: ignore[type-arg]
-    return request.app.state.redis_client
+def get_redis_client(request: Request) -> Redis:
+    return cast(Redis, request.app.state.redis_client)
 
 
-RedisClient = Annotated[Redis, Depends(get_redis_client)]  # type: ignore[type-arg]
+RedisClient = Annotated[Redis, Depends(get_redis_client)]
 
 
 @lru_cache(maxsize=1)

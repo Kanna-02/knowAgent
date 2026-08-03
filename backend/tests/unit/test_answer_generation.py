@@ -63,7 +63,7 @@ class StubLlmProvider:
         yield GenerationEvent.completed()
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_generate_returns_verified_answer_and_immutable_citation_snapshot() -> None:
     provider = StubLlmProvider(
         {
@@ -90,7 +90,7 @@ async def test_generate_returns_verified_answer_and_immutable_citation_snapshot(
     assert answer.prompt_version == "grounded-answer-v1"
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 @pytest.mark.parametrize(
     "citations",
     [
@@ -119,7 +119,7 @@ async def test_generate_rejects_unknown_fabricated_or_missing_citations(
         )
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_generate_rejects_claim_not_covered_by_quoted_evidence() -> None:
     provider = StubLlmProvider(
         {
@@ -154,7 +154,7 @@ def test_grounded_answer_prompt_rejects_unknown_version() -> None:
         load_prompt_definition("grounded-answer-v999")
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_generate_rejects_blank_claim_after_normalization() -> None:
     provider = StubLlmProvider(
         {
@@ -173,7 +173,7 @@ async def test_generate_rejects_blank_claim_after_normalization() -> None:
         )
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_openai_provider_emits_all_delta_and_completed_events() -> None:
     lines = [
         'data: {"choices":[{"delta":{"content":"{\\"answer\\":"}}]}',
@@ -212,7 +212,7 @@ async def test_openai_provider_emits_all_delta_and_completed_events() -> None:
     assert "".join(event.text for event in events) == '{"answer":"ok"}'
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_openai_provider_accepts_stop_reason_when_done_sentinel_is_omitted() -> None:
     line = 'data: {"choices":[{"delta":{"content":"{}"},"finish_reason":"stop"}]}'
 
@@ -273,7 +273,7 @@ def test_openai_provider_rejects_invalid_configuration() -> None:
         )
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 @pytest.mark.parametrize(
     "lines",
     [
@@ -312,7 +312,7 @@ async def test_openai_provider_rejects_non_successful_or_unconfirmed_completion(
             ]
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_openai_provider_maps_http_failures_without_exposing_response_body() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         del request

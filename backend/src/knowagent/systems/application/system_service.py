@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 import re
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -10,7 +11,6 @@ from knowagent.identity.domain.models import AccountRole, AccountStatus
 from knowagent.identity.ports import AuditSink, SessionStore
 from knowagent.systems.domain.models import BusinessSystem, BusinessSystemStatus, SystemOwner
 from knowagent.systems.ports import AccountDirectory, SystemRepository
-
 
 _SYSTEM_CODE_PATTERN = re.compile(r"^[A-Z][A-Z0-9_-]{1,31}$")
 
@@ -111,7 +111,7 @@ class SystemService:
         *,
         status: BusinessSystemStatus | None,
         include_owners: bool = True,
-    ) -> list[BusinessSystem]:
+    ) -> builtins.list[BusinessSystem]:
         return self._systems.list(status=status, include_owners=include_owners)
 
     def list_page(
@@ -120,7 +120,7 @@ class SystemService:
         page: int,
         page_size: int,
         status: BusinessSystemStatus | None,
-    ) -> tuple[list[BusinessSystem], int]:
+    ) -> tuple[builtins.list[BusinessSystem], int]:
         return self._systems.list_page(page=page, page_size=page_size, status=status)
 
     def assign_owners(
@@ -128,28 +128,25 @@ class SystemService:
         *,
         actor_id: UUID,
         system_id: UUID,
-        account_ids: list[UUID],
+        account_ids: builtins.list[UUID],
         replace_existing: bool,
         request_id: str | None = None,
-    ) -> list[SystemOwner]:
+    ) -> builtins.list[SystemOwner]:
         current = self._systems.get_by_id(system_id)
         if current is None:
             raise ValidationError("SYSTEM_NOT_FOUND", "业务系统不存在")
         previous_owner_ids = {owner.account_id for owner in current.owners}
-        unique_ids = list(dict.fromkeys(account_ids))
+        unique_ids: builtins.list[UUID] = builtins.list(dict.fromkeys(account_ids))
         if len(unique_ids) > 100:
             raise ValidationError("SYSTEM_OWNER_LIMIT", "单个系统最多配置 100 位负责人")
         account_roles = self._accounts.get_roles(unique_ids)
         invalid_ids = [
             account_id
             for account_id in unique_ids
-            if account_roles.get(account_id)
-            != (AccountRole.SYSTEM_OWNER, AccountStatus.ACTIVE)
+            if account_roles.get(account_id) != (AccountRole.SYSTEM_OWNER, AccountStatus.ACTIVE)
         ]
         if invalid_ids:
-            raise ValidationError(
-                "SYSTEM_OWNER_INVALID", "负责人必须是有效的系统负责人账号"
-            )
+            raise ValidationError("SYSTEM_OWNER_INVALID", "负责人必须是有效的系统负责人账号")
         owners = self._systems.assign_owners(
             system_id,
             unique_ids,

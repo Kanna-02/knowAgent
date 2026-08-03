@@ -17,8 +17,8 @@
 ```text
 当前阶段：Phase 2 问答与工单闭环（Phase 1 真实 S3 补验并行待办）
 阶段目标：系统隔离检索、带引用回答、可靠拒答、内置工单和审核回流
-当前任务：Phase 2 第 1/4 项，关键词/向量基础召回、证据组织、回答生成与来源引用
-任务状态：基础代码、Ollama Embedding 适配与自动化验证完成；真实 pgvector/Qwen 组合集成及问答 API/持久化待补
+当前任务：Phase 2 第 2/4 项，证据充分性决策、可靠拒答、原因留痕和自动创建/合并内置工单
+任务状态：前两项基础代码与自动化验证完成；第 2 项迁移往返、真实 pgvector/Qwen 组合集成及问答 API/SSE 待补
 ```
 
 ## 3. 已完成
@@ -65,10 +65,13 @@
 40. 已完成 Phase 2 第 1 项 review 修复：数据库向量异常可观测降级、版本化 Prompt、成功流终止校验、声明级引用支撑、批量向量写回和超预算证据跳过均有回归测试。
 41. 已实现 `model-service` Ollama `bge-m3` 适配：兼容新旧 Embedding API、限制请求、校验模型/数量/1024 维/有限非零向量、执行 L2 归一化，并提供存活/就绪健康检查；默认复用本机现有 1.158 GB 模型 volume。
 42. 已完成 model-service review 修复：实际 tag/digest 与对外版本绑定，严格拒绝非数组和非数值向量，健康检查使用独立短超时，Provider 输出脱敏结构化耗时/错误日志，并增加可显式启用的真实 Ollama 集成测试门禁。
+43. 已实现版本化确定性证据策略，覆盖无证据、定位缺失、低融合分、头部差值不足、必需词未覆盖、显式冲突和向量降级阈值倍率，并一次记录全部失败原因。
+44. 已实现可靠问答分流：证据不足、证据预算清空和生成内容无法由引用原文支撑时拒答；检索/模型不可用和模型格式错误保持系统故障，不误建知识缺口工单。
+45. 已实现证据判定与自动工单同事务持久化、`run_id` 幂等，以及按系统、规范化问题和时间窗合并重复工单；不同系统不合并。
 
 ## 4. 正在进行
 
-1. Phase 2 功能范围 1/4 的基础代码已完成；正在等待真实服务条件以完成该项集成验收。
+1. Phase 2 功能范围 2/4 的基础代码已完成；第 2 项单测和静态检查已通过，新迁移往返及真实服务集成验收待补。
 2. Phase 1 功能范围 6/6 已实现且 PostgreSQL/Redis 预验收通过；真实 S3 与四格式完整持久化链路仍是并行补验项。
 3. 本地 Ollama Embedding 适配已就绪；等待可加载 `vector` 的 PostgreSQL 和完整 Qwen Key 完成组合联调。
 4. 等待目标 Linux 服务器资源信息以最终确定 Embedding/Rerank 推理后端、量化方式和 Python 传递依赖锁；本地 Ollama 方案不自动等同生产选型。
@@ -77,9 +80,9 @@
 
 1. 提供隔离 S3 endpoint/Bucket 后，补跑四种格式的 S3→PostgreSQL→Worker 完整链路和页面手测；仅需复验对象存储相关集成点。
 2. 在支持 `vector`/`pg_trgm` 的 PostgreSQL 执行 `c8784d439b23`，启动真实 `/v1/embeddings` 服务并配置完整 Qwen Key，跑通索引、双通道检索、生成和引用集成样例。
-3. 实现 Phase 2 第 2/4 项：证据充分性决策、可靠拒答、原因留痕和自动创建/合并内置工单。
-4. 接入问答 API/SSE、会话/答案/引用持久化和索引 Worker 阶段，完成 AC-004 的端到端验收。
-5. 在类生产 Linux 环境验证 Python 3.11 完整安装、迁移锁时长、模型运行和发布回滚。
+3. 在隔离数据库补跑 `cc99b700f739` 的升级/降级/升级往返与 `alembic check`，再接入问答 API/SSE 和会话/答案/引用持久化。
+4. 实现 Phase 2 第 3/4 项：按系统分派、处理、追加、关闭、重开和审核入库。
+5. 接入索引 Worker 阶段并完成 AC-004 至 AC-007 的端到端验收；随后在类生产 Linux 环境验证迁移锁时长、模型运行和发布回滚。
 
 ## 6. 阻塞点
 
@@ -149,6 +152,10 @@
 | `backend/src/knowagent/knowledge/application/indexing.py` | 批量 Embedding、模型契约校验与原子向量写回 | 基础代码已完成；Worker 接线待后续 |
 | `backend/migrations/versions/c8784d439b23_add_phase2_vector_and_lexical_retrieval.py` | `vector`/`pg_trgm`、向量列和 trigram 索引 | SQLite 往返通过；真实 pgvector 待验收 |
 | `backend/tests/unit/test_*retrieval.py`、`test_*embedding*.py`、`test_evidence_organizer.py`、`test_answer_generation.py`、`test_grounded_answer.py`、`test_knowledge_indexing.py` | Phase 2 第 1 项正常、边界、异常与隔离回归 | 已完成 |
+| `backend/src/knowagent/agent/application/evidence_decision.py`、`reliable_question.py` | 确定性证据充分性、可靠拒答和故障分流 | 基础代码与单测/静态检查已完成；API/SSE 接线待补 |
+| `backend/src/knowagent/tickets/`、`backend/src/knowagent/agent/infrastructure/sqlalchemy_models.py` | 判定留痕、拒答自动建单、运行幂等和系统内时间窗合并 | 基础代码与单测/静态检查已完成；完整工单状态机待补 |
+| `backend/migrations/versions/cc99b700f739_add_evidence_decisions_and_refusal_.py` | `evidence_decisions`、`tickets`、外键、唯一约束和查询索引 | 已生成并人工修正 JSONB；迁移往返与 `alembic check` 本轮未运行 |
+| `backend/tests/unit/test_evidence_policy.py`、`test_refusal_tickets.py`、`test_reliable_question.py` | Phase 2 第 2 项正常、边界、异常、幂等和故障分流回归 | 已完成 |
 
 ## 8. 已运行验证
 
@@ -199,6 +206,9 @@
 | model-service Ollama 适配自动化验证 | 通过 | review 修复后 39 项测试通过、1 项真实服务测试显式跳过，总覆盖率 90.58%；源文件与测试 mypy strict 零错误；Bandit 中高危 0 |
 | model-service 真实 bge-m3 冒烟 | 通过（本地） | Ollama 0.3.14 复用 1.2 GB 模型 volume；ready 200，真实 `/api/embed` 返回 1024 维归一化向量；冷启动 18.21 秒、热请求 3.73 秒 |
 | pgvector/Embedding/Qwen 真实链路 | 未运行 | Ollama 适配已实现；缺少可加载 `vector` 的 PostgreSQL 和完整 Qwen Key，不宣称组合集成成功 |
+| Phase 2 第 2 项后端单测/覆盖率 | 通过 | 46 项定向测试全部通过；证据决策、可靠问答和工单核心模块分支覆盖率 92.83% |
+| Phase 2 第 2 项静态检查 | 通过（本次范围） | 18 个相关源/测试文件 Black/isort 清洁；111 个源文件 mypy strict 零错误；本次源文件 Pylint 10.00/10；全仓 Bandit 中高危 0 |
+| Phase 2 第 2 项 Alembic/真实集成 | 未运行（用户限定范围） | 未运行 `cc99b700f739` 往返、`alembic check`、真实 PostgreSQL/pgvector、Ollama/Qwen 或端到端链路 |
 
 ## 9. 未运行验证与风险
 
@@ -210,15 +220,15 @@
 6. 四类解析器已接入 S3/PostgreSQL/Celery 端口和持久任务；PostgreSQL/Redis/Markdown 核心链路已在真实服务验证，但 S3 签名、TLS、Bucket 权限、multipart、对象补偿及四格式完整组合仍待隔离 S3 环境。扫描 PDF 仅返回 `OCR_REQUIRED`，首版不执行 OCR。
 7. 本轮使用现有 Python 3.11.11 环境并在 `/tmp` 补充四个锁定依赖；FastAPI、Redis client、pytest/pytest-cov 小版本低于项目锁定版本，结果不替代目标 Linux 按完整锁定依赖安装的发布证明。
 8. 新迁移已在真实 PostgreSQL 16.14 完成 `upgrade head` 和 `alembic check`，JSONB 与复合外键成功落库；迁移锁时长、已有生产量级回填和查询计划仍待类生产数据验证。
-9. Phase 2 第 1 项基础代码和 Ollama Embedding 适配已实现，但真实 PostgreSQL `vector` 扩展和 Qwen 尚未完成组合联调；HNSW 在模型维度最终确认前不创建。问答 API/SSE、答案引用持久化、Worker 索引接线、证据充分性和工单闭环仍未实现。
+9. Phase 2 前两项基础代码已实现，但真实 PostgreSQL `vector` 扩展和 Qwen 尚未完成组合联调；HNSW 在模型维度最终确认前不创建。第 2 项新迁移尚未执行往返与 `alembic check`；问答 API/SSE、答案引用持久化、Worker 索引接线和完整工单处理仍未实现。
 
 ## 10. 继续开发建议
 
 新对话或新开发者接手时，建议下一步：
 
-1. 先阅读 TD-002、TD-003、TD-009、`retrieval`/`agent` 模块和 `c8784d439b23` 迁移。
-2. 本地 model-service 单条真实向量冒烟已完成；环境可用时继续完成 pgvector + Embedding + Qwen 的单条真实问答集成验收，随后实现证据充分性、拒答和内置工单。
-3. Phase 1 的真实 S3/四格式补验独立按 `docs/development/20-phase1-integration-acceptance.md` 执行，不阻塞 Phase 2 代码开发。
+1. 先阅读 TD-002、TD-003、TD-009、`retrieval`/`agent`/`tickets` 模块和 `c8784d439b23`、`cc99b700f739` 两个迁移。
+2. 先补跑第 2 项迁移往返与 `alembic check`，再接入问答 API/SSE、会话/答案/引用持久化；环境可用时补 pgvector + Embedding + Qwen 的单条真实问答集成验收。
+3. 随后实现 Phase 2 第 3/4 项完整工单处理与审核入库；Phase 1 的真实 S3/四格式补验继续作为独立并行项。
 
 ## 11. 接手时必须先读
 

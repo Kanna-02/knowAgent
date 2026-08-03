@@ -4,6 +4,7 @@ import hashlib
 import json
 import secrets
 from datetime import UTC, datetime
+from typing import cast
 from uuid import UUID
 
 from redis import Redis
@@ -14,7 +15,7 @@ from knowagent.identity.ports import NewSession, SessionRecord
 
 
 class RedisSessionStore:
-    def __init__(self, client: Redis, *, prefix: str) -> None:  # type: ignore[type-arg]
+    def __init__(self, client: Redis, *, prefix: str) -> None:
         self._client = client
         self._prefix = prefix.rstrip(":")
 
@@ -42,7 +43,7 @@ class RedisSessionStore:
 
     def get(self, token: str) -> SessionRecord | None:
         try:
-            payload = self._client.get(self._session_key(token))
+            payload = cast(str | None, self._client.get(self._session_key(token)))
         except RedisError as error:
             raise DependencyUnavailableError("redis") from error
         if payload is None:
@@ -62,7 +63,7 @@ class RedisSessionStore:
     def delete(self, token: str) -> None:
         key = self._session_key(token)
         try:
-            payload = self._client.get(key)
+            payload = cast(str | None, self._client.get(key))
             pipeline = self._client.pipeline(transaction=True)
             pipeline.delete(key)
             if payload is not None:
@@ -75,7 +76,7 @@ class RedisSessionStore:
     def revoke_account(self, account_id: UUID) -> None:
         account_key = self._account_key(account_id)
         try:
-            keys = self._client.smembers(account_key)
+            keys = cast(set[str], self._client.smembers(account_key))
             pipeline = self._client.pipeline(transaction=True)
             if keys:
                 pipeline.delete(*keys)
@@ -95,7 +96,7 @@ class RedisSessionStore:
 class RedisLoginRateLimiter:
     def __init__(
         self,
-        client: Redis,  # type: ignore[type-arg]
+        client: Redis,
         *,
         prefix: str,
         attempts: int,
@@ -109,7 +110,7 @@ class RedisLoginRateLimiter:
     def allow(self, username: str, source_ip: str, entry: str) -> bool:
         keys = self._keys(username, source_ip, entry)
         try:
-            counts = [int(self._client.get(key) or 0) for key in keys]
+            counts = [int(cast(str | int | None, self._client.get(key)) or 0) for key in keys]
             return all(count < self._attempts for count in counts)
         except RedisError as error:
             raise DependencyUnavailableError("redis") from error

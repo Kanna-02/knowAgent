@@ -100,7 +100,7 @@ def service(retrieval: StubRetrieval) -> GroundedAnswerService:
     )
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_answer_runs_retrieval_evidence_generation_and_citation_validation() -> None:
     retrieval = StubRetrieval((fused_hit(),))
     system_id = uuid4()
@@ -113,7 +113,7 @@ async def test_answer_runs_retrieval_evidence_generation_and_citation_validation
     assert retrieval.system_id == system_id
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_answer_preserves_vector_degradation_without_loosening_citations() -> None:
     retrieval = StubRetrieval((fused_hit(),), degraded_reasons=("VECTOR_UNAVAILABLE",))
 
@@ -123,7 +123,7 @@ async def test_answer_preserves_vector_degradation_without_loosening_citations()
     assert len(result.answer.citations) == 1
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_answer_stops_before_llm_when_retrieval_has_no_evidence() -> None:
     retrieval = StubRetrieval(())
 

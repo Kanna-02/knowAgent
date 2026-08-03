@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 from collections import defaultdict
 from uuid import UUID
 
@@ -68,25 +69,19 @@ class SqlAlchemySystemRepository:
         record.status = business_system.status
         record.updated_at = business_system.updated_at
         self._session.flush()
-        return self._to_domain(
-            record, self._owners_by_system([record.id]).get(record.id, ())
-        )
+        return self._to_domain(record, self._owners_by_system([record.id]).get(record.id, ()))
 
     def list(
         self,
         *,
         status: BusinessSystemStatus | None,
         include_owners: bool = True,
-    ) -> list[BusinessSystem]:
+    ) -> builtins.list[BusinessSystem]:
         statement = select(BusinessSystemRecord)
         if status is not None:
             statement = statement.where(BusinessSystemRecord.status == status)
         records = self._session.scalars(statement.order_by(BusinessSystemRecord.code)).all()
-        owners = (
-            self._owners_by_system([record.id for record in records])
-            if include_owners
-            else {}
-        )
+        owners = self._owners_by_system([record.id for record in records]) if include_owners else {}
         return [self._to_domain(record, owners.get(record.id, ())) for record in records]
 
     def list_page(
@@ -95,7 +90,7 @@ class SqlAlchemySystemRepository:
         page: int,
         page_size: int,
         status: BusinessSystemStatus | None,
-    ) -> tuple[list[BusinessSystem], int]:
+    ) -> tuple[builtins.list[BusinessSystem], int]:
         filters = []
         if status is not None:
             filters.append(BusinessSystemRecord.status == status)
@@ -118,10 +113,10 @@ class SqlAlchemySystemRepository:
     def assign_owners(
         self,
         system_id: UUID,
-        account_ids: list[UUID],
+        account_ids: builtins.list[UUID],
         *,
         replace_existing: bool,
-    ) -> list[SystemOwner]:
+    ) -> builtins.list[SystemOwner]:
         if replace_existing:
             self._session.execute(
                 delete(AccountSystemRoleRecord).where(
@@ -149,9 +144,9 @@ class SqlAlchemySystemRepository:
                     )
                 )
         self._session.flush()
-        return list(self._owners_by_system([system_id]).get(system_id, ()))
+        return builtins.list(self._owners_by_system([system_id]).get(system_id, ()))
 
-    def list_system_roles(self, account_id: UUID) -> list[SystemRoleAssignment]:
+    def list_system_roles(self, account_id: UUID) -> builtins.list[SystemRoleAssignment]:
         rows = self._session.execute(
             select(AccountSystemRoleRecord.system_id, AccountSystemRoleRecord.role)
             .where(AccountSystemRoleRecord.account_id == account_id)
@@ -160,7 +155,7 @@ class SqlAlchemySystemRepository:
         return [SystemRoleAssignment(system_id=system_id, role=role) for system_id, role in rows]
 
     def _owners_by_system(
-        self, system_ids: list[UUID]
+        self, system_ids: builtins.list[UUID]
     ) -> dict[UUID, tuple[SystemOwner, ...]]:
         if not system_ids:
             return {}
@@ -178,7 +173,7 @@ class SqlAlchemySystemRepository:
             )
             .order_by(AccountRecord.display_name, AccountRecord.username)
         ).all()
-        grouped: defaultdict[UUID, list[SystemOwner]] = defaultdict(list)
+        grouped: defaultdict[UUID, builtins.list[SystemOwner]] = defaultdict(builtins.list)
         for system_id, account_id, username, display_name in rows:
             grouped[system_id].append(
                 SystemOwner(
@@ -210,7 +205,7 @@ class SqlAlchemyAccountDirectory:
         self._session = session
 
     def get_roles(
-        self, account_ids: list[UUID]
+        self, account_ids: builtins.list[UUID]
     ) -> dict[UUID, tuple[AccountRole, AccountStatus]]:
         if not account_ids:
             return {}

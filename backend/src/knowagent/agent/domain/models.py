@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -86,3 +87,99 @@ class VerifiedAnswer:
 class GroundedAnswer:
     answer: VerifiedAnswer
     degraded_reasons: tuple[str, ...]
+
+
+class EvidenceDecisionOutcome(StrEnum):
+    SUFFICIENT = "sufficient"
+    INSUFFICIENT = "insufficient"
+    CONFLICTING = "conflicting"
+
+    @property
+    def is_refusal(self) -> bool:
+        return self in {self.INSUFFICIENT, self.CONFLICTING}
+
+
+class EvidenceReasonCode(StrEnum):
+    NO_EVIDENCE = "no_evidence"
+    SOURCE_LOCATION_MISSING = "source_location_missing"
+    SCORE_BELOW_THRESHOLD = "score_below_threshold"
+    SCORE_GAP_TOO_SMALL = "score_gap_too_small"
+    REQUIRED_TERM_NOT_COVERED = "required_term_not_covered"
+    CONFLICTING_EVIDENCE = "conflicting_evidence"
+    EVIDENCE_BUDGET_EMPTY = "evidence_budget_empty"
+    ANSWER_NOT_GROUNDED = "answer_not_grounded"
+
+
+@dataclass(frozen=True, slots=True)
+class EvidenceCandidateSummary:
+    chunk_id: UUID
+    source_id: UUID
+    source_name: str
+    source_version: str
+    fused_score: float
+    channels: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not self.source_name.strip() or not self.source_version.strip() or not self.channels:
+            raise ValueError("evidence candidate metadata must not be blank")
+        if not math.isfinite(self.fused_score):
+            raise ValueError("evidence candidate score must be finite")
+
+
+@dataclass(frozen=True, slots=True)
+class EvidenceDecision:  # pylint: disable=too-many-instance-attributes
+    id: UUID
+    run_id: UUID
+    system_id: UUID
+    query: str
+    normalized_query: str
+    outcome: EvidenceDecisionOutcome
+    reason_codes: tuple[EvidenceReasonCode, ...]
+    score: float | None
+    applied_score_threshold: float
+    policy_version: str
+    candidates: tuple[EvidenceCandidateSummary, ...]
+    degraded_reasons: tuple[str, ...]
+    decided_at: datetime
+    ticket_id: UUID | None = None
+
+    def __post_init__(self) -> None:
+        if not self.query.strip() or not self.normalized_query.strip():
+            raise ValueError("evidence decision query must not be blank")
+        if not self.policy_version.strip():
+            raise ValueError("evidence policy version must not be blank")
+        if not math.isfinite(self.applied_score_threshold):
+            raise ValueError("evidence score threshold must be finite")
+        if self.applied_score_threshold < 0:
+            raise ValueError("evidence score threshold must not be negative")
+        if self.score is not None and not math.isfinite(self.score):
+            raise ValueError("evidence decision score must be finite")
+        if self.decided_at.tzinfo is None:
+            raise ValueError("evidence decision time must be timezone-aware")
+        if self.outcome is EvidenceDecisionOutcome.SUFFICIENT and self.reason_codes:
+            raise ValueError("sufficient evidence decision must not include refusal reasons")
+        if self.outcome.is_refusal and not self.reason_codes:
+            raise ValueError("refusal evidence decision must include at least one reason")
+
+
+class QuestionResolutionStatus(StrEnum):
+    ANSWERED = "answered"
+    REFUSED = "refused"
+
+
+@dataclass(frozen=True, slots=True)
+class QuestionResolution:
+    status: QuestionResolutionStatus
+    decision: EvidenceDecision
+    answer: VerifiedAnswer | None
+    ticket_id: UUID | None
+    reason_codes: tuple[EvidenceReasonCode, ...]
+    degraded_reasons: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if self.status is QuestionResolutionStatus.ANSWERED:
+            if self.answer is None or self.ticket_id is not None or self.reason_codes:
+                raise ValueError("answered resolution has inconsistent answer or refusal data")
+            return
+        if self.answer is not None or self.ticket_id is None or not self.reason_codes:
+            raise ValueError("refused resolution must include reasons and a ticket")

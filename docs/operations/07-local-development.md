@@ -24,6 +24,8 @@ Copy-Item .env.example .env
 
 macOS/Linux 对应命令是 `cp .env.example .env`。`.env` 是隐藏文件，在 Finder 默认不可见；可在 `backend` 目录执行 `ls -la .env` 查看。本仓库已忽略该文件，禁止把真实 Key 提交到 Git。
 
+依赖只需安装到项目持久目录 `backend/.venv` 一次；后续测试直接复用该环境。不要使用 `pip install --target /tmp/...` 作为常规测试方式，否则临时目录清理后会再次下载依赖。
+
 将 `.env` 中的数据库、Redis、S3、Embedding 和 LLM 配置改为本地测试值，再把变量加载到当前终端。应用不会自动读取 `.env`；可使用公司统一的环境加载方式，或在 macOS/Linux 的 `zsh` 中执行 `set -a; source .env; set +a`。兼容用户现有的 `LLM_API_BASE`、`LLM_API_KEY`、`LLM_MODEL`，项目前缀变量 `KNOWAGENT_LLM_*` 优先。
 
 Phase 2 关键变量：
@@ -36,7 +38,11 @@ Phase 2 关键变量：
 | `KNOWAGENT_EMBEDDING_TIMEOUT_SECONDS` | 否 | 默认 15 秒 |
 | `KNOWAGENT_EMBEDDING_BATCH_SIZE` | 否 | 索引批大小，默认 32 |
 | `KNOWAGENT_RETRIEVAL_*` | 否 | 关键词/向量/result top-k 与 RRF 参数 |
-| `KNOWAGENT_EVIDENCE_*` | 否 | 证据条数和字符预算 |
+| `KNOWAGENT_EVIDENCE_MAX_*` | 否 | 证据条数和字符预算 |
+| `KNOWAGENT_EVIDENCE_POLICY_VERSION` | 否 | 证据判定策略版本，默认 `evidence-v1` |
+| `KNOWAGENT_EVIDENCE_MIN_FUSED_SCORE` / `KNOWAGENT_EVIDENCE_MIN_SCORE_GAP` | 否 | 最低融合分数和头部候选最小差值；必须为非负数 |
+| `KNOWAGENT_EVIDENCE_DEGRADED_SCORE_MULTIPLIER` | 否 | 向量等检索通道降级时的阈值倍率，必须不小于 1 |
+| `KNOWAGENT_TICKET_DEDUPLICATION_WINDOW_HOURS` | 否 | 同系统规范化问题的自动工单合并时间窗，默认 24 小时 |
 | `KNOWAGENT_LLM_API_BASE` / `LLM_API_BASE` | 生成链路必需 | Qwen OpenAI 兼容 `/v1` Base URL |
 | `KNOWAGENT_LLM_API_KEY` / `LLM_API_KEY` | 生成链路必需 | 只放本地 `.env` 或密钥设施；不能使用 `sk-` 占位值 |
 | `KNOWAGENT_LLM_MODEL` / `LLM_MODEL` | 生成链路必需 | 当前测试目标为 `qwen3.6-plus` |
@@ -64,6 +70,8 @@ SELECT extname, extversion FROM pg_extension WHERE extname IN ('vector', 'pg_trg
 ```
 
 当前向量列不固定维度，因此可以保存 Provider 返回的模型维度，但暂不创建 HNSW。模型和维度最终确认后再通过独立迁移增加固定维度/HNSW，并用类生产数据验证查询计划。
+
+迁移 `cc99b700f739` 创建 `evidence_decisions` 和 `tickets`，保存策略版本、拒答原因、候选证据摘要及自动工单关联，并建立系统/判定结果和系统/工单状态索引。应用该迁移前必须先完成备份，并在隔离数据库验证 `upgrade`/`downgrade` 往返和 `alembic check`。
 
 健康检查：`GET http://127.0.0.1:8000/health/live`。
 
