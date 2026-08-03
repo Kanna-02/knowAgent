@@ -20,6 +20,11 @@ python -m pytest tests -v
 python -m mypy src/knowagent --strict
 python -m bandit -r src/knowagent -ll
 
+cd ../model-service
+python -m pytest tests -v
+python -m mypy src/knowagent_model --strict
+python -m bandit -r src/knowagent_model -ll
+
 cd ../frontend
 npm ci
 npm run test:coverage
@@ -59,7 +64,7 @@ alembic check
 2. 以迁移专用账号执行 `alembic upgrade head`，确认 `alembic check` 无差异。
 3. 切换 `current` 软链接并依次重启 API、交互 Worker、批处理 Worker 和 Beat。
 4. 验证 `/health/live`、登录、文档上传、v2 上传和任务状态查询。
-5. 验证 Embedding `/v1/embeddings` 返回模型/版本/维度契约，Qwen `/chat/completions` 可流式返回结构化 JSON；日志不得包含 API Key 或响应正文中的敏感内容。
+5. 从 Ollama `/api/tags` 核对部署 manifest 的精确 tag/digest，确认 model-service 的版本标签以相同 digest 前缀结尾；运行真实 Ollama integration marker，验证 `/health/ready` 和 `/v1/embeddings` 的模型/版本/维度/归一化契约。再验证 Qwen `/chat/completions` 可流式返回结构化 JSON；日志只允许状态、耗时和错误类别，不得包含 API Key、输入文本、内部 URL、Provider 响应正文或其他敏感内容。
 6. 在两个业务系统分别发布同名知识，完成索引并验证关键词/向量通道均只返回所选系统的 `PUBLISHED` 文档 chunk。
 7. 验证 Embedding 故障时降级为关键词，LLM 故障时返回系统错误而不创建知识不足工单。
 
@@ -77,5 +82,5 @@ alembic downgrade d1a97d2e451b
 
 - 尚未在目标 Linux/Python 3.11 环境执行安装和发布。
 - 尚未在真实 PostgreSQL 验证迁移锁时长、查询计划和复合外键行为。
-- 尚未在可加载 pgvector 的 PostgreSQL、真实 Embedding 服务和 Qwen API 上完成 Phase 2 核心链路。
+- Ollama 本地适配已实现；尚未在目标 Linux 模型运行时、可加载 pgvector 的 PostgreSQL 和 Qwen API 上完成 Phase 2 核心链路。
 - systemd unit、Nginx 配置、备份恢复演练和监控告警在 Phase 4 补齐。

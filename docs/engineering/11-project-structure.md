@@ -92,7 +92,7 @@ conversations/tickets/documents <- analytics
 | `notifications` | Outbox 消费、模板、公司通知 API、重试和人工重试 | `NotificationDispatcher` | `tickets`, `platform` |
 | `analytics` | 高频问题、知识缺口、使用统计、离线评测和版本对比 | 查询服务与聚合任务 | `conversations`, `tickets`, `documents` |
 | `audit` | 认证、权限、知识和工单关键操作审计 | `AuditSink`、审计查询 | `common`, `platform` |
-| `model-service` | Embedding/Rerank 推理、批处理、模型元数据和健康检查 | HTTP `/v1/embeddings`、`/v1/rerank` | 无业务模块 |
+| `model-service` | Embedding/Rerank 推理适配、批处理、模型元数据和健康检查 | `/v1/embeddings` 已实现；`/v1/rerank` 待补 | 本地基线依赖 Ollama HTTP，不依赖业务模块 |
 | `web` | 用户问答、引用与工单；管理端知识、系统、账号、审计和分析 | 浏览器 UI | API 契约 |
 
 模块职责语义重叠低于 30%。`documents` 管原文件生命周期，`knowledge` 管可检索发布视图；`retrieval` 只产出证据，`agent` 决定如何回答；`tickets` 管人工闭环，`notifications` 只管可靠投递。
@@ -313,6 +313,8 @@ class AuthorizationService(Protocol):
 - 请求必须限制文本数、单文本长度、总字符数和并发；维度与数据库当前索引配置不一致时拒绝写入。
 
 Provider 可由内部 HTTP、自建运行时或后续公司 API 实现；领域服务只依赖上述契约。
+
+当前本地实现由 `model-service` 调用 Ollama：优先使用 `/api/embed`，旧版回退 `/api/embeddings`，再统一校验维度并归一化。该适配只存在于模型服务边界，`backend` 不感知 Ollama 协议；生产可替换为 PyTorch、ONNX Runtime 或其他内部服务而不改变主应用契约。
 
 ## 6. 数据模型
 
@@ -573,12 +575,15 @@ knowAgent/
     tests/integration/
     tests/contract/
   model-service/
+    .env.example
     pyproject.toml
     src/knowagent_model/
-      api/
-      providers/
-      runtime/
-    tests/
+      app.py             # /v1/embeddings 与健康检查
+      cli.py             # 本地/systemd 进程入口
+      embedding.py       # 服务端口、结果与稳定错误
+      ollama.py          # 新旧 Ollama Embedding API 适配
+      settings.py        # 环境配置与边界校验
+    tests/unit/
   frontend/
     package.json
     package-lock.json

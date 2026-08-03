@@ -9,9 +9,13 @@ description = "Internal HTTP boundary for KnowAgent embedding and rerank models"
 requires-python = ">=3.11,<3.12"
 dependencies = [
   "fastapi==0.141.1",
+  "httpx==0.28.1",
   "pydantic==2.13.4",
   "uvicorn==0.52.1",
 ]
+
+[project.scripts]
+knowagent-model-service = "knowagent_model.cli:main"
 
 [project.optional-dependencies]
 dev = [
@@ -58,6 +62,9 @@ severity = "MEDIUM"
 [tool.pytest.ini_options]
 addopts = "--cov=knowagent_model --cov-report=term-missing --cov-fail-under=80"
 testpaths = ["tests"]
+markers = [
+  "integration: requires explicitly configured live external services",
+]
 
 [tool.coverage.run]
 branch = true

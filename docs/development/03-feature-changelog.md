@@ -17,6 +17,25 @@
 
 ## 功能变更记录
 
+### 2026-08-03 - 增加 Ollama bge-m3 模型服务适配层
+
+类型：新功能
+
+相关需求：REQ-004、REQ-009；AC-003/AC-004 的本地 Embedding 服务准备范围。
+
+变更说明：
+
+1. 在独立 `model-service` 中实现 `POST /v1/embeddings`、`GET /health/live`、`GET /health/ready` 和兼容 `/health`，返回主应用要求的模型、版本、维度、归一化标识和批量向量契约。
+2. 新增 Ollama Provider，优先调用批量 `/api/embed`，在旧版本返回 404 时自动回退到逐条 `/api/embeddings`；默认内部批大小为 1，以规避既有 Ollama 0.3.14 在 Apple Silicon 纯 CPU 批处理时的超时问题。
+3. 对 Ollama 返回执行模型名、数量、1024 维、有限数值和非零向量校验，并统一做 L2 归一化；网络、HTTP 和非法响应使用脱敏错误，不向主应用泄露内部地址或响应正文。
+4. 默认配置对应本机已保留的 `deploy_ollama-models` volume：`bge-m3` 模型层 digest 前缀 `daec91ff`、占用约 1.158 GB；生产模型版本、维度、批大小、超时、文本限制和 keep-alive 均可由环境覆盖。
+5. 完成 review 缺陷修复：readiness 和每次推理前都精确校验允许的模型 tag 与实际 digest，且对外版本必须以 digest 前缀结尾；严格拒绝非 JSON 数组、布尔值和字符串数值向量；健康检查使用独立短超时，并输出不含文本、内部 URL 或响应正文的结构化结果、耗时和错误类别日志。
+6. 增加可由 `KNOWAGENT_TEST_OLLAMA_*` 环境变量启用的真实 Ollama 集成测试门禁，覆盖模型身份、维度、归一化和单条向量契约。
+
+验证方式：review 修复后 model-service 39 项测试通过、1 项真实 Ollama 测试因本轮服务未启动而显式跳过，总覆盖率 90.58%；源文件与测试 `mypy --strict` 零错误，Bandit 中高危 0，diff 与 100 字符行宽检查通过。修复前已恢复 Ollama 0.3.14 并复用既有 volume 完成真实冒烟：`/health/ready` 返回 200，`/api/embed` 冷启动约 18.21 秒、热请求约 3.73 秒，适配响应为 1 个 1024 维向量且 L2 范数为 1.0000000000000004；修复后的 digest 强校验真实复验需在服务恢复后运行新增集成测试。
+
+后续注意：本地 Ollama 适配用于复用已有模型和快速联调，不替代目标 Linux 的推理后端资源门禁；Rerank 适配、pgvector 真实检索、Worker 索引接线和 Qwen 完整链路仍待完成。本轮 review 修复验证时 `127.0.0.1:11434` 和 `127.0.0.1:8100` 未运行，需按本地开发文档恢复后补跑真实集成测试。
+
 ### 2026-08-03 - 完成 Phase 2 基础检索、证据组织和带引用回答内核
 
 类型：新功能

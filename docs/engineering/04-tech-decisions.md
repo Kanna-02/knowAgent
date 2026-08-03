@@ -106,7 +106,8 @@
 - **初始评测基线**：以 `BAAI/bge-m3` 作为中文和多语言质量基线；模型名称、向量维度和归一化规则由模型注册配置唯一管理，不写死在实体或 SQL 中。
 - **接口基线**：提供批量 `/v1/embeddings` 和 `/health`；限制批大小和文本长度，返回模型标识、版本和向量维度。
 - **资源门禁**：在目标 Linux 服务器上用真实 ESB 样本完成延迟、吞吐和内存测试后，再确认 PyTorch、ONNX Runtime 或 INT8 量化方式；资源不足时可替换轻量模型而不改变 provider 契约。
-- **实施状态（2026-08-03）**：主应用侧 `/v1/embeddings` HTTP Provider、批量索引、模型契约校验和原子向量写回已实现；实际 `model-service` 模型运行时与真实服务验收尚未完成。索引批大小、模型、Base URL 和超时已配置化。
+- **本地适配决策（2026-08-03）**：用户确认先复用 `knowledge-rag` 已下载的 Ollama `bge-m3`。`model-service` 作为防腐层把 Ollama `/api/embed`（旧版回退 `/api/embeddings`）转换为稳定 `/v1/embeddings` 契约，并负责维度校验和 L2 归一化；主应用不直接依赖 Ollama 协议。
+- **实施状态（2026-08-03）**：主应用侧 HTTP Provider、批量索引、模型契约校验和原子向量写回已实现；`model-service` 的 Ollama 适配、健康检查、请求限制及自动化测试已实现。适配层在 readiness 和每次推理前校验实际模型 tag 与 digest；配置的对外 `model_version` 必须以 8-64 位 digest 前缀结尾，避免模型替换后误用旧版本标签。健康检查使用独立短超时，推理日志只记录脱敏状态、耗时和错误类别。本地默认模型版本对应现有 digest 前缀 `daec91ff`，生产必须按实际 manifest 同步覆盖版本与 digest。真实 bge-m3 冒烟已返回 1024 维归一化向量，冷启动约 18.21 秒、热请求约 3.73 秒；目标 Linux 的最终推理运行时、量化和组合验收仍受资源门禁约束。
 
 ### TD-004：独立内网 Rerank 服务
 

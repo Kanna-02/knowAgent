@@ -7,7 +7,7 @@
 - PostgreSQL 16+ 测试实例，服务端必须能加载 `vector` 与 `pg_trgm` 扩展。
 - Redis 7 测试实例，用于 Session、Celery broker 和恢复调度。
 - 数据库迁移账号必须具有目标 Schema 建表/索引权限，以及 `CREATE EXTENSION vector`、`CREATE EXTENSION pg_trgm` 权限；若扩展由 DBA 预装，应用账号不需要扩展创建权限。
-- 一个 OpenAI 兼容的 Embedding HTTP 服务，提供 `POST /v1/embeddings`，返回 `model`、`model_version`、`dimension`、`normalized` 和 `vectors`。它可以是项目后续自托管的内网 `model-service`，不要求购买外部 API，但当前仓库尚未实现实际模型运行时。
+- 一个可访问的 Ollama 服务和已加载的 `bge-m3`；仓库内 `model-service` 将其适配为主应用使用的 `POST /v1/embeddings` 契约。本机可复用 `knowledge-rag` 的 `deploy_ollama-models` volume，生产环境不以 Docker 为前提。
 - Qwen OpenAI 兼容 API 的完整 Key、Base URL 和模型名；没有 Key 时可运行关键词/向量之外的单测，但不能完成真实回答生成。
 
 本地 HTTP 调试可设置 `KNOWAGENT_COOKIE_SECURE=false`；类生产和生产环境必须使用 HTTPS，并保持 `true`。
@@ -83,7 +83,53 @@ celery -A knowagent.worker.celery_app:celery_app beat --loglevel=INFO
 
 Celery 消息只携带 `job_id`；业务状态以 PostgreSQL 为准。Beat 定期恢复未派发任务、到期重试和租约过期任务，不能用 Celery result backend 判断入库是否完成。
 
-## 3. 首个管理员
+## 3. Embedding 模型服务
+
+本机已有 Docker volume `deploy_ollama-models`，其中 `bge-m3` 模型层约 1.158 GB。仅用于本地联调时，可从 `knowledge-rag/deploy` 恢复 Ollama 容器；Compose 会复用同名 volume，不重新下载模型权重：
+
+```bash
+docker compose -f ../knowledge-rag/deploy/docker-compose.yml up -d ollama
+```
+
+安装并启动适配层：
+
+```bash
+cd model-service
+python3.11 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[dev]"
+cp .env.example .env
+set -a
+source .env
+set +a
+knowagent-model-service
+```
+
+Windows 使用 `py -3.11 -m venv .venv`、`.\.venv\Scripts\Activate.ps1` 和 `$env:` 形式加载变量。适配层默认监听 `127.0.0.1:8100`，Ollama 地址为 `127.0.0.1:11434`。验证：
+
+`.env` 中的 `KNOWAGENT_MODEL_OLLAMA_MODEL_DIGEST` 必须是 Ollama `/api/tags` 返回 digest 的 8-64 位十六进制前缀，`KNOWAGENT_MODEL_EMBEDDING_VERSION` 必须以同一前缀结尾。服务会在 readiness 和每次推理前核对实际模型；tag 或 digest 不匹配时返回未就绪，不生成或误标向量。`KNOWAGENT_MODEL_OLLAMA_HEALTH_TIMEOUT_SECONDS` 仅控制 `/api/tags` 检查，默认 5 秒，不受 300 秒推理超时影响。
+
+```bash
+curl http://127.0.0.1:8100/health/ready
+curl -X POST http://127.0.0.1:8100/v1/embeddings \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"bge-m3","texts":["ESB 接口如何申请？"]}'
+```
+
+响应应包含 `model=bge-m3`、配置的 `model_version`、`dimension=1024`、`normalized=true` 和一个向量。旧 Ollama 在 Apple Silicon 纯 CPU 上可能单条也需数十秒；本地测试应将 backend 的 `KNOWAGENT_EMBEDDING_TIMEOUT_SECONDS` 临时设为 `300`，不要把此值直接作为生产延迟目标。
+
+对真实 Ollama 执行可重复的 Provider 集成测试：
+
+```bash
+cd model-service
+export KNOWAGENT_TEST_OLLAMA_BASE_URL=http://127.0.0.1:11434
+export KNOWAGENT_TEST_OLLAMA_MODEL_DIGEST=daec91ff
+PYTHONPATH=src pytest tests/integration/test_live_ollama.py -m integration -v
+```
+
+模型或 volume 更新后，必须先从 `/api/tags` 取得新 digest，再同步更新运行配置和上述测试变量；不得只修改对外版本标签。
+
+## 4. 首个管理员
 
 首个管理员只能通过一次性命令初始化；已有管理员后，命令会拒绝再次创建。
 
@@ -93,7 +139,7 @@ knowagent-bootstrap-admin --username root.admin --display-name "平台管理员"
 
 密码通过隐藏输入读取，不进入命令历史。新管理员首次从 `/admin/login` 登录后必须改密。
 
-## 4. 批量导入用户
+## 5. 批量导入用户
 
 先为临时密码生成 Argon2id 摘要：
 
@@ -118,7 +164,7 @@ username,display_name,password_hash,role,credential_batch
 knowagent-import-users .\examples\users-import.csv
 ```
 
-## 5. 前端
+## 6. 前端
 
 ```powershell
 cd frontend
@@ -135,10 +181,14 @@ npm run dev -- --host 127.0.0.1 --port 5173
 
 Vite 将 `/api` 代理到 `http://127.0.0.1:8000`。
 
-## 6. 验证
+## 7. 验证
 
 ```powershell
 cd backend
+$env:PYTHONPATH = "src"
+pytest tests -v
+
+cd ..\model-service
 $env:PYTHONPATH = "src"
 pytest tests -v
 

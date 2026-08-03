@@ -9,7 +9,7 @@
 更新人/助手：Codex
 当前分支：master
 远程仓库：git@github.com:Kanna-02/knowAgent.git
-当前环境：Python 3.11.11；PostgreSQL 16.14；Redis 7；Node.js 24.16.0
+当前环境：Python 3.11.11；PostgreSQL 16.14；Redis 7；Node.js 24.16.0；本地 Ollama 0.3.14 + bge-m3
 ```
 
 ## 2. 当前阶段
@@ -18,7 +18,7 @@
 当前阶段：Phase 2 问答与工单闭环（Phase 1 真实 S3 补验并行待办）
 阶段目标：系统隔离检索、带引用回答、可靠拒答、内置工单和审核回流
 当前任务：Phase 2 第 1/4 项，关键词/向量基础召回、证据组织、回答生成与来源引用
-任务状态：基础代码与自动化验证完成；真实 pgvector、Embedding、Qwen 集成及问答 API/持久化待补
+任务状态：基础代码、Ollama Embedding 适配与自动化验证完成；真实 pgvector/Qwen 组合集成及问答 API/持久化待补
 ```
 
 ## 3. 已完成
@@ -63,13 +63,15 @@
 38. 已实现批量 Embedding 索引与原子写回，模型名、版本、维度、归一化、数量、超时和批大小均有契约或配置校验；新增 `vector`/`pg_trgm` 迁移和 trigram 索引。
 39. 已实现证据条数/字符预算、稳定证据编号、Qwen OpenAI 兼容 SSE 生成、结构化回答解析和引用白名单/逐字验证，引用结果携带不可变来源与 locator 快照。
 40. 已完成 Phase 2 第 1 项 review 修复：数据库向量异常可观测降级、版本化 Prompt、成功流终止校验、声明级引用支撑、批量向量写回和超预算证据跳过均有回归测试。
+41. 已实现 `model-service` Ollama `bge-m3` 适配：兼容新旧 Embedding API、限制请求、校验模型/数量/1024 维/有限非零向量、执行 L2 归一化，并提供存活/就绪健康检查；默认复用本机现有 1.158 GB 模型 volume。
+42. 已完成 model-service review 修复：实际 tag/digest 与对外版本绑定，严格拒绝非数组和非数值向量，健康检查使用独立短超时，Provider 输出脱敏结构化耗时/错误日志，并增加可显式启用的真实 Ollama 集成测试门禁。
 
 ## 4. 正在进行
 
 1. Phase 2 功能范围 1/4 的基础代码已完成；正在等待真实服务条件以完成该项集成验收。
 2. Phase 1 功能范围 6/6 已实现且 PostgreSQL/Redis 预验收通过；真实 S3 与四格式完整持久化链路仍是并行补验项。
-3. 等待可加载 `vector` 的 PostgreSQL、真实 Embedding 服务和完整 Qwen Key。
-4. 等待目标 Linux 服务器资源信息以确定 Embedding/Rerank 推理后端、量化方式和 Python 传递依赖锁。
+3. 本地 Ollama Embedding 适配已就绪；等待可加载 `vector` 的 PostgreSQL 和完整 Qwen Key 完成组合联调。
+4. 等待目标 Linux 服务器资源信息以最终确定 Embedding/Rerank 推理后端、量化方式和 Python 传递依赖锁；本地 Ollama 方案不自动等同生产选型。
 
 ## 5. 未完成 / 下一步
 
@@ -84,8 +86,8 @@
 | 问题 | 影响 | 需要谁处理 | 当前状态 |
 | --- | --- | --- | --- |
 | 当前 PostgreSQL 16 无可加载的 `vector` 扩展 | 阻塞真实向量列迁移和 pgvector 查询；代码与 SQLite 迁移测试不受影响 | 用户/DBA | 本机 Homebrew pgvector 仅含 PG17/18 构件，待提供兼容实例 |
-| 模型服务器 CPU/内存/GPU 信息未知 | 影响 Embedding/Rerank 运行时和量化 | 运维/用户 | 待提供 |
-| Qwen 完整 API Key 与真实 Embedding 服务未配置 | 阻塞真实生成和向量生成联调 | 用户/运维 | Qwen base/model 已知；Key 与 Embedding endpoint 待提供/启动 |
+| 模型服务器 CPU/内存/GPU 信息未知 | 影响生产 Embedding/Rerank 运行时和量化；本地 Ollama 适配不受阻 | 运维/用户 | 待提供 |
+| Qwen 完整 API Key 未配置 | 阻塞真实回答生成联调 | 用户/运维 | Qwen base/model 已知；Key 待提供 |
 | 公司通知协议及真实对象存储端点契约待验证 | 影响后续通知 provider 和 S3 兼容性证明 | 用户/第三方 | 待提供/验证 |
 | 本机无 S3 兼容服务或测试 Bucket | 阻塞 Phase 1 真实对象存储与四格式完整链路关闭门禁 | 用户/运维 | 待提供隔离 endpoint、Bucket 和凭据 |
 
@@ -105,7 +107,8 @@
 | `docs/development/20-phase1-integration-acceptance.md` | 记录 Phase 1 PostgreSQL/Redis 验收证据、跳过项和 S3 复验计划 | 已完成 |
 | `docs/engineering/11-project-structure.md` | 完整架构方案通过确认 | 已完成 |
 | `backend/pyproject.toml` | Python 3.11 后端依赖和质量工具配置 | 已完成 |
-| `model-service/pyproject.toml` | Python 3.11 模型服务边界和质量工具配置 | 已完成；模型运行时待硬件门禁 |
+| `model-service/src/knowagent_model/`、`.env.example`、`pyproject.toml` | Ollama bge-m3 适配、批量/旧接口兼容、归一化、健康检查、配置和进程入口 | 已完成；生产运行时待硬件门禁 |
+| `model-service/tests/unit/`、`tests/integration/` | Ollama 请求转换、回退、模型身份、严格向量、日志、限额、健康检查、CLI、配置回归和真实服务门禁 | 已完成；真实门禁待服务恢复后复跑 |
 | `frontend/package.json` 等 | TypeScript/Vite/ESLint/Vitest 配置和 npm 锁文件 | 已完成 |
 | `backend/src/knowagent/identity/` | 账号领域、统一认证、RBAC、导入和基础设施适配 | 已完成 |
 | `backend/migrations/versions/3f5d51a53981_create_phase1_identity_tables.py` | 账号与审计表基线迁移 | 已完成 |
@@ -193,26 +196,28 @@
 | Phase 2 第 1 项后端全量测试 | 通过 | review 修复后 167 项测试通过，总覆盖率 91.06%；45 项相关测试覆盖召回、数据库异常降级/指标、索引、证据预算、Prompt、流终止、声明支撑和引用异常 |
 | Phase 2 第 1 项静态检查 | 通过 | 相关 27 个源文件 mypy strict 零错误；本次 36 个 Python 文件 Black/isort 清洁；Pylint 10.00/10；全仓 Bandit 中高危 0 |
 | Phase 2 第 1 项 Alembic | 通过（SQLite） | `upgrade head -> downgrade 3ba86a4c3d35 -> upgrade head` 和 `alembic check` 通过；真实 PostgreSQL 因 `vector` 扩展不兼容未运行 |
-| pgvector/Embedding/Qwen 真实链路 | 未运行 | 缺少可加载 `vector` 的 PostgreSQL、运行中的 Embedding 服务和完整 Qwen Key，不宣称外部集成成功 |
+| model-service Ollama 适配自动化验证 | 通过 | review 修复后 39 项测试通过、1 项真实服务测试显式跳过，总覆盖率 90.58%；源文件与测试 mypy strict 零错误；Bandit 中高危 0 |
+| model-service 真实 bge-m3 冒烟 | 通过（本地） | Ollama 0.3.14 复用 1.2 GB 模型 volume；ready 200，真实 `/api/embed` 返回 1024 维归一化向量；冷启动 18.21 秒、热请求 3.73 秒 |
+| pgvector/Embedding/Qwen 真实链路 | 未运行 | Ollama 适配已实现；缺少可加载 `vector` 的 PostgreSQL 和完整 Qwen Key，不宣称组合集成成功 |
 
 ## 9. 未运行验证与风险
 
 1. 双端壳层和业务系统页面已使用隔离测试 API 完成桌面/移动浏览器截图与交互检查；真实 PostgreSQL/Redis 后端的完整页面链路仍待集成环境补充。
 2. 默认密码批量导入仍有共享密码泄露风险；实现已强制摘要、首次改密、限流、会话撤销和审计，凭据分发流程仍需组织侧控制。
 3. 核心、解析器和质量工具直接版本已固定；Python 传递依赖锁仍需在目标 Linux/Python 3.11 环境生成。
-4. 模型运行时和目标 Linux 完整安装尚未验证；本轮前端生产构建已通过。
+4. 本地 Ollama 适配和修复前真实 bge-m3 冒烟已通过；review 修复时服务未运行，新增 digest 强校验集成测试待恢复服务后复跑。目标 Linux 运行时、量化与完整安装尚未验证，本轮前端生产构建已通过。
 5. `npm audit` 的公告接口访问审批返回 503；`npm ci` 曾报告现有锁文件有 2 个 high 漏洞，未在未评估 breaking change 的情况下执行自动升级。
 6. 四类解析器已接入 S3/PostgreSQL/Celery 端口和持久任务；PostgreSQL/Redis/Markdown 核心链路已在真实服务验证，但 S3 签名、TLS、Bucket 权限、multipart、对象补偿及四格式完整组合仍待隔离 S3 环境。扫描 PDF 仅返回 `OCR_REQUIRED`，首版不执行 OCR。
 7. 本轮使用现有 Python 3.11.11 环境并在 `/tmp` 补充四个锁定依赖；FastAPI、Redis client、pytest/pytest-cov 小版本低于项目锁定版本，结果不替代目标 Linux 按完整锁定依赖安装的发布证明。
 8. 新迁移已在真实 PostgreSQL 16.14 完成 `upgrade head` 和 `alembic check`，JSONB 与复合外键成功落库；迁移锁时长、已有生产量级回填和查询计划仍待类生产数据验证。
-9. Phase 2 第 1 项基础代码已实现，但真实 PostgreSQL `vector` 扩展、Embedding 和 Qwen 尚未联调；HNSW 在模型维度最终确认前不创建。问答 API/SSE、答案引用持久化、Worker 索引接线、证据充分性和工单闭环仍未实现。
+9. Phase 2 第 1 项基础代码和 Ollama Embedding 适配已实现，但真实 PostgreSQL `vector` 扩展和 Qwen 尚未完成组合联调；HNSW 在模型维度最终确认前不创建。问答 API/SSE、答案引用持久化、Worker 索引接线、证据充分性和工单闭环仍未实现。
 
 ## 10. 继续开发建议
 
 新对话或新开发者接手时，建议下一步：
 
 1. 先阅读 TD-002、TD-003、TD-009、`retrieval`/`agent` 模块和 `c8784d439b23` 迁移。
-2. 环境可用时先完成 pgvector + Embedding + Qwen 的单条真实问答集成验收；随后实现证据充分性、拒答和内置工单。
+2. 本地 model-service 单条真实向量冒烟已完成；环境可用时继续完成 pgvector + Embedding + Qwen 的单条真实问答集成验收，随后实现证据充分性、拒答和内置工单。
 3. Phase 1 的真实 S3/四格式补验独立按 `docs/development/20-phase1-integration-acceptance.md` 执行，不阻塞 Phase 2 代码开发。
 
 ## 11. 接手时必须先读
