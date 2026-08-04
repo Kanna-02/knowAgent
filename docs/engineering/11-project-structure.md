@@ -87,8 +87,8 @@ conversations/tickets/documents <- analytics
 | `knowledge` | 文档片段、工单知识、来源定位、索引版本和发布视图 | `KnowledgeIndexService`（基础 Embedding 写回已实现）、`CitationResolver` | `documents`, `systems` |
 | `conversations` | 会话、消息、回答、引用快照、运行记录、多轮上下文 | `ConversationService`、`RunEventStream` | `identity`, `systems` |
 | `retrieval` | 查询改写、关键词/向量混合召回、Rerank、证据候选组织 | `BasicRetrievalService`、`EvidenceOrganizer` 已实现 | `knowledge`, `conversations` |
-| `agent` | LangGraph 问答流程、意图分类、证据决策、降级分流、回答与引用校验 | `GroundedAnswerService`、`DeterministicEvidencePolicy`、`ReliableQuestionService` 已实现；`QuestionWorkflow` 待补 | `retrieval`, `conversations`, Provider ports |
-| `tickets` | 自动建单、分派、回复、追加、关闭/重开、候选知识审核回流 | `RefusalTicketService` 与自动建单持久化已实现；完整工单状态机和 `KnowledgeCandidateService` 待补 | `systems`, `conversations`, `knowledge` |
+| `agent` | LangGraph 问答流程、意图分类、证据决策、降级分流、回答与引用校验 | `GroundedAnswerService`、`DeterministicEvidencePolicy`、`ReliableQuestionService`、`AnswerSnapshotService` 已实现；`QuestionWorkflow` 待补 | `retrieval`, `conversations`, Provider ports |
+| `tickets` | 自动建单、分派、回复、追加、关闭/重开、候选知识审核回流 | 自动建单、工单状态机、审核后向量发布已实现；API 编排待补 | `systems`, `conversations`, `knowledge` |
 | `notifications` | Outbox 消费、模板、公司通知 API、重试和人工重试 | `NotificationDispatcher` | `tickets`, `platform` |
 | `analytics` | 高频问题、知识缺口、使用统计、离线评测和版本对比 | 查询服务与聚合任务 | `conversations`, `tickets`, `documents` |
 | `audit` | 认证、权限、知识和工单关键操作审计 | `AuditSink`、审计查询 | `common`, `platform` |
@@ -329,15 +329,15 @@ Provider 可由内部 HTTP、自建运行时或后续公司 API 实现；领域�
 | 文档 | `documents` | `system_id`、逻辑文档名、`current_published_version_id`；当前指针以 `version_id + document_id + system_id` 复合引用版本 |
 | 文档 | `document_versions` | 冗余 `system_id`、对象键、文件名、媒体类型、SHA-256、版本号、解析/发布状态；`document_id + version_no` 唯一，`document_id + system_id` 复合引用文档 |
 | 文档 | `ingestion_jobs` | 原始 nullable `requested_document_id`、阶段、状态、进度、attempt、租约、错误码、Celery task id；`actor_id + system_id + idempotency_key` 唯一 |
-| 知识 | `knowledge_sources` | 来源类型 `DOCUMENT/TICKET`、`system_id`、源版本/工单、发布状态；文档来源以 `document_version_id + system_id` 复合外键约束 |
+| 知识 | `knowledge_sources` | 来源类型 `DOCUMENT/TICKET`、`system_id`、源版本/工单、发布状态；文档和工单来源均以来源 ID + `system_id` 复合外键约束 |
 | 知识 | `knowledge_chunks` | `system_id`、source、文本、`SourceLocator` JSONB、结构路径、序号、token 数、模型版本、检索文本和 nullable 无固定维度向量；以 `source_id + system_id` 复合外键约束；固定维度/HNSW 在模型契约最终确认后补充 |
 | 会话 | `conversations` | `owner_id`、不可变 `system_id`、标题、状态、最近活动时间 |
 | 会话 | `messages` | 会话、角色、内容、状态、序号；`conversation_id + sequence` 唯一 |
 | 问答 | `question_runs` | 问题消息、状态、意图、查询改写、模型/提示词/检索配置版本、降级标记、错误分类 |
 | 问答 | `run_events` | 运行内递增序号、事件类型、最小载荷；用于 SSE 断线恢复和诊断 |
 | 问答 | `evidence_decisions` | outcome、证据分数、阈值版本、理由代码、候选摘要 |
-| 问答 | `answers` | 回答消息、置信状态、完整/拒答/降级结果、生成模型元数据 |
-| 问答 | `answer_citations` | answer、chunk/source、排序、引用文本快照、定位快照、文档显示名和版本快照 |
+| 问答 | `answers` | 已实现：`run_id + system_id`、声明映射、降级结果、生成模型和 Prompt 版本快照 |
+| 问答 | `answer_citations` | 已实现：answer、原始 chunk/source ID、排序、引用文本、定位、来源显示名和版本快照；不外键依赖当前知识片段，保证历史保留 |
 | 工单 | `tickets` | `system_id`、提问人、来源运行、负责人、状态、优先级、去重指纹；来源运行唯一防重复建单 |
 | 工单 | `ticket_replies` | 工单、作者、正文、可见性、序号 |
 | 工单 | `knowledge_candidates` | 工单、标准问题、答案、审核状态、提交人、审核人、审核意见、发布 source id |
@@ -395,7 +395,7 @@ DRAFT -> SUBMITTED -> APPROVED -> PUBLISHING -> PUBLISHED
 
 ### 7.2 问答、引用和拒答
 
-Phase 2 前两项当前实现边界：`retrieval` 已提供 PostgreSQL 关键词/向量查询、数据库层系统/发布状态过滤、RRF、数据库异常降级日志和指标端口；`agent` 已提供版本化问答 Prompt、Qwen OpenAI 兼容流、证据预算、声明级结构化回答、逐字支撑校验、确定性证据决策和可靠拒答；`tickets` 已提供拒答判定与自动建单的同事务持久化、运行幂等和系统内时间窗合并。当前声明/引用快照只作为领域结果返回，问答 API/SSE、会话/答案持久化、完整 `QuestionWorkflow` 和工单处理状态机仍待实现。
+Phase 2 基础实现边界：`retrieval` 已提供 PostgreSQL 关键词/向量查询、`DOCUMENT/TICKET` 统一来源检索、数据库层系统/发布状态过滤、RRF 和可观测降级；`agent` 已提供版本化 Prompt、Qwen 兼容流、声明级引用校验以及按 `run_id + system_id` 持久化的答案/引用快照；`tickets` 已提供拒答建单、完整状态机和审核后 Embedding 成功才原子发布的知识回流。问答 API/SSE、会话/消息持久化、完整 `QuestionWorkflow` 和工单 API 仍待实现。
 
 1. 创建会话时固定 `system_id`；每次提问再次校验用户对该系统的访问权限。
 2. 事务持久化问题消息、`question_run` 和任务派发事实，提交后投递 Celery `qa` 队列并立即返回 run id。
@@ -414,8 +414,8 @@ Worker 异常退出后，恢复任务扫描超时租约并重新投递未到终�
 2. 工单事务写入后产生 Outbox，通知消费者调用公司 API；通知失败不回滚工单。
 3. 负责人回复、用户追加、关闭和重开均走状态机并写审计。
 4. 负责人将稳定答案整理为知识候选；审核者确认标准问题、答案、适用系统和来源。
-5. 审核通过后创建 `TICKET` 来源和索引任务；发布成功才标记候选 `PUBLISHED`。
-6. 新知识在配置目标 5 分钟内进入同一受控检索链路，保留工单来源，可独立下线。
+5. 审核通过时锁定候选并调用 Embedding；Provider 失败时保持 `PENDING` 且不产生发布知识，成功后在同一事务创建 `TICKET` 来源、带工单 locator 的向量片段并标记候选 `PUBLISHED`。
+6. 关键词和向量检索均纳入已发布 `TICKET` 来源，显示工单标题并保留 `ticket_id`；5 分钟时效仍需真实 API/模型链路验收。
 
 ## 8. 部署拓扑
 

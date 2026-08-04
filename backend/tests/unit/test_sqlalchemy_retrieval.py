@@ -27,7 +27,9 @@ def test_keyword_search_filters_system_and_publication_before_ranking() -> None:
     sql = compiled_statement(session)
     assert "knowledge_chunks.system_id =" in sql
     assert "knowledge_chunks.publish_status =" in sql
-    assert "knowledge_sources.source_type =" in sql
+    assert "knowledge_sources.publish_status =" in sql
+    assert "LEFT OUTER JOIN tickets" in sql
+    assert "knowledge_sources.source_type =" not in sql.split("WHERE", maxsplit=1)[1]
     assert "similarity(knowledge_chunks.retrieval_text" in sql
     assert "LIMIT" in sql
 
@@ -54,6 +56,9 @@ def test_vector_search_filters_system_publication_and_model_contract() -> None:
     assert "knowledge_chunks.embedding_model =" in sql
     assert "knowledge_chunks.embedding_model_version =" in sql
     assert "knowledge_chunks.embedding IS NOT NULL" in sql
+    assert "knowledge_sources.publish_status =" in sql
+    assert "LEFT OUTER JOIN tickets" in sql
+    assert "knowledge_sources.source_type =" not in sql.split("WHERE", maxsplit=1)[1]
     assert "<=>" in sql
 
 

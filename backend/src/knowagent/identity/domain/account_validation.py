@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 
-
 _USERNAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{2,63}$")
 
 

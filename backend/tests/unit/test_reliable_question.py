@@ -11,14 +11,16 @@ from knowagent.agent.application.answer_generation import AnswerGenerator
 from knowagent.agent.application.evidence_decision import DeterministicEvidencePolicy
 from knowagent.agent.application.reliable_question import ReliableQuestionService
 from knowagent.agent.domain.models import (
+    AnswerSnapshot,
     EvidenceDecision,
     EvidenceDecisionOutcome,
     EvidenceReasonCode,
     GenerationEvent,
     GenerationRequest,
     QuestionResolutionStatus,
+    VerifiedAnswer,
 )
-from knowagent.common.errors import ProviderUnavailableError
+from knowagent.common.errors import ConflictError, ProviderUnavailableError
 from knowagent.documents.domain.models import SourceLocator, SourceType
 from knowagent.retrieval.application.evidence import EvidenceOrganizer
 from knowagent.retrieval.domain.models import FusedSearchHit, RetrievalResult, SearchHit
@@ -54,9 +56,11 @@ def make_hit() -> FusedSearchHit:
 class StubRetrieval:
     def __init__(self, result: RetrievalResult | Exception) -> None:
         self.result = result
+        self.calls = 0
 
     async def retrieve(self, *, system_id: UUID, query: str) -> RetrievalResult:
         del system_id, query
+        self.calls += 1
         if isinstance(self.result, Exception):
             raise self.result
         return self.result
@@ -116,10 +120,18 @@ class RecordingResolutionRecorder:
     def __init__(self) -> None:
         self.sufficient: list[EvidenceDecision] = []
         self.refusals: list[EvidenceDecision] = []
+        self.answers: list[tuple[EvidenceDecision, VerifiedAnswer, tuple[str, ...], datetime]] = []
+        self.snapshots: dict[tuple[UUID, UUID], AnswerSnapshot] = {}
         self.ticket_id = uuid4()
 
     def record_sufficient(self, *, decision: EvidenceDecision) -> None:
         self.sufficient.append(decision)
+
+    def get_decision(self, *, run_id: UUID) -> EvidenceDecision | None:
+        return next(
+            (decision for decision in self.sufficient if decision.run_id == run_id),
+            None,
+        )
 
     def create_from_refusal(
         self,
@@ -131,6 +143,29 @@ class RecordingResolutionRecorder:
         del requester_id, now
         self.refusals.append(decision)
         return self.ticket_id
+
+    def record(
+        self,
+        *,
+        decision: EvidenceDecision,
+        answer: VerifiedAnswer,
+        degraded_reasons: tuple[str, ...],
+        now: datetime,
+    ) -> AnswerSnapshot:
+        self.answers.append((decision, answer, degraded_reasons, now))
+        snapshot = AnswerSnapshot(
+            id=uuid4(),
+            run_id=decision.run_id,
+            system_id=decision.system_id,
+            answer=answer,
+            degraded_reasons=degraded_reasons,
+            created_at=now,
+        )
+        self.snapshots[(decision.system_id, decision.run_id)] = snapshot
+        return snapshot
+
+    def get_by_run(self, *, system_id: UUID, run_id: UUID) -> AnswerSnapshot | None:
+        return self.snapshots.get((system_id, run_id))
 
 
 def service(
@@ -151,6 +186,7 @@ def service(
         ),
         answers=AnswerGenerator(llm),
         recorder=recorder,
+        snapshots=recorder,
         clock=lambda: NOW,
     )
 
@@ -175,7 +211,66 @@ async def test_resolve_with_sufficient_evidence_returns_verified_answer() -> Non
     assert result.answer.text == "发布前必须执行数据库迁移。"
     assert result.ticket_id is None
     assert recorder.sufficient[0].outcome is EvidenceDecisionOutcome.SUFFICIENT
+    assert recorder.answers[0][1] == result.answer
     assert recorder.refusals == []
+
+
+@pytest.mark.anyio
+async def test_resolve_replay_returns_stored_answer_without_repeating_external_calls() -> None:
+    recorder = RecordingResolutionRecorder()
+    retrieval = StubRetrieval(RetrievalResult(query="如何发布？", hits=(make_hit(),)))
+    llm = StubLlm()
+    question_service = service(retrieval=retrieval, llm=llm, recorder=recorder)
+    run_id = uuid4()
+    requester_id = uuid4()
+    system_id = uuid4()
+
+    first = await question_service.resolve(
+        run_id=run_id,
+        requester_id=requester_id,
+        system_id=system_id,
+        question="如何发布？",
+    )
+    retrieval.result = ProviderUnavailableError("database")
+    llm.unavailable = True
+    replay = await question_service.resolve(
+        run_id=run_id,
+        requester_id=requester_id,
+        system_id=system_id,
+        question="如何发布？",
+    )
+
+    assert replay.answer == first.answer
+    assert replay.decision == first.decision
+    assert retrieval.calls == 1
+    assert llm.calls == 1
+    assert len(recorder.answers) == 1
+
+
+@pytest.mark.anyio
+async def test_resolve_replay_with_changed_question_conflicts_before_retrieval() -> None:
+    recorder = RecordingResolutionRecorder()
+    retrieval = StubRetrieval(RetrievalResult(query="如何发布？", hits=(make_hit(),)))
+    question_service = service(retrieval=retrieval, llm=StubLlm(), recorder=recorder)
+    run_id = uuid4()
+    requester_id = uuid4()
+    system_id = uuid4()
+    await question_service.resolve(
+        run_id=run_id,
+        requester_id=requester_id,
+        system_id=system_id,
+        question="如何发布？",
+    )
+
+    with pytest.raises(ConflictError, match="问题不一致"):
+        await question_service.resolve(
+            run_id=run_id,
+            requester_id=requester_id,
+            system_id=system_id,
+            question="如何回滚？",
+        )
+
+    assert retrieval.calls == 1
 
 
 @pytest.mark.anyio

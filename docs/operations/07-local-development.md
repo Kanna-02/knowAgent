@@ -12,6 +12,30 @@
 
 本地 HTTP 调试可设置 `KNOWAGENT_COOKIE_SECURE=false`；类生产和生产环境必须使用 HTTPS，并保持 `true`。
 
+### macOS 本地环境基线
+
+当前 macOS 开发基线使用 Homebrew PostgreSQL 17 二进制，并由统一入口在 `.runtime/postgres` 初始化项目独立数据目录，监听 `127.0.0.1:5440`。Homebrew `pgvector` 必须与 PostgreSQL 主版本匹配；本机已验证 PostgreSQL 17.10 可加载 `vector 0.8.6` 和 `pg_trgm 1.6`。不要把数据库建在其他项目的 PostgreSQL 容器中，也不要复用按阶段命名的临时验收库。
+
+项目自己的 Redis 监听 `127.0.0.1:6380`，MinIO S3 API/控制台监听 `127.0.0.1:9200/9201`，数据、PID 和日志保存在仓库忽略的 `.runtime/`。这样即使其他项目占用标准端口，KnowAgent 的 Session、Celery broker 和文档对象仍保持独立。
+
+首次安装本地二进制：
+
+```bash
+brew install postgresql@17 pgvector redis minio
+```
+
+复制并填写两个 `.env` 后，使用仓库统一入口管理本地进程：
+
+```bash
+./scripts/local-env.sh start
+./scripts/local-env.sh serve
+./scripts/local-env.sh status
+./scripts/local-env.sh logs backend
+./scripts/local-env.sh stop
+```
+
+`start` 会初始化并启动项目独立 PostgreSQL `5440`、Redis `6380` 和 MinIO `9200/9201`，自动创建 `knowagent-dev` Bucket，检查 Ollama、执行 `alembic upgrade head`，再启动 model-service、API `8200`、Celery Worker、Celery Beat 和 Vite 前端 `5273`。Vite 使用严格端口并通过 `VITE_API_PROXY_TARGET` 自动代理到项目 API。普通终端可使用 `start` 后台运行；需要由当前终端持续托管进程时使用 `serve`，按 `Ctrl+C` 会统一停止。`stop` 会同时校验 `.runtime/` 中的 PID 和进程启动时间，只停止本次脚本启动的 KnowAgent 进程；过期或已被复用的 PID 记录只会被清理，不会向无关进程发送信号。单独执行迁移使用 `./scripts/local-env.sh migrate`。
+
 ## 2. 后端
 
 ```powershell
@@ -131,7 +155,7 @@ curl -X POST http://127.0.0.1:8100/v1/embeddings \
 ```bash
 cd model-service
 export KNOWAGENT_TEST_OLLAMA_BASE_URL=http://127.0.0.1:11434
-export KNOWAGENT_TEST_OLLAMA_MODEL_DIGEST=daec91ff
+export KNOWAGENT_TEST_OLLAMA_MODEL_DIGEST=79076464
 PYTHONPATH=src pytest tests/integration/test_live_ollama.py -m integration -v
 ```
 
@@ -182,12 +206,12 @@ npm run dev -- --host 127.0.0.1 --port 5173
 
 页面地址：
 
-- 用户登录：`http://127.0.0.1:5173/login`
-- 用户问答首页与系统选择：`http://127.0.0.1:5173/app`
-- 管理员登录：`http://127.0.0.1:5173/admin/login`
-- 业务系统管理：`http://127.0.0.1:5173/admin/systems`
+- 统一入口启动后的用户登录：`http://127.0.0.1:5273/login`
+- 用户问答首页与系统选择：`http://127.0.0.1:5273/app`
+- 管理员登录：`http://127.0.0.1:5273/admin/login`
+- 业务系统管理：`http://127.0.0.1:5273/admin/systems`
 
-Vite 将 `/api` 代理到 `http://127.0.0.1:8000`。
+统一入口通过环境变量将 Vite `/api` 代理到 `http://127.0.0.1:8200`；手工启动未设置该变量时仍使用默认 `http://127.0.0.1:8000`。
 
 ## 7. 验证
 

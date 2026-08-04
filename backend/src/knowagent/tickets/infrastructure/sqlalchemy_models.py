@@ -19,8 +19,12 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from knowagent.identity.infrastructure.sqlalchemy_models import Base, enum_values
-from knowagent.tickets.domain.models import TicketPriority, TicketStatus
-from knowagent.tickets.domain.models import CandidateStatus, ReplyAuthorRole
+from knowagent.tickets.domain.models import (
+    CandidateStatus,
+    ReplyAuthorRole,
+    TicketPriority,
+    TicketStatus,
+)
 
 
 class TicketRecord(Base):  # pylint: disable=too-few-public-methods
@@ -185,7 +189,7 @@ class TicketTransitionRecord(Base):  # pylint: disable=too-few-public-methods
             native_enum=False,
             create_constraint=True,
             length=32,
-            name="ticket_status",
+            name="ticket_transition_from_status",
         ),
         nullable=True,
     )
@@ -196,7 +200,7 @@ class TicketTransitionRecord(Base):  # pylint: disable=too-few-public-methods
             native_enum=False,
             create_constraint=True,
             length=32,
-            name="ticket_status",
+            name="ticket_transition_to_status",
         ),
         nullable=False,
     )

@@ -62,8 +62,7 @@ class CurrentUserView(BaseModel):
             status=account.status,
             must_change_password=account.must_change_password,
             system_roles=[
-                SystemRoleView.from_assignment(assignment)
-                for assignment in (system_roles or [])
+                SystemRoleView.from_assignment(assignment) for assignment in (system_roles or [])
             ],
         )
 

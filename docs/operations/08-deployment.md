@@ -12,6 +12,8 @@
 
 禁止使用 Docker 作为运行前提。配置位于 release 目录外，权限为 `0600`；密钥不进入仓库、命令历史或日志。
 
+仓库的 `scripts/local-env.sh` 仅用于 macOS/Linux 本地开发，使用 `.runtime/` 管理项目进程和独立 Redis，不是生产发布入口。staging/production 仍按本文件的 systemd + Nginx 基线部署，且必须使用所属环境的独立 PostgreSQL、Redis namespace、Bucket 和密钥；禁止复用其他项目容器。
+
 ## 2. 构建与部署前检查
 
 ```bash

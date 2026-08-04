@@ -9,8 +9,8 @@ from dataclasses import dataclass
 class ModelServiceSettings:  # pylint: disable=too-many-instance-attributes
     ollama_base_url: str = "http://127.0.0.1:11434"
     embedding_model: str = "bge-m3"
-    embedding_model_version: str = "ollama-bge-m3-daec91ff"
-    ollama_model_digest: str = "daec91ff"
+    embedding_model_version: str = "ollama-bge-m3-79076464"
+    ollama_model_digest: str = "79076464"
     embedding_dimension: int = 1024
     ollama_timeout_seconds: float = 300.0
     ollama_health_timeout_seconds: float = 5.0
@@ -35,9 +35,10 @@ class ModelServiceSettings:  # pylint: disable=too-many-instance-attributes
         if any(not value.strip() for value in text_values):
             raise ValueError("model-service text settings must not be blank")
         normalized_digest = self.ollama_model_digest.lower().removeprefix("sha256:")
-        if not 8 <= len(normalized_digest) <= 64 or re.fullmatch(
-            r"[0-9a-f]+", normalized_digest
-        ) is None:
+        if (
+            not 8 <= len(normalized_digest) <= 64
+            or re.fullmatch(r"[0-9a-f]+", normalized_digest) is None
+        ):
             raise ValueError("Ollama model digest must be an 8-64 character hex prefix")
         if not self.embedding_model_version.lower().endswith(normalized_digest):
             raise ValueError("embedding model version must end with the Ollama digest prefix")
@@ -67,10 +68,10 @@ class ModelServiceSettings:  # pylint: disable=too-many-instance-attributes
             ).strip(),
             embedding_model=os.getenv("KNOWAGENT_MODEL_EMBEDDING_MODEL", "bge-m3").strip(),
             embedding_model_version=os.getenv(
-                "KNOWAGENT_MODEL_EMBEDDING_VERSION", "ollama-bge-m3-daec91ff"
+                "KNOWAGENT_MODEL_EMBEDDING_VERSION", "ollama-bge-m3-79076464"
             ).strip(),
             ollama_model_digest=os.getenv(
-                "KNOWAGENT_MODEL_OLLAMA_MODEL_DIGEST", "daec91ff"
+                "KNOWAGENT_MODEL_OLLAMA_MODEL_DIGEST", "79076464"
             ).strip(),
             embedding_dimension=int(os.getenv("KNOWAGENT_MODEL_EMBEDDING_DIMENSION", "1024")),
             ollama_timeout_seconds=float(

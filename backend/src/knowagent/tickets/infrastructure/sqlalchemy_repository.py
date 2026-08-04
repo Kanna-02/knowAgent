@@ -283,6 +283,14 @@ class SqlAlchemyTicketRepository:  # pylint: disable=too-many-public-methods
         record = self._session.get(KnowledgeCandidateRecord, candidate_id)
         return self._to_candidate(record) if record is not None else None
 
+    def lock_candidate(self, *, candidate_id: UUID) -> KnowledgeCandidate | None:
+        record = self._session.scalar(
+            select(KnowledgeCandidateRecord)
+            .where(KnowledgeCandidateRecord.id == candidate_id)
+            .with_for_update()
+        )
+        return self._to_candidate(record) if record is not None else None
+
     def get_pending_candidate_by_ticket(self, *, ticket_id: UUID) -> KnowledgeCandidate | None:
         record = self._session.scalar(
             select(KnowledgeCandidateRecord).where(
@@ -292,7 +300,7 @@ class SqlAlchemyTicketRepository:  # pylint: disable=too-many-public-methods
         )
         return self._to_candidate(record) if record is not None else None
 
-    def approve_candidate(
+    def publish_candidate(
         self,
         *,
         candidate_id: UUID,
@@ -303,7 +311,7 @@ class SqlAlchemyTicketRepository:  # pylint: disable=too-many-public-methods
         record = self._session.get(KnowledgeCandidateRecord, candidate_id)
         if record is None:
             raise NotFoundError("KNOWLEDGE_CANDIDATE_NOT_FOUND", "知识候选不存在")
-        record.status = CandidateStatus.APPROVED
+        record.status = CandidateStatus.PUBLISHED
         record.reviewer_id = reviewer_id
         record.knowledge_source_id = knowledge_source_id
         record.updated_at = now
@@ -357,24 +365,37 @@ class SqlAlchemyTicketRepository:  # pylint: disable=too-many-public-methods
         self._session.flush()
         return source.id
 
-    def create_published_chunk(
+    def create_published_chunk(  # pylint: disable=too-many-arguments,too-many-locals
         self,
         *,
         system_id: UUID,
         source_id: UUID,
         text: str,
+        embedding_model: str,
+        embedding_model_version: str,
+        embedding: tuple[float, ...],
         now: datetime,
-   ) -> UUID:  # pylint: disable=too-many-positional-arguments
+    ) -> UUID:
         # Deferred import: pgvector is only available in the deployment venv.
         # pylint: disable=import-outside-toplevel
         from knowagent.common.lifecycle import PublicationStatus
+        from knowagent.documents.domain.models import SourceLocator, SourceType
         from knowagent.knowledge.infrastructure.sqlalchemy_models import (
             KnowledgeChunkRecord,
+            KnowledgeSourceRecord,
         )
 
         trimmed = text.strip()
         if not trimmed:
             raise ValueError("knowledge chunk text must not be blank")
+        source = self._session.get(KnowledgeSourceRecord, source_id)
+        if source is None or source.system_id != system_id or source.ticket_id is None:
+            raise NotFoundError("KNOWLEDGE_SOURCE_NOT_FOUND", "知识来源不存在")
+        locator = SourceLocator(
+            source_type=SourceType.TICKET,
+            block_index=0,
+            ticket_id=source.ticket_id,
+        )
         chunk = KnowledgeChunkRecord(
             system_id=system_id,
             source_id=source_id,
@@ -382,11 +403,11 @@ class SqlAlchemyTicketRepository:  # pylint: disable=too-many-public-methods
             text=trimmed,
             token_count=1,
             structure_path=[],
-            locators=[],
+            locators=[locator.model_dump(mode="json")],
             retrieval_text=trimmed,
-            embedding_model=None,
-            embedding_model_version=None,
-            embedding=None,
+            embedding_model=embedding_model,
+            embedding_model_version=embedding_model_version,
+            embedding=list(embedding),
             publish_status=PublicationStatus.PUBLISHED,
             created_at=now,
             updated_at=now,

@@ -3,7 +3,13 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from knowagent.common.errors import ConflictError, NotFoundError, ValidationError
+from knowagent.common.errors import (
+    ConflictError,
+    NotFoundError,
+    ProviderUnavailableError,
+    ValidationError,
+)
+from knowagent.retrieval.ports import EmbeddingProvider
 from knowagent.tickets.domain.models import CandidateStatus, KnowledgeCandidate
 from knowagent.tickets.ports import TicketRepository
 
@@ -26,8 +32,9 @@ class KnowledgeReviewService:
     responsibility of :class:`TicketWorkflowService` and the orchestration layer.
     """
 
-    def __init__(self, *, repository: TicketRepository) -> None:
+    def __init__(self, *, repository: TicketRepository, embeddings: EmbeddingProvider) -> None:
         self._repository = repository
+        self._embeddings = embeddings
 
     def submit_answer(
         self,
@@ -69,7 +76,7 @@ class KnowledgeReviewService:
         )
         return candidate
 
-    def approve(
+    async def approve(
         self,
         *,
         candidate_id: UUID,
@@ -86,6 +93,17 @@ class KnowledgeReviewService:
                 "KNOWLEDGE_CANDIDATE_NOT_PENDING",
                 "只能审核待处理的知识候选",
             )
+        embedding_batch = await self._embeddings.embed(texts=(candidate.answer,))
+        if len(embedding_batch.vectors) != 1 or not embedding_batch.normalized:
+            raise ProviderUnavailableError("embedding")
+        candidate = self._repository.lock_candidate(candidate_id=candidate_id)
+        if candidate is None:
+            raise NotFoundError("KNOWLEDGE_CANDIDATE_NOT_FOUND", "知识候选不存在")
+        if candidate.status is not CandidateStatus.PENDING:
+            raise ConflictError(
+                "KNOWLEDGE_CANDIDATE_NOT_PENDING",
+                "只能审核待处理的知识候选",
+            )
         knowledge_source_id = self._repository.create_ticket_knowledge_source(
             system_id=candidate.system_id,
             ticket_id=candidate.ticket_id,
@@ -95,9 +113,12 @@ class KnowledgeReviewService:
             system_id=candidate.system_id,
             source_id=knowledge_source_id,
             text=candidate.answer,
+            embedding_model=embedding_batch.model,
+            embedding_model_version=embedding_batch.model_version,
+            embedding=embedding_batch.vectors[0],
             now=now,
         )
-        approved = self._repository.approve_candidate(
+        approved = self._repository.publish_candidate(
             candidate_id=candidate_id,
             reviewer_id=reviewer_id,
             knowledge_source_id=knowledge_source_id,
@@ -114,7 +135,7 @@ class KnowledgeReviewService:
     ) -> KnowledgeCandidate:
         if now.tzinfo is None:
             raise ValueError("reject time must be timezone-aware")
-        candidate = self._repository.get_candidate(candidate_id=candidate_id)
+        candidate = self._repository.lock_candidate(candidate_id=candidate_id)
         if candidate is None:
             raise NotFoundError("KNOWLEDGE_CANDIDATE_NOT_FOUND", "知识候选不存在")
         if candidate.status is not CandidateStatus.PENDING:

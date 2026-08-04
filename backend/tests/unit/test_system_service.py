@@ -108,9 +108,9 @@ class SessionStoreFake:
         self.revoked.append(account_id)
 
 
-def make_service() -> tuple[
-    SystemService, SystemRepositoryFake, AccountDirectoryFake, SessionStoreFake
-]:
+def make_service() -> (
+    tuple[SystemService, SystemRepositoryFake, AccountDirectoryFake, SessionStoreFake]
+):
     systems = SystemRepositoryFake()
     accounts = AccountDirectoryFake()
     sessions = SessionStoreFake()

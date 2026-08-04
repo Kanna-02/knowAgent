@@ -31,7 +31,6 @@ from knowagent.systems.infrastructure.sqlalchemy_repository import (
     SqlAlchemySystemRepository,
 )
 
-
 router = APIRouter()
 
 

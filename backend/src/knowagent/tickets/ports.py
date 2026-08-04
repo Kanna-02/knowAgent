@@ -5,9 +5,10 @@ from typing import Protocol
 from uuid import UUID
 
 from knowagent.agent.domain.models import EvidenceDecision
-from knowagent.tickets.domain.models import Ticket, TicketOccurrence
 from knowagent.tickets.domain.models import (
     KnowledgeCandidate,
+    Ticket,
+    TicketOccurrence,
     TicketReply,
     TicketStatus,
     TicketTransition,
@@ -76,9 +77,11 @@ class TicketRepository(Protocol):  # pylint: disable=too-many-public-methods
 
     def get_candidate(self, *, candidate_id: UUID) -> KnowledgeCandidate | None: ...
 
+    def lock_candidate(self, *, candidate_id: UUID) -> KnowledgeCandidate | None: ...
+
     def get_pending_candidate_by_ticket(self, *, ticket_id: UUID) -> KnowledgeCandidate | None: ...
 
-    def approve_candidate(
+    def publish_candidate(
         self,
         *,
         candidate_id: UUID,
@@ -103,11 +106,14 @@ class TicketRepository(Protocol):  # pylint: disable=too-many-public-methods
         now: datetime,
     ) -> UUID: ...
 
-    def create_published_chunk(
+    def create_published_chunk(  # pylint: disable=too-many-arguments
         self,
         *,
         system_id: UUID,
         source_id: UUID,
         text: str,
+        embedding_model: str,
+        embedding_model_version: str,
+        embedding: tuple[float, ...],
         now: datetime,
     ) -> UUID: ...

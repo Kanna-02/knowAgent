@@ -7,15 +7,20 @@ from typing import Protocol
 from uuid import UUID
 
 from knowagent.agent.application.answer_generation import AnswerGenerator
-from knowagent.agent.application.evidence_decision import DeterministicEvidencePolicy
+from knowagent.agent.application.evidence_decision import (
+    DeterministicEvidencePolicy,
+    normalize_question,
+)
 from knowagent.agent.domain.models import (
+    AnswerSnapshot,
     EvidenceDecision,
     EvidenceDecisionOutcome,
     EvidenceReasonCode,
     QuestionResolution,
     QuestionResolutionStatus,
+    VerifiedAnswer,
 )
-from knowagent.common.errors import ProviderUnavailableError, ValidationError
+from knowagent.common.errors import ConflictError, ProviderUnavailableError, ValidationError
 from knowagent.retrieval.application.evidence import EvidenceOrganizer
 from knowagent.retrieval.domain.models import RetrievalResult
 
@@ -32,6 +37,8 @@ class RetrievalService(Protocol):  # pylint: disable=too-few-public-methods
 
 
 class ResolutionRecorder(Protocol):
+    def get_decision(self, *, run_id: UUID) -> EvidenceDecision | None: ...
+
     def record_sufficient(self, *, decision: EvidenceDecision) -> None: ...
 
     def create_from_refusal(
@@ -43,6 +50,19 @@ class ResolutionRecorder(Protocol):
     ) -> UUID: ...
 
 
+class AnswerRecorder(Protocol):  # pylint: disable=too-few-public-methods
+    def get_by_run(self, *, system_id: UUID, run_id: UUID) -> AnswerSnapshot | None: ...
+
+    def record(
+        self,
+        *,
+        decision: EvidenceDecision,
+        answer: VerifiedAnswer,
+        degraded_reasons: tuple[str, ...],
+        now: datetime,
+    ) -> AnswerSnapshot: ...
+
+
 class ReliableQuestionService:  # pylint: disable=too-few-public-methods,too-many-instance-attributes,too-many-arguments
     def __init__(
         self,
@@ -52,6 +72,7 @@ class ReliableQuestionService:  # pylint: disable=too-few-public-methods,too-man
         policy: DeterministicEvidencePolicy,
         answers: AnswerGenerator,
         recorder: ResolutionRecorder,
+        snapshots: AnswerRecorder,
         clock: Callable[[], datetime],
     ) -> None:
         self._retrieval = retrieval
@@ -59,6 +80,7 @@ class ReliableQuestionService:  # pylint: disable=too-few-public-methods,too-man
         self._policy = policy
         self._answers = answers
         self._recorder = recorder
+        self._snapshots = snapshots
         self._clock = clock
 
     async def resolve(
@@ -70,6 +92,9 @@ class ReliableQuestionService:  # pylint: disable=too-few-public-methods,too-man
         question: str,
         required_terms: tuple[str, ...] = (),
     ) -> QuestionResolution:
+        replay = self._replay_answer(run_id=run_id, system_id=system_id, question=question)
+        if replay is not None:
+            return replay
         retrieval = await self._retrieval.retrieve(system_id=system_id, query=question)
         now = self._clock()
         decision = self._policy.decide(
@@ -117,6 +142,12 @@ class ReliableQuestionService:  # pylint: disable=too-few-public-methods,too-man
             )
 
         self._recorder.record_sufficient(decision=decision)
+        self._snapshots.record(
+            decision=decision,
+            answer=answer,
+            degraded_reasons=retrieval.degraded_reasons,
+            now=now,
+        )
         return QuestionResolution(
             status=QuestionResolutionStatus.ANSWERED,
             decision=decision,
@@ -124,6 +155,30 @@ class ReliableQuestionService:  # pylint: disable=too-few-public-methods,too-man
             ticket_id=None,
             reason_codes=(),
             degraded_reasons=retrieval.degraded_reasons,
+        )
+
+    def _replay_answer(
+        self,
+        *,
+        run_id: UUID,
+        system_id: UUID,
+        question: str,
+    ) -> QuestionResolution | None:
+        snapshot = self._snapshots.get_by_run(system_id=system_id, run_id=run_id)
+        if snapshot is None:
+            return None
+        decision = self._recorder.get_decision(run_id=run_id)
+        if decision is None or decision.system_id != system_id:
+            raise ConflictError("QUESTION_RUN_INCONSISTENT", "问答运行记录与答案快照不一致")
+        if decision.normalized_query != normalize_question(question):
+            raise ConflictError("QUESTION_RUN_REUSED", "同一问答运行的问题不一致")
+        return QuestionResolution(
+            status=QuestionResolutionStatus.ANSWERED,
+            decision=decision,
+            answer=snapshot.answer,
+            ticket_id=None,
+            reason_codes=(),
+            degraded_reasons=snapshot.degraded_reasons,
         )
 
     def _record_refusal(

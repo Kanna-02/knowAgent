@@ -18,7 +18,6 @@ from knowagent.identity.infrastructure.sqlalchemy_models import AccountRecord
 from knowagent.platform.database import create_database_engine, create_session_factory
 from knowagent.platform.settings import Settings
 
-
 _ADMIN_BOOTSTRAP_LOCK_ID = 1_265_660_574_325_345
 
 

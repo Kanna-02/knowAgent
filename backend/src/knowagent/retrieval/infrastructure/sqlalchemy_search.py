@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from uuid import UUID
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Select, cast, desc, func, select
+from sqlalchemy import Select, String, case, cast, desc, func, literal, select
 from sqlalchemy.engine import Row
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -23,6 +23,7 @@ from knowagent.knowledge.infrastructure.sqlalchemy_models import (
     KnowledgeSourceRecord,
 )
 from knowagent.retrieval.domain.models import SearchHit
+from knowagent.tickets.infrastructure.sqlalchemy_models import TicketRecord
 
 # SQLAlchemy's dynamic func namespace triggers false positives.
 # pylint: disable=not-callable
@@ -43,7 +44,7 @@ class PostgresKnowledgeSearch:
         statement = self._base_statement(similarity.label("score")).where(
             KnowledgeChunkRecord.system_id == system_id,
             KnowledgeChunkRecord.publish_status == PublicationStatus.PUBLISHED,
-            KnowledgeSourceRecord.source_type == KnowledgeSourceType.DOCUMENT,
+            KnowledgeSourceRecord.publish_status == PublicationStatus.PUBLISHED,
             similarity > 0,
         )
         statement = statement.order_by(desc(similarity), KnowledgeChunkRecord.id).limit(limit)
@@ -70,7 +71,7 @@ class PostgresKnowledgeSearch:
         statement = self._base_statement(score).where(
             KnowledgeChunkRecord.system_id == system_id,
             KnowledgeChunkRecord.publish_status == PublicationStatus.PUBLISHED,
-            KnowledgeSourceRecord.source_type == KnowledgeSourceType.DOCUMENT,
+            KnowledgeSourceRecord.publish_status == PublicationStatus.PUBLISHED,
             KnowledgeChunkRecord.embedding.is_not(None),
             KnowledgeChunkRecord.embedding_model == model,
             KnowledgeChunkRecord.embedding_model_version == model_version,
@@ -86,12 +87,26 @@ class PostgresKnowledgeSearch:
     @staticmethod
     def _base_statement(
         score: ColumnElement[float],
-    ) -> Select[tuple[KnowledgeChunkRecord, str, int, float]]:
+    ) -> Select[tuple[KnowledgeChunkRecord, str, str, float]]:
+        source_name = case(
+            (
+                KnowledgeSourceRecord.source_type == KnowledgeSourceType.TICKET,
+                literal("工单：") + TicketRecord.title,
+            ),
+            else_=DocumentRecord.name,
+        )
+        source_version = case(
+            (
+                KnowledgeSourceRecord.source_type == KnowledgeSourceType.TICKET,
+                cast(TicketRecord.id, String),
+            ),
+            else_=cast(DocumentVersionRecord.version_no, String),
+        )
         return (
             select(
                 KnowledgeChunkRecord,
-                DocumentRecord.name.label("source_name"),
-                DocumentVersionRecord.version_no.label("source_version"),
+                source_name.label("source_name"),
+                source_version.label("source_version"),
                 score,
             )
             .join(
@@ -99,21 +114,26 @@ class PostgresKnowledgeSearch:
                 (KnowledgeSourceRecord.id == KnowledgeChunkRecord.source_id)
                 & (KnowledgeSourceRecord.system_id == KnowledgeChunkRecord.system_id),
             )
-            .join(
+            .outerjoin(
                 DocumentVersionRecord,
                 (DocumentVersionRecord.id == KnowledgeSourceRecord.document_version_id)
                 & (DocumentVersionRecord.system_id == KnowledgeSourceRecord.system_id),
             )
-            .join(
+            .outerjoin(
                 DocumentRecord,
                 (DocumentRecord.id == DocumentVersionRecord.document_id)
                 & (DocumentRecord.system_id == DocumentVersionRecord.system_id),
+            )
+            .outerjoin(
+                TicketRecord,
+                (TicketRecord.id == KnowledgeSourceRecord.ticket_id)
+                & (TicketRecord.system_id == KnowledgeSourceRecord.system_id),
             )
         )
 
     @staticmethod
     def _to_hits(
-        rows: Sequence[Row[tuple[KnowledgeChunkRecord, str, int, float]]],
+        rows: Sequence[Row[tuple[KnowledgeChunkRecord, str, str, float]]],
     ) -> tuple[SearchHit, ...]:
         hits: list[SearchHit] = []
         for chunk, source_name, source_version, score in rows:

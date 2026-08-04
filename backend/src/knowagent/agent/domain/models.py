@@ -89,6 +89,20 @@ class GroundedAnswer:
     degraded_reasons: tuple[str, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class AnswerSnapshot:
+    id: UUID
+    run_id: UUID
+    system_id: UUID
+    answer: VerifiedAnswer
+    degraded_reasons: tuple[str, ...]
+    created_at: datetime
+
+    def __post_init__(self) -> None:
+        if self.created_at.tzinfo is None:
+            raise ValueError("answer snapshot time must be timezone-aware")
+
+
 class EvidenceDecisionOutcome(StrEnum):
     SUFFICIENT = "sufficient"
     INSUFFICIENT = "insufficient"

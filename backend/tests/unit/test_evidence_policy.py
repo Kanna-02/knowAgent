@@ -222,7 +222,9 @@ def test_decide_with_covered_normalized_term_remains_sufficient() -> None:
 
 def test_decide_normalizes_evidence_text_before_required_term_matching() -> None:
     decision = decide(
-        RetrievalResult(query="ESB TLS 如何配置？", hits=(make_hit(text="ESB ＴＬＳ\n 发布步骤。"),)),
+        RetrievalResult(
+            query="ESB TLS 如何配置？", hits=(make_hit(text="ESB ＴＬＳ\n 发布步骤。"),)
+        ),
         required_terms=("TLS 发布",),
     )
 

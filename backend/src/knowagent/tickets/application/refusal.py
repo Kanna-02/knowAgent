@@ -44,6 +44,9 @@ class RefusalTicketService:
             raise ConflictError("EVIDENCE_DECISION_CONFLICT", "同一问答运行已有不同判定")
         self._assert_decision_payload_matches(existing, decision)
 
+    def get_decision(self, *, run_id: UUID) -> EvidenceDecision | None:
+        return self._repository.get_decision(run_id=run_id)
+
     def create_from_refusal(
         self,
         *,

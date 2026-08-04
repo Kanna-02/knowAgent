@@ -36,7 +36,6 @@ def locator_ids() -> dict[str, object]:
             },
         ),
         (SourceType.XLSX, {"sheet_name": "参数", "cell_range": "A2:C3"}),
-        (SourceType.TICKET, {"ticket_id": uuid4()}),
     ],
 )
 def test_source_locator_accepts_each_supported_shape(
@@ -132,3 +131,28 @@ def test_source_locator_rejects_ambiguous_or_partial_table_locations(
 ) -> None:
     with pytest.raises(ValidationError):
         SourceLocator(source_type=source_type, **locator_ids(), **fields)
+
+
+def test_ticket_locator_uses_ticket_identity_without_fake_document_ids() -> None:
+    ticket_id = uuid4()
+
+    locator = SourceLocator(
+        source_type=SourceType.TICKET,
+        block_index=0,
+        ticket_id=ticket_id,
+    )
+
+    assert locator.ticket_id == ticket_id
+    assert locator.document_id is None
+    assert locator.document_version_id is None
+
+
+def test_ticket_locator_rejects_document_identity() -> None:
+    with pytest.raises(ValidationError, match="document"):
+        SourceLocator(
+            document_id=uuid4(),
+            document_version_id=uuid4(),
+            source_type=SourceType.TICKET,
+            block_index=0,
+            ticket_id=uuid4(),
+        )

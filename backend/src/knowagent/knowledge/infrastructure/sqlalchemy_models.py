@@ -47,6 +47,12 @@ class KnowledgeSourceRecord(Base):
             name="fk_knowledge_sources_version_system",
             ondelete="CASCADE",
         ),
+        ForeignKeyConstraint(
+            ["ticket_id", "system_id"],
+            ["tickets.id", "tickets.system_id"],
+            name="fk_knowledge_sources_ticket_system",
+            ondelete="RESTRICT",
+        ),
         CheckConstraint(
             "(source_type = 'DOCUMENT' AND document_version_id IS NOT NULL "
             "AND ticket_id IS NULL) OR "

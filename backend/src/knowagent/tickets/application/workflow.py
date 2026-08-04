@@ -103,7 +103,7 @@ class TicketWorkflowService:
         now: datetime,
         transition_to: TicketStatus | None = None,
         action: str | None = None,
-   ) -> tuple[TicketReply, Ticket]:
+    ) -> tuple[TicketReply, Ticket]:
         # pylint: disable=too-many-arguments
         if now.tzinfo is None:
             raise ValueError("reply time must be timezone-aware")

@@ -5,11 +5,11 @@
 ## 1. 快照时间
 
 ```text
-更新时间：2026-08-03
+更新时间：2026-08-04
 更新人/助手：Codex
 当前分支：master
 远程仓库：git@github.com:Kanna-02/knowAgent.git
-当前环境：Python 3.11.11；PostgreSQL 16.14；Redis 7；Node.js 24.16.0；本地 Ollama 0.3.14 + bge-m3
+当前环境：Python 3.11.11；PostgreSQL 17.10 + vector 0.8.6 + pg_trgm 1.6；Redis 7；本地 MinIO；Node.js 24.16.0；本地 Ollama 0.3.14 + bge-m3
 ```
 
 ## 2. 当前阶段
@@ -17,8 +17,8 @@
 ```text
 当前阶段：Phase 2 问答与工单闭环（Phase 1 真实 S3 补验并行待办）
 阶段目标：系统隔离检索、带引用回答、可靠拒答、内置工单和审核回流
-当前任务：Phase 2 第 3/4 项，工单分派/处理/追加/关闭/重开/审核入库（基础代码完成，待补工单 API 路由、检索纳入 TICKET 来源与端到端验收）
-任务状态：前三项基础代码与自动化验证完成；第 2 项迁移往返、真实 pgvector/Qwen 组合集成、问答 API/SSE、工单 API 路由、检索层纳入 TICKET 来源与第 4 项待补
+当前任务：Phase 2 四项基础代码完成，进入问答 API/SSE、工单 API 与集成验收
+任务状态：4/4 基础代码与自动化验证完成；本地 PostgreSQL 17 已迁移到 c1738febb896，待补真实 pgvector/Embedding/Qwen 组合链路和 AC-004 至 AC-007 端到端验收
 ```
 
 ## 3. 已完成
@@ -68,31 +68,33 @@
 43. 已实现版本化确定性证据策略，覆盖无证据、定位缺失、低融合分、头部差值不足、必需词未覆盖、显式冲突和向量降级阈值倍率，并一次记录全部失败原因。
 44. 已实现可靠问答分流：证据不足、证据预算清空和生成内容无法由引用原文支撑时拒答；检索/模型不可用和模型格式错误保持系统故障，不误建知识缺口工单。
 45. 已实现证据判定与自动工单同事务持久化、`run_id` 幂等，以及按系统、规范化问题和时间窗合并重复工单；不同系统不合并。
+46. 已完成审核发布重新索引：批准前先生成 Embedding，失败保持候选 `PENDING` 且不发布，成功后事务内创建带向量的 `TICKET` 来源/片段并将候选标记为 `PUBLISHED`。
+47. 已将关键词和向量检索扩展到已发布工单来源，文档与工单使用外连接组装来源名称/版本；工单 locator 使用 `ticket_id`，不伪造文档身份。
+48. 已实现回答与引用快照持久化，保存回答、声明、模型/Prompt 版本、降级原因、逐字引用和完整 locator；原 chunk/source UUID 作为历史值保留，不依赖当前知识表生命周期。
+49. 已新增并验证 `c1738febb896` 迁移，答案/引用复合隔离、运行唯一约束、工单来源复合外键和候选 `PUBLISHED` 状态均已落地到本地 PostgreSQL 17。
+50. 已完成 Phase 2 第 4 项 review 修复：审核锁不再跨越 Embedding `await`，候选批准/拒绝统一串行化；答案重放在外部调用前返回历史快照并处理并发唯一冲突；本地进程停止校验 PID 启动身份；ORM 约束名和模型默认 digest 与迁移、运行配置一致。
 
 ## 4. 正在进行
 
-1. Phase 2 功能范围 3/4 的基础代码已完成；第 2 项新迁移往返、问答 API/SSE、答案引用持久化、Worker 索引接线、检索层纳入 TICKET 来源、工单 API 路由与第 4 项仍待补；第 3 项工单工作流与审核入库单测和静态检查已通过。
-2. Phase 1 功能范围 6/6 已实现且 PostgreSQL/Redis 预验收通过；真实 S3 与四格式完整持久化链路仍是并行补验项。
-3. 本地 Ollama Embedding 适配已就绪；等待可加载 `vector` 的 PostgreSQL 和完整 Qwen Key 完成组合联调。
+1. Phase 2 功能范围 4/4 的基础代码与自动化验证已完成；问答 API/SSE、工单 API、文档索引 Worker 接线和 AC-004 至 AC-007 集成验收正在排期。
+2. Phase 1 功能范围 6/6 已实现且 PostgreSQL/Redis 预验收通过；本地 MinIO 已建立并完成对象冒烟，四格式完整持久化链路仍是并行补验项。
+3. 本地 PostgreSQL 17、pgvector、pg_trgm、MinIO 和 Ollama Embedding 已就绪；等待完整 Qwen Key 完成组合联调。
 4. 等待目标 Linux 服务器资源信息以最终确定 Embedding/Rerank 推理后端、量化方式和 Python 传递依赖锁；本地 Ollama 方案不自动等同生产选型。
 
 ## 5. 未完成 / 下一步
 
-1. 提供隔离 S3 endpoint/Bucket 后，补跑四种格式的 S3→PostgreSQL→Worker 完整链路和页面手测；仅需复验对象存储相关集成点。
-2. 在支持 `vector`/`pg_trgm` 的 PostgreSQL 执行 `c8784d439b23`，启动真实 `/v1/embeddings` 服务并配置完整 Qwen Key，跑通索引、双通道检索、生成和引用集成样例。
-3. 在隔离数据库补跑 `cc99b700f739` 的升级/降级/升级往返与 `alembic check`，再接入问答 API/SSE 和会话/答案/引用持久化。
-4. 实现 Phase 2 第 3/4 项：按系统分派、处理、追加、关闭、重开和审核入库。（基础代码与 24 项单测已完成，待补工单 API 路由、检索层纳入 TICKET 来源与真实链路验收）
-5. 接入索引 Worker 阶段并完成 AC-004 至 AC-007 的端到端验收；随后在类生产 Linux 环境验证迁移锁时长、模型运行和发布回滚。
+1. 接入问答 API/SSE 与工单 API，装配可靠问答、答案快照、工单工作流和知识审核服务。
+2. 接入文档索引 Worker，并使用本地 PostgreSQL 17 + pgvector、Ollama Embedding 和完整 Qwen Key 跑通索引、双通道检索、生成、引用及审核回流样例。
+3. 完成 AC-004 至 AC-007 的端到端验收，覆盖跨系统零泄漏、可靠拒答建单、工单处理审核和发布后可检索时延。
+4. 使用本地 MinIO 补跑四种格式的 S3→PostgreSQL→Worker 完整链路和页面手测；随后在类生产 Linux 环境验证迁移锁时长、模型运行和发布回滚。
 
 ## 6. 阻塞点
 
 | 问题 | 影响 | 需要谁处理 | 当前状态 |
 | --- | --- | --- | --- |
-| 当前 PostgreSQL 16 无可加载的 `vector` 扩展 | 阻塞真实向量列迁移和 pgvector 查询；代码与 SQLite 迁移测试不受影响 | 用户/DBA | 本机 Homebrew pgvector 仅含 PG17/18 构件，待提供兼容实例 |
 | 模型服务器 CPU/内存/GPU 信息未知 | 影响生产 Embedding/Rerank 运行时和量化；本地 Ollama 适配不受阻 | 运维/用户 | 待提供 |
 | Qwen 完整 API Key 未配置 | 阻塞真实回答生成联调 | 用户/运维 | Qwen base/model 已知；Key 待提供 |
 | 公司通知协议及真实对象存储端点契约待验证 | 影响后续通知 provider 和 S3 兼容性证明 | 用户/第三方 | 待提供/验证 |
-| 本机无 S3 兼容服务或测试 Bucket | 阻塞 Phase 1 真实对象存储与四格式完整链路关闭门禁 | 用户/运维 | 待提供隔离 endpoint、Bucket 和凭据 |
 
 ## 7. 最近改动文件
 
@@ -156,6 +158,12 @@
 | `backend/src/knowagent/tickets/`、`backend/src/knowagent/agent/infrastructure/sqlalchemy_models.py` | 判定留痕、拒答自动建单、运行幂等和系统内时间窗合并 | 基础代码与单测/静态检查已完成；完整工单状态机待补 |
 | `backend/migrations/versions/cc99b700f739_add_evidence_decisions_and_refusal_.py` | `evidence_decisions`、`tickets`、外键、唯一约束和查询索引 | 已生成并人工修正 JSONB；迁移往返与 `alembic check` 本轮未运行 |
 | `backend/tests/unit/test_evidence_policy.py`、`test_refusal_tickets.py`、`test_reliable_question.py` | Phase 2 第 2 项正常、边界、异常、幂等和故障分流回归 | 已完成 |
+| `backend/src/knowagent/tickets/application/review.py`、`tickets/infrastructure/sqlalchemy_repository.py` | 审核前 Embedding、工单来源/发布片段和候选发布事务 | 已完成；API 装配待补 |
+| `backend/src/knowagent/retrieval/infrastructure/sqlalchemy_search.py`、`documents/domain/models.py` | `TICKET` 来源检索和工单 locator 契约 | 已完成；真实组合链路待验收 |
+| `backend/src/knowagent/agent/application/answer_snapshots.py`、`agent/infrastructure/sqlalchemy_repository.py` | 回答与历史引用快照服务和 SQLAlchemy 仓储 | 已完成；问答 API 装配待补 |
+| `backend/migrations/versions/c1738febb896_add_phase2_answer_citation_snapshots.py` | 答案/引用表、复合隔离约束、候选发布状态和工单来源外键 | SQLite 往返/check 与 PostgreSQL 17 升级通过 |
+| `backend/tests/unit/test_knowledge_review.py`、`test_answer_snapshots.py`、`test_sqlalchemy_retrieval.py` | 审核重索引、来源追踪、历史快照和检索回归 | 已完成 |
+| `backend/src/knowagent/agent/application/reliable_question.py`、`tickets/application/review.py`、`scripts/local-env.sh`、`model-service/src/knowagent_model/settings.py` | Phase 2 第 4 项 review 并发、幂等、进程安全和配置一致性修复 | 已完成并通过自动化验证；PID 沙箱外运行复验因审批服务 503 待补 |
 
 ## 8. 已运行验证
 
@@ -209,6 +217,10 @@
 | Phase 2 第 2 项后端单测/覆盖率 | 通过 | 46 项定向测试全部通过；证据决策、可靠问答和工单核心模块分支覆盖率 92.83% |
 | Phase 2 第 2 项静态检查 | 通过（本次范围） | 18 个相关源/测试文件 Black/isort 清洁；111 个源文件 mypy strict 零错误；本次源文件 Pylint 10.00/10；全仓 Bandit 中高危 0 |
 | Phase 2 第 2 项 Alembic/真实集成 | 未运行（用户限定范围） | 未运行 `cc99b700f739` 往返、`alembic check`、真实 PostgreSQL/pgvector、Ollama/Qwen 或端到端链路 |
+| Phase 2 第 4 项后端测试/覆盖率 | 通过 | 59 项相关测试和 243 项全量测试通过，总覆盖率 90.80% |
+| Phase 2 第 4 项静态检查 | 范围通过 | 149 个 Python 文件 Black/isort 清洁；115 个源文件 mypy strict 零错误；14 个相关源文件 Pylint 10.00/10；全仓 Bandit 中高危 0。全仓 Pylint 9.77/10，剩余为 identity/systems 既有告警 |
+| Phase 2 第 4 项 Alembic | 通过 | SQLite autogenerate、`upgrade -> downgrade -> upgrade` 和 `alembic check` 通过；本地 PostgreSQL 17.10 已升级到 `c1738febb896` |
+| Phase 2 第 4 项 review 修复 | 通过（运行级 PID 复验待补） | 39 项定向回归、248 项后端测试和 90.72% 覆盖率通过；model-service 39 项/90.58%，前端 42 项、TypeScript、ESLint、生产构建，双后端 mypy/Bandit、相关 Pylint、SQLite 迁移往返/check、Bash 语法和 diff 检查通过 |
 
 ## 9. 未运行验证与风险
 
@@ -216,19 +228,20 @@
 2. 默认密码批量导入仍有共享密码泄露风险；实现已强制摘要、首次改密、限流、会话撤销和审计，凭据分发流程仍需组织侧控制。
 3. 核心、解析器和质量工具直接版本已固定；Python 传递依赖锁仍需在目标 Linux/Python 3.11 环境生成。
 4. 本地 Ollama 适配和修复前真实 bge-m3 冒烟已通过；review 修复时服务未运行，新增 digest 强校验集成测试待恢复服务后复跑。目标 Linux 运行时、量化与完整安装尚未验证，本轮前端生产构建已通过。
-5. `npm audit` 的公告接口访问审批返回 503；`npm ci` 曾报告现有锁文件有 2 个 high 漏洞，未在未评估 breaking change 的情况下执行自动升级。
+5. `npm audit --audit-level=moderate` 仍报告 React Router RSC 模式 CSRF 公告产生 2 个 high；自动修复会强制降级 `react-router-dom` 到 7.11.0，未在缺少 breaking change 评估时执行。
 6. 四类解析器已接入 S3/PostgreSQL/Celery 端口和持久任务；PostgreSQL/Redis/Markdown 核心链路已在真实服务验证，但 S3 签名、TLS、Bucket 权限、multipart、对象补偿及四格式完整组合仍待隔离 S3 环境。扫描 PDF 仅返回 `OCR_REQUIRED`，首版不执行 OCR。
 7. 本轮使用现有 Python 3.11.11 环境并在 `/tmp` 补充四个锁定依赖；FastAPI、Redis client、pytest/pytest-cov 小版本低于项目锁定版本，结果不替代目标 Linux 按完整锁定依赖安装的发布证明。
-8. 新迁移已在真实 PostgreSQL 16.14 完成 `upgrade head` 和 `alembic check`，JSONB 与复合外键成功落库；迁移锁时长、已有生产量级回填和查询计划仍待类生产数据验证。
-9. Phase 2 前三项基础代码已实现，但真实 PostgreSQL `vector` 扩展和 Qwen 尚未完成组合联调；HNSW 在模型维度最终确认前不创建。第 2 项新迁移尚未执行往返与 `alembic check`；问答 API/SSE、答案引用持久化、Worker 索引接线、检索层纳入 TICKET 来源、工单 API 路由与第 4 项仍待实现。
+8. Phase 2 迁移已在本地 PostgreSQL 17.10 升级到 `c1738febb896`，JSONB、向量列与复合外键成功落库；迁移锁时长、已有生产量级回填和查询计划仍待类生产数据验证。
+9. Phase 2 四项基础代码已实现，但真实 pgvector/Embedding/Qwen 尚未完成组合问答与审核回流联调；HNSW 在模型维度最终确认前不创建。问答 API/SSE、工单 API、文档索引 Worker 接线和 AC-004 至 AC-007 验收仍待完成。
+10. PID 启动身份的沙箱外受控测试因审批服务 503 未获授权，`shellcheck` 当前不可用；脚本已通过 Bash 语法和 diff 检查，仍需在本地运行一次“伪造过期启动时间后 stop 不发送信号”的复验。model-service 全目录 Black 检查另有未改动 `ollama.py` 的既有格式差异，本次变更文件清洁。
 
 ## 10. 继续开发建议
 
 新对话或新开发者接手时，建议下一步：
 
-1. 先阅读 TD-002、TD-003、TD-009、`retrieval`/`agent`/`tickets` 模块和 `c8784d439b23`、`cc99b700f739` 两个迁移。
-2. 先补跑第 2 项迁移往返与 `alembic check`，再接入问答 API/SSE、会话/答案/引用持久化；环境可用时补 pgvector + Embedding + Qwen 的单条真实问答集成验收。
-3. 随后补齐工单 API 路由、检索层纳入 TICKET 来源并实现 Phase 2 第 4 项（审核发布后重新索引与历史引用快照），再做 AC-004 至 AC-007 端到端验收；Phase 1 的真实 S3/四格式补验继续作为独立并行项。
+1. 先阅读 TD-002、TD-003、TD-009、`retrieval`/`agent`/`tickets` 模块和 `c8784d439b23`、`cc99b700f739`、`ee1a2b3c4d5e`、`c1738febb896` 四个迁移。
+2. 优先接入问答 API/SSE、工单 API 和文档索引 Worker，并装配答案快照与审核发布服务。
+3. 配置完整 Qwen Key 后，使用本地 PostgreSQL 17/pgvector、MinIO 和 Ollama 完成 AC-004 至 AC-007 端到端验收；Phase 1 四格式完整链路继续作为并行补验项。
 
 ## 11. 接手时必须先读
 

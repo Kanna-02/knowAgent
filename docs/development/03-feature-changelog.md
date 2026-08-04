@@ -17,6 +17,47 @@
 
 ## 功能变更记录
 
+### 2026-08-04 - 完成 Phase 2 审核发布重新索引、来源追踪与历史引用快照
+
+类型：新功能
+
+相关需求：REQ-005、REQ-007；AC-004、AC-007 的基础代码范围，问答/工单 API 与真实 Qwen 端到端验收待补。
+
+变更说明：
+
+1. 知识审核批准改为先调用 Embedding Provider；向量生成失败时候选保持 `PENDING` 且不创建发布知识，成功后在同一事务内创建 `TICKET` 来源、带模型版本和向量的发布片段，并将候选推进为 `PUBLISHED`。
+2. `SourceLocator` 为工单来源保存 `ticket_id` 定位且不伪造文档身份；关键词与向量检索使用文档/工单外连接并纳入已发布 `TICKET` 来源，返回工单标题和工单 ID 版本标识。
+3. 新增回答与引用快照模型、服务和仓储，保存回答正文、声明、降级原因、模型、Prompt 版本、原 chunk/source UUID、逐字引用与完整 locator；引用快照不反向外键到当前知识表，来源退役或删除后历史答案仍可读取原始证据。
+4. 新增 `c1738febb896` 迁移，补齐答案/引用复合系统隔离、`evidence_decisions` 运行唯一约束、工单知识来源复合外键和候选 `PUBLISHED` 状态；成功回答路径自动持久化快照并保持同一运行幂等。
+
+review 修复（1 阻塞 + 3 建议 + 1 提醒）：
+
+1. 审核发布改为先完成 Embedding，再锁定并重新校验候选状态；拒绝路径使用同一行锁，避免同步数据库锁跨越外部 `await` 以及审核/拒绝竞争。
+2. 可靠问答在检索和 LLM 前读取同一 `run_id` 的历史快照，重放直接返回首次答案且校验问题一致性；快照仓储使用 SAVEPOINT 吸收并发唯一冲突并读取胜出记录。
+3. 本地进程 PID 同时记录并校验操作系统启动时间，过期或复用 PID 不再收到停止信号；ORM 与迁移统一工单转换 CHECK 名称。
+4. model-service 默认 digest、环境示例和技术决策统一为已验证的 manifest 前缀 `79076464`。
+
+质量补充 5 个回归用例，覆盖答案重放零外部调用、运行 ID 复用冲突、Embedding 期间候选状态变化、快照唯一冲突恢复和 ORM 约束名称。
+
+验证方式：39 项 review 定向回归和 248 项后端全量测试通过，总覆盖率 90.72%；148 个后端 Python 文件 Black/isort 清洁，115 个源文件 `mypy --strict` 零错误，相关模块 Pylint 10.00/10，Bandit 中高危 0。model-service 39 项通过、1 项真实 Ollama 测试按门禁跳过，覆盖率 90.58%；11 个源文件 `mypy --strict` 零错误，变更文件 Black/isort、Pylint 和 Bandit 通过。前端 42 项测试、TypeScript、ESLint 和生产构建通过。新 SQLite 影子库完成 `upgrade -> downgrade -> upgrade` 和 `alembic check`；Bash 语法与 Git diff whitespace 检查通过。
+
+后续注意：Phase 2 四项基础代码已完成，但问答 API/SSE、工单 API、文档索引 Worker 接线和 AC-004 至 AC-007 的真实 pgvector/Embedding/Qwen 端到端验收尚未完成；PID 启动身份的沙箱外受控运行测试因审批服务 503 未获授权，`shellcheck` 不可用，已执行 Bash 语法检查并保留本地运行复验项。model-service 全目录 Black 检查仍命中未改动的 `ollama.py` 既有格式差异；`npm audit` 仍报告 React Router 2 个 high 且自动修复涉及 breaking downgrade，均未扩展本次修复范围。本次无页面手测步骤。
+
+### 2026-08-03 - 建立 KnowAgent 独立完整本地运行环境
+
+类型：部署配置 / 修复
+
+变更说明：
+
+1. 本机切换到 PostgreSQL 17.10，创建项目独立 `knowagent` 角色和同名数据库，加载 `vector 0.8.6` 与 `pg_trgm 1.6`，从空库执行全部 Alembic 迁移到 `ee1a2b3c4d5e`。
+2. 修复末端迁移中 `ticket_transitions.from_status` 与 `to_status` 生成同名 `ticket_status` CHECK 约束的问题，分别使用独立约束名，使 PostgreSQL 空库升级可以到达 head。
+3. 新增 `scripts/local-env.sh`，统一管理项目独立 PostgreSQL 5440、Redis 6380、MinIO 9200/9201、model-service、API 8200、Celery Worker/Beat 和前端 5273；运行数据与日志写入忽略的 `.runtime/`，不再依赖或操作其他项目的 `fc-*` 容器。入口自动创建 S3 Bucket；Vite 代理目标可配置并启用严格端口；`serve` 模式支持当前终端持续托管和退出清理。
+4. 安装 model-service 与 frontend 依赖；按 Ollama `/api/tags` 返回值把 `bge-m3` digest/version 前缀从模型 blob 的 `daec91ff` 修正为模型 manifest digest `79076464`。
+
+验证方式：项目独立 PostgreSQL 17 空库 7 个迁移升级到 head，`alembic check` 返回 `No new upgrade operations detected`；数据库包含 16 张业务/迁移表，`vector 0.8.6` 与 `pg_trgm 1.6` 可用；统一入口状态检查确认 PostgreSQL 5440、Redis 6380、MinIO 9200、model-service 8100、API 8200、Celery Worker/Beat 和前端 5273 全部运行，API live、model-service ready/Ollama 和前端登录页分别返回 200；MinIO `knowagent-dev` Bucket 真实 `put/get/delete` 通过，Beat 连续三个恢复周期成功；真实 `bge-m3` 返回版本 `ollama-bge-m3-79076464`、1024 维向量和 1.000000 L2 范数。backend 238 项测试通过、覆盖率 90.84%；model-service 39 项测试通过、1 项独立 integration marker 在测试套件执行时跳过，覆盖率 90.58%；frontend 类型检查、ESLint 和生产构建通过；`scripts/local-env.sh` 通过 Bash 语法与 Git diff whitespace 检查。
+
+后续注意：Qwen API Key 和真实 S3 兼容对象存储凭据仍需由本地密钥配置提供；没有这些外部凭据时，回答生成和真实文档上传链路不能视为完整验收。`npm audit --audit-level=moderate` 报告 React Router RSC 模式 CSRF 漏洞产生 2 个高危项，自动修复会把 `react-router-dom` 强制降级到 7.11.0，需作为独立依赖变更评估和回归。
+
 ### 2026-08-03 - 完成 Phase 2 工单分派、处理、追加、关闭/重开与审核入库
 
 类型：新功能

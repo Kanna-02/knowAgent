@@ -354,6 +354,20 @@ def test_reply_non_requester_non_assignee_gets_reviewer_role() -> None:
         assert reply.author_role is ReplyAuthorRole.REVIEWER
 
 
+def test_ticket_transition_check_constraints_have_distinct_names() -> None:
+    from sqlalchemy import CheckConstraint
+
+    from knowagent.tickets.infrastructure.sqlalchemy_models import TicketTransitionRecord
+
+    names = {
+        constraint.name
+        for constraint in TicketTransitionRecord.__table__.constraints
+        if isinstance(constraint, CheckConstraint)
+    }
+
+    assert names == {"ticket_transition_from_status", "ticket_transition_to_status"}
+
+
 def _ticket_record(ticket: Ticket) -> object:
     from knowagent.tickets.infrastructure.sqlalchemy_models import TicketRecord
 

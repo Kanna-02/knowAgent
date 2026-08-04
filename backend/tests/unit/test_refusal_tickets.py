@@ -102,12 +102,8 @@ def test_create_from_refusal_replaying_run_returns_same_ticket_without_increment
         decision = make_decision()
         requester_id = uuid4()
 
-        first = tickets.create_from_refusal(
-            decision=decision, requester_id=requester_id, now=NOW
-        )
-        replay = tickets.create_from_refusal(
-            decision=decision, requester_id=requester_id, now=NOW
-        )
+        first = tickets.create_from_refusal(decision=decision, requester_id=requester_id, now=NOW)
+        replay = tickets.create_from_refusal(decision=decision, requester_id=requester_id, now=NOW)
 
         assert replay == first
         assert repository.get_ticket(ticket_id=first).occurrence_count == 1

@@ -11,8 +11,8 @@ def test_settings_defaults_match_existing_local_bge_m3_volume() -> None:
     settings = ModelServiceSettings()
 
     assert settings.embedding_model == "bge-m3"
-    assert settings.embedding_model_version == "ollama-bge-m3-daec91ff"
-    assert settings.ollama_model_digest == "daec91ff"
+    assert settings.embedding_model_version == "ollama-bge-m3-79076464"
+    assert settings.ollama_model_digest == "79076464"
     assert settings.embedding_dimension == 1024
     assert settings.ollama_batch_size == 1
     assert settings.ollama_max_concurrency == 1

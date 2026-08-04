@@ -64,6 +64,7 @@ class ReplyAuthorRole(StrEnum):
 class CandidateStatus(StrEnum):
     PENDING = "pending"
     APPROVED = "approved"
+    PUBLISHED = "published"
     REJECTED = "rejected"
 
 
@@ -145,9 +146,15 @@ class KnowledgeCandidate:  # pylint: disable=too-many-instance-attributes
         trimmed = self.answer.strip()
         if not trimmed:
             raise ValueError("knowledge candidate answer must not be blank")
-        if self.status is CandidateStatus.APPROVED and self.reviewer_id is None:
+        if (
+            self.status in {CandidateStatus.APPROVED, CandidateStatus.PUBLISHED}
+            and self.reviewer_id is None
+        ):
             raise ValueError("approved candidate must have a reviewer")
-        if self.status is CandidateStatus.APPROVED and self.knowledge_source_id is None:
+        if (
+            self.status in {CandidateStatus.APPROVED, CandidateStatus.PUBLISHED}
+            and self.knowledge_source_id is None
+        ):
             raise ValueError("approved candidate must reference a knowledge source")
 
 

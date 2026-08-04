@@ -26,8 +26,8 @@ class BlockType(StrEnum):
 class SourceLocator(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    document_id: UUID
-    document_version_id: UUID
+    document_id: UUID | None = None
+    document_version_id: UUID | None = None
     source_type: SourceType
     block_index: int = Field(ge=0)
     page_number: int | None = Field(default=None, ge=1)
@@ -46,6 +46,7 @@ class SourceLocator(BaseModel):
 
     @model_validator(mode="after")
     def validate_source_shape(self) -> SourceLocator:
+        self._validate_source_identity()
         self._validate_ordered_pair("paragraph_start", self.paragraph_start, self.paragraph_end)
         self._validate_ordered_pair("line_start", self.line_start, self.line_end)
         self._validate_ordered_pair("table_row_start", self.table_row_start, self.table_row_end)
@@ -73,6 +74,14 @@ class SourceLocator(BaseModel):
             SourceType.TICKET: self._validate_ticket_location,
         }[self.source_type]()
         return self
+
+    def _validate_source_identity(self) -> None:
+        if self.source_type is SourceType.TICKET:
+            if self.document_id is not None or self.document_version_id is not None:
+                raise ValueError("ticket locator must not include document identity")
+            return
+        if self.document_id is None or self.document_version_id is None:
+            raise ValueError("document identity is required for document locator")
 
     def _validate_pdf_location(self) -> None:
         if self.page_number is None:

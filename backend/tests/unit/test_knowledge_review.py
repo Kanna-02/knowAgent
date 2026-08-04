@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -7,7 +8,10 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
+from knowagent.common.errors import ConflictError, ProviderUnavailableError
+from knowagent.documents.domain.models import SourceLocator, SourceType
 from knowagent.identity.infrastructure.sqlalchemy_models import Base
+from knowagent.retrieval.domain.models import EmbeddingBatch
 from knowagent.tickets.application.review import KnowledgeReviewService
 from knowagent.tickets.domain.models import (
     CandidateStatus,
@@ -21,6 +25,27 @@ from knowagent.tickets.infrastructure.sqlalchemy_repository import (
 )
 
 NOW = datetime(2026, 8, 3, 16, 0, tzinfo=UTC)
+
+
+class StubEmbeddings:
+    def __init__(self, *, fail: bool = False, on_embed: Callable[[], None] | None = None) -> None:
+        self.fail = fail
+        self.on_embed = on_embed
+        self.texts: list[tuple[str, ...]] = []
+
+    async def embed(self, *, texts: tuple[str, ...]) -> EmbeddingBatch:
+        self.texts.append(texts)
+        if self.on_embed is not None:
+            self.on_embed()
+        if self.fail:
+            raise ProviderUnavailableError("embedding")
+        return EmbeddingBatch(
+            model="bge-m3",
+            model_version="2026-08",
+            dimension=3,
+            normalized=True,
+            vectors=((1.0, 0.0, 0.0),),
+        )
 
 
 def make_ticket(
@@ -57,9 +82,17 @@ def setup_engine() -> object:
 
 def setup_review(
     session: Session,
+    *,
+    embeddings: StubEmbeddings | None = None,
 ) -> tuple[KnowledgeReviewService, SqlAlchemyTicketRepository]:
     repository = SqlAlchemyTicketRepository(session)
-    return KnowledgeReviewService(repository=repository), repository
+    return (
+        KnowledgeReviewService(
+            repository=repository,
+            embeddings=embeddings or StubEmbeddings(),
+        ),
+        repository,
+    )
 
 
 def _create_ticket(session: Session, **kwargs: object) -> Ticket:
@@ -111,10 +144,12 @@ def test_submit_answer_creates_pending_candidate_and_blocks_duplicate() -> None:
             review.submit_answer(ticket_id=ticket.id, author_id=author_id, answer="另一份", now=NOW)
 
 
-def test_approve_creates_knowledge_source_and_published_chunk() -> None:
+@pytest.mark.anyio
+async def test_approve_indexes_then_publishes_ticket_knowledge_with_source_locator() -> None:
     engine = setup_engine()
     with Session(engine) as session:
-        review, _ = setup_review(session)
+        embeddings = StubEmbeddings()
+        review, _ = setup_review(session, embeddings=embeddings)
         ticket = _create_ticket(session)
         author_id = uuid4()
         reviewer_id = uuid4()
@@ -122,11 +157,16 @@ def test_approve_creates_knowledge_source_and_published_chunk() -> None:
             ticket_id=ticket.id, author_id=author_id, answer="答案正文", now=NOW
         )
 
-        approved = review.approve(candidate_id=candidate.id, reviewer_id=reviewer_id, now=NOW)
+        approved = await review.approve(
+            candidate_id=candidate.id,
+            reviewer_id=reviewer_id,
+            now=NOW,
+        )
 
-        assert approved.status is CandidateStatus.APPROVED
+        assert approved.status is CandidateStatus.PUBLISHED
         assert approved.reviewer_id == reviewer_id
         assert approved.knowledge_source_id is not None
+        assert embeddings.texts == [("答案正文",)]
 
         source_id = approved.knowledge_source_id
         assert source_id is not None
@@ -163,7 +203,8 @@ def test_reject_marks_candidate_rejected_without_creating_knowledge() -> None:
         _assert_no_knowledge_source_for_ticket(session, ticket_id=ticket.id)
 
 
-def test_approve_non_pending_candidate_raises_conflict() -> None:
+@pytest.mark.anyio
+async def test_approve_non_pending_candidate_raises_conflict() -> None:
     engine = setup_engine()
     with Session(engine) as session:
         review, _ = setup_review(session)
@@ -176,10 +217,11 @@ def test_approve_non_pending_candidate_raises_conflict() -> None:
         review.reject(candidate_id=candidate.id, reviewer_id=reviewer_id, now=NOW)
 
         with pytest.raises(Exception, match="待处理"):
-            review.approve(candidate_id=candidate.id, reviewer_id=reviewer_id, now=NOW)
+            await review.approve(candidate_id=candidate.id, reviewer_id=reviewer_id, now=NOW)
 
 
-def test_re_submit_after_rejection_creates_new_pending_candidate() -> None:
+@pytest.mark.anyio
+async def test_re_submit_after_rejection_creates_new_pending_candidate() -> None:
     engine = setup_engine()
     with Session(engine) as session:
         review, _ = setup_review(session)
@@ -197,8 +239,12 @@ def test_re_submit_after_rejection_creates_new_pending_candidate() -> None:
 
         assert second.id != first.id
         assert second.status is CandidateStatus.PENDING
-        approved = review.approve(candidate_id=second.id, reviewer_id=reviewer_id, now=NOW)
-        assert approved.status is CandidateStatus.APPROVED
+        approved = await review.approve(
+            candidate_id=second.id,
+            reviewer_id=reviewer_id,
+            now=NOW,
+        )
+        assert approved.status is CandidateStatus.PUBLISHED
         _assert_published_chunk(
             session,
             source_id=approved.knowledge_source_id,
@@ -207,7 +253,8 @@ def test_re_submit_after_rejection_creates_new_pending_candidate() -> None:
         )
 
 
-def test_get_pending_candidate_returns_none_after_approval() -> None:
+@pytest.mark.anyio
+async def test_get_pending_candidate_returns_none_after_approval() -> None:
     engine = setup_engine()
     with Session(engine) as session:
         review, _ = setup_review(session)
@@ -217,7 +264,7 @@ def test_get_pending_candidate_returns_none_after_approval() -> None:
         candidate = review.submit_answer(
             ticket_id=ticket.id, author_id=author_id, answer="答案正文", now=NOW
         )
-        review.approve(candidate_id=candidate.id, reviewer_id=reviewer_id, now=NOW)
+        await review.approve(candidate_id=candidate.id, reviewer_id=reviewer_id, now=NOW)
         assert review.get_pending_candidate_by_ticket(ticket_id=ticket.id) is None
 
 
@@ -238,15 +285,17 @@ def test_submit_answer_blank_raises_validation_error() -> None:
             review.submit_answer(ticket_id=ticket.id, author_id=uuid4(), answer="   ", now=NOW)
 
 
-def test_approve_unknown_candidate_raises_not_found() -> None:
+@pytest.mark.anyio
+async def test_approve_unknown_candidate_raises_not_found() -> None:
     engine = setup_engine()
     with Session(engine) as session:
         review, _ = setup_review(session)
         with pytest.raises(Exception, match="知识候选不存在"):
-            review.approve(candidate_id=uuid4(), reviewer_id=uuid4(), now=NOW)
+            await review.approve(candidate_id=uuid4(), reviewer_id=uuid4(), now=NOW)
 
 
-def test_approve_preserves_ticket_system_isolation() -> None:
+@pytest.mark.anyio
+async def test_approve_preserves_ticket_system_isolation() -> None:
     engine = setup_engine()
     with Session(engine) as session:
         review, _ = setup_review(session)
@@ -257,7 +306,11 @@ def test_approve_preserves_ticket_system_isolation() -> None:
         candidate = review.submit_answer(
             ticket_id=ticket.id, author_id=author_id, answer="答案", now=NOW
         )
-        approved = review.approve(candidate_id=candidate.id, reviewer_id=reviewer_id, now=NOW)
+        approved = await review.approve(
+            candidate_id=candidate.id,
+            reviewer_id=reviewer_id,
+            now=NOW,
+        )
         assert approved.system_id == system_id
         assert approved.knowledge_source_id is not None
         _assert_ticket_knowledge_source(
@@ -266,6 +319,63 @@ def test_approve_preserves_ticket_system_isolation() -> None:
             system_id=system_id,
             ticket_id=ticket.id,
         )
+
+
+@pytest.mark.anyio
+async def test_approve_embedding_failure_leaves_candidate_pending_and_knowledge_unpublished() -> (
+    None
+):
+    engine = setup_engine()
+    with Session(engine) as session:
+        review, _ = setup_review(session, embeddings=StubEmbeddings(fail=True))
+        ticket = _create_ticket(session)
+        candidate = review.submit_answer(
+            ticket_id=ticket.id,
+            author_id=uuid4(),
+            answer="答案正文",
+            now=NOW,
+        )
+
+        with pytest.raises(ProviderUnavailableError):
+            await review.approve(candidate_id=candidate.id, reviewer_id=uuid4(), now=NOW)
+
+        unchanged = review.get_candidate(candidate_id=candidate.id)
+        assert unchanged is not None
+        assert unchanged.status is CandidateStatus.PENDING
+        _assert_no_knowledge_source_for_ticket(session, ticket_id=ticket.id)
+
+
+@pytest.mark.anyio
+async def test_approve_rechecks_candidate_after_embedding_before_publishing() -> None:
+    engine = setup_engine()
+    with Session(engine) as session:
+        repository = SqlAlchemyTicketRepository(session)
+        ticket = _create_ticket(session)
+        candidate = KnowledgeReviewService(
+            repository=repository,
+            embeddings=StubEmbeddings(),
+        ).submit_answer(
+            ticket_id=ticket.id,
+            author_id=uuid4(),
+            answer="答案正文",
+            now=NOW,
+        )
+        embeddings = StubEmbeddings(
+            on_embed=lambda: repository.reject_candidate(
+                candidate_id=candidate.id,
+                reviewer_id=uuid4(),
+                now=NOW,
+            )
+        )
+        review = KnowledgeReviewService(repository=repository, embeddings=embeddings)
+
+        with pytest.raises(ConflictError, match="待处理"):
+            await review.approve(candidate_id=candidate.id, reviewer_id=uuid4(), now=NOW)
+
+        rejected = repository.get_candidate(candidate_id=candidate.id)
+        assert rejected is not None
+        assert rejected.status is CandidateStatus.REJECTED
+        _assert_no_knowledge_source_for_ticket(session, ticket_id=ticket.id)
 
 
 def _assert_ticket_knowledge_source(
@@ -310,6 +420,14 @@ def _assert_published_chunk(
     assert len(records) == 1
     assert records[0].publish_status is PublicationStatus.PUBLISHED
     assert records[0].text == text
+    assert records[0].embedding == [1.0, 0.0, 0.0]
+    assert records[0].embedding_model == "bge-m3"
+    assert records[0].embedding_model_version == "2026-08"
+    locator = SourceLocator.model_validate(records[0].locators[0])
+    assert locator.source_type is SourceType.TICKET
+    assert locator.document_id is None
+    assert locator.document_version_id is None
+    assert locator.ticket_id is not None
 
 
 def _assert_no_knowledge_source_for_ticket(
