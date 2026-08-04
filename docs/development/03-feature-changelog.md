@@ -17,6 +17,22 @@
 
 ## 功能变更记录
 
+### 2026-08-04 - Phase 2 qwen3-max 全量测试与 Agent/Tickets API 集成验收通过
+
+类型：修复
+
+相关需求：REQ-002、REQ-005、REQ-006、REQ-007、REQ-011；AC-004、AC-006、AC-007、AC-016。
+
+变更说明：
+
+1. `backend/.env` 的 `KNOWAGENT_LLM_MODEL` 从 `qwen3.5-flash` 切换为 `qwen3-max`，Phase 2 live 引用契约与工单往返 2 项全通过。
+2. 为 Agent/Tickets API live 集成测试专门建库 `knowagent_api_integration`（Alembic 升级至 `c1738febb896`），设 `KNOWAGENT_RUN_API_INTEGRATION=1` 跑通全部 18 项 API 集成测试（鉴权、校验、工单状态机、审核发布、CSRF 与跨系统隔离）。
+3. 修复 `test_ask_question_validates_system_id_required` 在 CSRF 强制开启后缺 `X-CSRF-Token` 头导致 403 与期望 422 不符的问题，补 CSRF 头后用例通过并提交 `d9ca72b`。
+
+验证方式：后端 250 项 + 21 skip（87.64%）；前端 42 项；model-service 39 项 + 1 skip（90.58%）；Phase 2 live 2 项（qwen3-max，34.87s）；Agent/Tickets API live 18 项（真实 PostgreSQL 17，5.57s）；Phase 1 live 1 项（真实 MinIO/S3）；mypy strict 122 文件零错误；Bandit 中高危 0；test_agent_api Black/isort 清洁。
+
+后续注意：`backend/.env` 的模型为本地配置不入版本控制；SSE 流式、文档索引 Worker 接线和页面端到端闭环仍待完成，Phase 2 保持进行中。
+
 ### 2026-08-04 - 审查修复 Agent 与 Tickets API 跨系统隔离与 CSRF 等阻塞项
 
 类型：修复

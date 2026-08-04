@@ -52,13 +52,13 @@
 
 最终结果：2 项 live 用例通过，耗时 36.85 秒；Alembic 未检测到 schema 漂移。标准后端套件 250 项通过、3 项 live 门禁跳过，总覆盖率 90.72%；Black/isort、mypy strict、本次范围 Pylint 10.00/10、Bandit 中高危 0 和 Bash 语法检查通过。
 
-补充（2026-08-04 本轮提交）：装配 Agent/Tickets API 后非集成测试仍为 250 项通过，总覆盖率 87.64%；集成测试 21 项默认 skip（`KNOWAGENT_RUN_API_INTEGRATION` 未设），collect-only 通过。Agent/Tickets API 的真实 SQL/CSRF/跨系统隔离验收待在真实 PostgreSQL/Redis 下显式启用集成测试。
+补充（2026-08-04 本轮提交）：装配 Agent/Tickets API 后非集成测试为 250 项通过，总覆盖率 87.64%。随后在真实 PostgreSQL 17 上为 Agent/Tickets API 专门建库 `knowagent_api_integration`（Alembic 升级至 `c1738febb896`）并设 `KNOWAGENT_RUN_API_INTEGRATION=1` 跑通全部 18 项 API 集成测试（鉴权、校验、工单状态机、审核发布、CSRF 与跨系统隔离）。LLM 模型切换为 `qwen3-max` 后 Phase 2 live 引用契约与工单往返 2 项仍全通过。Phase 1 live 验收在真实 MinIO/S3 上复跑通过。`test_ask_question_validates_system_id_required` 因 CSRF 强制开启后缺头导致 403 与期望 422 不符，补 CSRF 头后修复并提交 `d9ca72b`。
 
 ## 5. 阶段关闭缺口
 
 1. 问答 API（`POST /api/v1/questions`）已装配并补 CSRF 校验、跨系统访问鉴权与集成测试用例（`backend/tests/integration/test_agent_api.py`）；SSE 流式协议和会话持久化尚未装配。
-2. 工单 API 路由已装配（`backend/src/knowagent/tickets/api/router.py`），覆盖列表/详情/回复/分派/开始/解决/关闭/重开/答案提交/候选审核全链路，并修跨系统泄露与 CSRF 防护；待真实基础设施环境跑 `KNOWAGENT_RUN_API_INTEGRATION=1` 验收。
+2. 工单 API 路由已装配（`backend/src/knowagent/tickets/api/router.py`），覆盖列表/详情/回复/分派/开始/解决/关闭/重开/答案提交/候选审核全链路，并修跨系统泄露与 CSRF 防护；已在真实 PostgreSQL 17 跑通 `KNOWAGENT_RUN_API_INTEGRATION=1` 全部 18 项 API 集成测试。
 3. 文档入库 Worker 尚未调用 Phase 2 Embedding 索引服务。
 4. 用户端与管理端尚无可执行的真实页面端到端闭环。
 
-以下缺口仍需完成并验收：SSE 流式与 Worker 接线、在真实 PostgreSQL/Redis 环境运行 Agent/Tickets API 集成测试以及页面端到端闭环。完成前 Phase 2 保持进行中。
+以下缺口仍需完成并验收：SSE 流式与 Worker 接线、页面端到端闭环。Agent/Tickets API 集成验收已完成。完成前 Phase 2 保持进行中。

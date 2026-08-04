@@ -32,6 +32,6 @@ KnowAgent 是面向公司内部人员的多系统智能客服产品。Phase 0 �
 
 ## 下一步
 
-1. 接入问答 SSE 流式与会话持久化、文档索引 Worker 接线，并在真实 PostgreSQL/Redis 下运行 Agent/Tickets API 集成测试，准备 Phase 2 端到端验收。
+1. 接入问答 SSE 流式与会话持久化、文档索引 Worker 接线，准备 Phase 2 端到端验收。Agent/Tickets API 集成测试已在真实 PostgreSQL 17 跑通。
 2. 配置完整 Qwen Key，在现有 PostgreSQL/pgvector 与 Ollama Embedding 环境完成组合联调。
 3. 模型运行时和 Python 传递依赖锁等待目标 Linux/硬件信息后确认。

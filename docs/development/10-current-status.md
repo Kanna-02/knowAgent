@@ -5,7 +5,7 @@
 ## 1. 快照时间
 
 ```text
-更新时间：2026-08-04
+更新时间：2026-08-04（Phase 2 qwen3-max 全量测试与 Agent/Tickets API 集成验收通过）
 更新人/助手：Codex
 当前分支：master
 远程仓库：git@github.com:Kanna-02/knowAgent.git
@@ -17,8 +17,8 @@
 ```text
 当前阶段：Phase 2 问答与工单闭环（Phase 1 已完成并通过集成验收）
 阶段目标：系统隔离检索、带引用回答、可靠拒答、内置工单和审核回流
-当前任务：问答 API 与工单 API 装配完成，进入 SSE 流式、Worker 接线与页面端到端门禁
-任务状态：4/4 基础代码完成；真实 PostgreSQL 17/pgvector、Ollama、Qwen、拒答工单和审核回流组合验证通过；Agent/Tickets API 装配完成并通过静态检查与非集成测试，集成测试默认 skip 待真实环境运行；SSE 流式/Worker 接线/页面端到端门禁待补
+当前任务：问答 API 与工单 API 装配完成并已通过真实 PostgreSQL 17 集成测试，进入 SSE 流式、Worker 接线与页面端到端门禁
+任务状态：4/4 基础代码完成；真实 PostgreSQL 17/pgvector、Ollama、Qwen qwen3-max、拒答工单和审核回流组合验证通过；Agent/Tickets API 装配完成并已在真实 PostgreSQL 17 跑通 18 项 API 集成测试；SSE 流式/Worker 接线/页面端到端门禁待补
 ```
 
 ## 3. 已完成
@@ -82,14 +82,14 @@
 
 ## 4. 正在进行
 
-1. Phase 2 功能范围 4/4 的基础代码和核心服务真实集成验收已完成；问答 API 与工单 API 已装配完成并通过静态检查与非集成测试，SSE 流式、文档索引 Worker 接线和页面端到端验收待实施。
+1. Phase 2 功能范围 4/4 的基础代码和核心服务真实集成验收已完成；问答 API 与工单 API 已装配完成并已在真实 PostgreSQL 17 跑通 18 项 API 集成测试，SSE 流式、文档索引 Worker 接线和页面端到端验收待实施。
 2. Phase 1 功能范围 6/6 已实现，并于 2026-08-04 在固定 PostgreSQL/Redis/MinIO integration 资源上完成四格式完整持久化与隔离验收，现已正式关闭。
 3. 本地 PostgreSQL 17、pgvector、pg_trgm、MinIO、Ollama Embedding 和 Qwen 已完成 Phase 2 核心服务组合联调。
 4. 等待目标 Linux 服务器资源信息以最终确定 Embedding/Rerank 推理后端、量化方式和 Python 传递依赖锁；本地 Ollama 方案不自动等同生产选型。
 
 ## 5. 未完成 / 下一步
 
-1. 接入 SSE 流式问答协议与会话持久化；Agent API（`/questions`）与 Tickets API 已装配，待在真实 PostgreSQL/Redis 下显式启用集成测试验收。
+1. 接入 SSE 流式问答协议与会话持久化；Agent API（`/questions`）与 Tickets API 已装配并已通过真实 PostgreSQL 17 集成测试，SSE 流式协议和会话持久化尚未装配。
 2. 接入文档索引 Worker，将已验证的 Embedding 索引服务装配到真实文档入库流程。
 3. 在 API 和 Worker 装配后完成 AC-004 至 AC-007 的接口/页面端到端验收；核心领域服务的跨系统零泄漏、拒答建单、工单审核和回流时延已有真实证据。
 4. 在 Phase 2 页面端到端验收中刷新真实后端页面证据；随后在 staging/类生产 Linux 环境验证公司对象存储 TLS/内部 CA、迁移锁时长、模型运行和发布回滚。
@@ -117,8 +117,11 @@
 | `docs/development/20-phase1-integration-acceptance.md` | 记录 Phase 1 PostgreSQL/Redis/MinIO 四格式完整验收证据和遗留风险 | 已完成（正式通过） |
 | `backend/tests/integration/test_phase2_live_integration.py`、`scripts/run-phase2-integration.sh` | Phase 2 固定资源 live 验收与真实 Qwen 可选门禁 | 已完成并通过 |
 | `docs/development/21-phase2-integration-acceptance.md` | 记录 Phase 2 核心服务验收证据、写入顺序修复和阶段关闭缺口 | 已完成（核心服务通过） |
-| `backend/src/knowagent/agent/api/`、`backend/src/knowagent/tickets/api/`、`backend/src/knowagent/identity/api/access.py` | 装配 Agent/Tickets API 端点与共享系统访问 helper，并修跨系统泄露与 CSRF 缺口 | 已完成；非集成测试 250 通过、集成测试待真实环境运行 |
+| `backend/src/knowagent/agent/api/`、`backend/src/knowagent/tickets/api/`、`backend/src/knowagent/identity/api/access.py` | 装配 Agent/Tickets API 端点与共享系统访问 helper，并修跨系统泄露与 CSRF 缺口 | 已完成；非集成测试 250 通过、18 项 API 集成测试已在真实 PostgreSQL 17 跑通 |
 | `backend/tests/integration/test_agent_api.py`、`test_tickets_api.py`、`_fakes.py` | Agent/Tickets API 集成测试与共享 FakeRedis | 已完成；默认 skip 待环境变量启用 |
+| `backend/tests/integration/test_agent_api.py` | 修复 `test_ask_question_validates_system_id_required` CSRF 头缺失（`d9ca72b`） | 已完成；18 项 API 集成测试在真实 PostgreSQL 17 全部通过 |
+| `backend/.env` | LLM 模型从 `qwen3.5-flash` 切换为 `qwen3-max` | 已完成；Phase 2 live 引用契约与工单往返通过 |
+| `docs/development/10-current-status.md`、`21-phase2-integration-acceptance.md` | 补记 Phase 2 qwen3-max 全量测试与 Agent/Tickets API 集成验收通过 | 已完成 |
 | `docs/development/03-feature-changelog.md` | 记录 Agent/Tickets API 装配与 review 修复 | 已完成 |
 | `docs/engineering/11-project-structure.md` | 完整架构方案通过确认 | 已完成 |
 | `backend/pyproject.toml` | Python 3.11 后端依赖和质量工具配置 | 已完成 |
@@ -232,6 +235,7 @@
 | Phase 2 第 4 项 Alembic | 通过 | SQLite autogenerate、`upgrade -> downgrade -> upgrade` 和 `alembic check` 通过；本地 PostgreSQL 17.10 已升级到 `c1738febb896` |
 | Phase 2 第 4 项 review 修复 | 通过（运行级 PID 复验待补） | 39 项定向回归、248 项后端测试和 90.72% 覆盖率通过；model-service 39 项/90.58%，前端 42 项、TypeScript、ESLint、生产构建，双后端 mypy/Bandit、相关 Pylint、SQLite 迁移往返/check、Bash 语法和 diff 检查通过 |
 | Phase 2 核心服务 live 验收与 FK 顺序修复 | 通过 | 2 项 live 用例 36.85 秒通过；250 项标准测试通过、3 项 live 门禁跳过，覆盖率 90.72%；Black/isort、115 文件 mypy strict、本次范围 Pylint 10.00/10、Bandit 中高危 0 和 Bash 语法通过 |
+| Phase 2 qwen3-max 全量测试与 API 集成验收 | 通过 | 后端 250 项 + 21 skip（87.64%）；前端 42 项；model-service 39 项 + 1 skip（90.58%）；Phase 2 live 2 项（qwen3-max，34.87s）；Agent/Tickets API live 18 项（真实 PostgreSQL 17 `knowagent_api_integration` 库，5.57s）；Phase 1 live 1 项（真实 MinIO/S3）；mypy strict 122 文件零错误；Bandit 中高危 0；test_agent_api CSRF 头修复已提交 `d9ca72b` |
 
 ## 9. 未运行验证与风险
 
