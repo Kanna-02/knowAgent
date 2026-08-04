@@ -330,8 +330,13 @@ def test_ask_question_validates_question_min_length(client: TestClient) -> None:
 
 
 def test_ask_question_validates_system_id_required(client: TestClient) -> None:
-    _login(client, "admin", "agent.api.admin")
-    resp = client.post("/api/v1/questions", json={"question": "ESB 如何申请？"})
+    login = _login(client, "admin", "agent.api.admin")
+    csrf = str(login["csrf_token"])
+    resp = client.post(
+        "/api/v1/questions",
+        headers={"X-CSRF-Token": csrf},
+        json={"question": "ESB 如何申请？"},
+    )
     assert resp.status_code == 422
 
 
