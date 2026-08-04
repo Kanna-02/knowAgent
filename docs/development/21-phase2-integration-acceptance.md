@@ -2,7 +2,7 @@
 
 验收结论：**核心服务范围通过，Phase 2 尚未正式关闭**。
 
-2026-08-04 已使用项目真实 `.env` 配置，在固定 integration 资源上完成 PostgreSQL 17/pgvector/pg_trgm、Ollama bge-m3、Qwen、可靠问答、工单和知识审核回流的组合验证。问答 API/SSE、工单 API、文档索引 Worker 接线及页面端到端流程不在当前可执行链路内，仍是阶段关闭门禁。
+2026-08-04 已使用项目真实 `.env` 配置，在固定 integration 资源上完成 PostgreSQL 17/pgvector/pg_trgm、Ollama bge-m3、Qwen、可靠问答、工单和知识审核回流的组合验证。问答 API（`POST /api/v1/questions`）与工单 API（`/api/v1/tickets` 系列）已在本轮提交完成装配并补集成测试用例（默认 skip，待真实基础设施环境运行）；SSE 流式、文档索引 Worker 接线及页面端到端流程仍不在当前可执行链路内，仍是阶段关闭门禁。
 
 ## 1. 环境与资源
 
@@ -52,11 +52,13 @@
 
 最终结果：2 项 live 用例通过，耗时 36.85 秒；Alembic 未检测到 schema 漂移。标准后端套件 250 项通过、3 项 live 门禁跳过，总覆盖率 90.72%；Black/isort、mypy strict、本次范围 Pylint 10.00/10、Bandit 中高危 0 和 Bash 语法检查通过。
 
+补充（2026-08-04 本轮提交）：装配 Agent/Tickets API 后非集成测试仍为 250 项通过，总覆盖率 87.64%；集成测试 21 项默认 skip（`KNOWAGENT_RUN_API_INTEGRATION` 未设），collect-only 通过。Agent/Tickets API 的真实 SQL/CSRF/跨系统隔离验收待在真实 PostgreSQL/Redis 下显式启用集成测试。
+
 ## 5. 阶段关闭缺口
 
-1. 问答 API/SSE 和会话持久化尚未装配。
-2. 工单 API 路由尚未装配。
+1. 问答 API（`POST /api/v1/questions`）已装配并补 CSRF 校验、跨系统访问鉴权与集成测试用例（`backend/tests/integration/test_agent_api.py`）；SSE 流式协议和会话持久化尚未装配。
+2. 工单 API 路由已装配（`backend/src/knowagent/tickets/api/router.py`），覆盖列表/详情/回复/分派/开始/解决/关闭/重开/答案提交/候选审核全链路，并修跨系统泄露与 CSRF 防护；待真实基础设施环境跑 `KNOWAGENT_RUN_API_INTEGRATION=1` 验收。
 3. 文档入库 Worker 尚未调用 Phase 2 Embedding 索引服务。
 4. 用户端与管理端尚无可执行的真实页面端到端闭环。
 
-以上缺口完成并验收前，Phase 2 保持进行中。
+以下缺口仍需完成并验收：SSE 流式与 Worker 接线、在真实 PostgreSQL/Redis 环境运行 Agent/Tickets API 集成测试以及页面端到端闭环。完成前 Phase 2 保持进行中。

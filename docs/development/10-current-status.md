@@ -17,8 +17,8 @@
 ```text
 当前阶段：Phase 2 问答与工单闭环（Phase 1 已完成并通过集成验收）
 阶段目标：系统隔离检索、带引用回答、可靠拒答、内置工单和审核回流
-当前任务：Phase 2 核心服务集成验收通过，进入问答 API/SSE、工单 API 与 Worker 装配
-任务状态：4/4 基础代码完成；真实 PostgreSQL 17/pgvector、Ollama、Qwen、拒答工单和审核回流组合验证通过；API/Worker/页面端到端门禁待补
+当前任务：问答 API 与工单 API 装配完成，进入 SSE 流式、Worker 接线与页面端到端门禁
+任务状态：4/4 基础代码完成；真实 PostgreSQL 17/pgvector、Ollama、Qwen、拒答工单和审核回流组合验证通过；Agent/Tickets API 装配完成并通过静态检查与非集成测试，集成测试默认 skip 待真实环境运行；SSE 流式/Worker 接线/页面端到端门禁待补
 ```
 
 ## 3. 已完成
@@ -75,17 +75,21 @@
 50. 已完成 Phase 2 第 4 项 review 修复：审核锁不再跨越 Embedding `await`，候选批准/拒绝统一串行化；答案重放在外部调用前返回历史快照并处理并发唯一冲突；本地进程停止校验 PID 启动身份；ORM 约束名和模型默认 digest 与迁移、运行配置一致。
 51. 已新增 Phase 2 live 集成运行器，读取真实 `.env` 并固定复用 `knowagent_integration` 和 Redis DB 15；真实 Qwen 合约、双系统 pgvector 检索隔离、答案快照、可靠拒答、工单工作流、审核发布和 5 分钟内回流检索均通过。
 52. 已修复 PostgreSQL 父子 INSERT 顺序：答案先于引用 flush，拒答判定先于工单发生记录 flush；2 个写入顺序回归和 25 项相关单测通过。
+53. 已装配 Agent API（`POST /api/v1/questions`）：依赖注入 `CsrfContext` 强制 CSRF，跨系统访问鉴权复用共享 helper，并把 `HttpEmbeddingProvider`/`OpenAiCompatibleLlmProvider`/策略/`AnswerGenerator`/prompt 提升为进程级单例复用连接池。
+54. 已装配 Tickets API（`/api/v1/tickets` 系列）：列表/详情/回复/分派/开始/解决/关闭/重开/答案提交/候选审核全链路端点，系统归属鉴权、CSRF 校验与审计落库；修复 list_tickets 在可见系统为空时退化为全表扫描的跨系统泄露。
+55. 已抽出 `backend/src/knowagent/identity/api/access.py` 共享 `require_system_access`/`visible_system_ids`，消除 agent/tickets 重复实现；`visible_system_ids` 改为不受 1000 上限的 `systems.list`。
+56. 已抽 `backend/tests/integration/_fakes.py` 共享 `FakeRedis`/`FakePipeline`，并新增 `test_agent_api.py`、`test_tickets_api.py`（21 项集成测试默认 skip，含 CSRF、跨系统泄露回归用例）。
 
 ## 4. 正在进行
 
-1. Phase 2 功能范围 4/4 的基础代码和核心服务真实集成验收已完成；问答 API/SSE、工单 API、文档索引 Worker 接线和页面端到端验收待实施。
+1. Phase 2 功能范围 4/4 的基础代码和核心服务真实集成验收已完成；问答 API 与工单 API 已装配完成并通过静态检查与非集成测试，SSE 流式、文档索引 Worker 接线和页面端到端验收待实施。
 2. Phase 1 功能范围 6/6 已实现，并于 2026-08-04 在固定 PostgreSQL/Redis/MinIO integration 资源上完成四格式完整持久化与隔离验收，现已正式关闭。
 3. 本地 PostgreSQL 17、pgvector、pg_trgm、MinIO、Ollama Embedding 和 Qwen 已完成 Phase 2 核心服务组合联调。
 4. 等待目标 Linux 服务器资源信息以最终确定 Embedding/Rerank 推理后端、量化方式和 Python 传递依赖锁；本地 Ollama 方案不自动等同生产选型。
 
 ## 5. 未完成 / 下一步
 
-1. 接入问答 API/SSE 与工单 API，装配可靠问答、答案快照、工单工作流和知识审核服务。
+1. 接入 SSE 流式问答协议与会话持久化；Agent API（`/questions`）与 Tickets API 已装配，待在真实 PostgreSQL/Redis 下显式启用集成测试验收。
 2. 接入文档索引 Worker，将已验证的 Embedding 索引服务装配到真实文档入库流程。
 3. 在 API 和 Worker 装配后完成 AC-004 至 AC-007 的接口/页面端到端验收；核心领域服务的跨系统零泄漏、拒答建单、工单审核和回流时延已有真实证据。
 4. 在 Phase 2 页面端到端验收中刷新真实后端页面证据；随后在 staging/类生产 Linux 环境验证公司对象存储 TLS/内部 CA、迁移锁时长、模型运行和发布回滚。
@@ -113,6 +117,9 @@
 | `docs/development/20-phase1-integration-acceptance.md` | 记录 Phase 1 PostgreSQL/Redis/MinIO 四格式完整验收证据和遗留风险 | 已完成（正式通过） |
 | `backend/tests/integration/test_phase2_live_integration.py`、`scripts/run-phase2-integration.sh` | Phase 2 固定资源 live 验收与真实 Qwen 可选门禁 | 已完成并通过 |
 | `docs/development/21-phase2-integration-acceptance.md` | 记录 Phase 2 核心服务验收证据、写入顺序修复和阶段关闭缺口 | 已完成（核心服务通过） |
+| `backend/src/knowagent/agent/api/`、`backend/src/knowagent/tickets/api/`、`backend/src/knowagent/identity/api/access.py` | 装配 Agent/Tickets API 端点与共享系统访问 helper，并修跨系统泄露与 CSRF 缺口 | 已完成；非集成测试 250 通过、集成测试待真实环境运行 |
+| `backend/tests/integration/test_agent_api.py`、`test_tickets_api.py`、`_fakes.py` | Agent/Tickets API 集成测试与共享 FakeRedis | 已完成；默认 skip 待环境变量启用 |
+| `docs/development/03-feature-changelog.md` | 记录 Agent/Tickets API 装配与 review 修复 | 已完成 |
 | `docs/engineering/11-project-structure.md` | 完整架构方案通过确认 | 已完成 |
 | `backend/pyproject.toml` | Python 3.11 后端依赖和质量工具配置 | 已完成 |
 | `model-service/src/knowagent_model/`、`.env.example`、`pyproject.toml` | Ollama bge-m3 适配、批量/旧接口兼容、归一化、健康检查、配置和进程入口 | 已完成；生产运行时待硬件门禁 |

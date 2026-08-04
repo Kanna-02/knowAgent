@@ -17,13 +17,13 @@ KnowAgent 是面向公司内部人员的多系统智能客服产品。Phase 0 �
 | 分类 | 文档 | 状态 |
 | --- | --- | --- |
 | 产品 | `product/01-requirements-clarification.md` | 已确认，认证范围已同步 |
-| 产品 | `product/06-roadmap.md` | Phase 1 已完成集成验收并关闭，Phase 2 进行中 |
+| 产品 | `product/06-roadmap.md` | Phase 1 已完成集成验收并关闭，Phase 2 核心服务集成验收通过，Agent/Tickets API 装配完成，SSE/Worker/页面端到端待补 |
 | 产品 | `product/15-frontend-design.md` | 已确认，双登录流程已同步 |
 | 工程 | `engineering/02-development-principles.md` | 初版完成 |
 | 工程 | `engineering/04-tech-decisions.md` | TD-001 至 TD-011 及核心版本基线已确认 |
 | 工程 | `engineering/11-project-structure.md` | 架构已确认 |
 | 开发 | `development/03-feature-changelog.md` | 已记录 Phase 1 全部实现、评审修复与集成验收 |
-| 开发 | `development/10-current-status.md` | Phase 1 已完成真实基础设施验收，Phase 2 集成验收待补 |
+| 开发 | `development/10-current-status.md` | Phase 1 已完成真实基础设施验收，Phase 2 核心服务集成验收通过，API 装配完成，SSE/Worker/页面端到端待补 |
 | 开发 | `development/16-retrospective.md` | `knowledge-rag` 跨项目资产盘点已完成 |
 | 开发 | `development/17-traceability-matrix.md` | REQ-004 的解析、对象存储和可恢复持久任务已实现；知识索引/发布待完成 |
 | 开发 | `development/20-phase1-integration-acceptance.md` | 通过；记录真实 PG/Redis/MinIO 与四格式完整链路证据 |
@@ -32,6 +32,6 @@ KnowAgent 是面向公司内部人员的多系统智能客服产品。Phase 0 �
 
 ## 下一步
 
-1. 接入问答 API/SSE、工单 API 和文档索引 Worker，准备 Phase 2 端到端验收。
+1. 接入问答 SSE 流式与会话持久化、文档索引 Worker 接线，并在真实 PostgreSQL/Redis 下运行 Agent/Tickets API 集成测试，准备 Phase 2 端到端验收。
 2. 配置完整 Qwen Key，在现有 PostgreSQL/pgvector 与 Ollama Embedding 环境完成组合联调。
 3. 模型运行时和 Python 传递依赖锁等待目标 Linux/硬件信息后确认。
