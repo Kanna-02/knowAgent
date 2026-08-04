@@ -63,6 +63,15 @@ class TicketRepository(Protocol):  # pylint: disable=too-many-public-methods
 
     def add_ticket_occurrence(self, occurrence: TicketOccurrence) -> TicketOccurrence: ...
 
+    def list_tickets_page(
+        self,
+        *,
+        system_ids: list[UUID],
+        status: TicketStatus | None,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[Ticket], int]: ...
+
     # ---- workflow: replies, transitions, candidates ----
 
     def add_reply(self, reply: TicketReply) -> TicketReply: ...

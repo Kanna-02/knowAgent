@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 from redis import Redis
 
+from knowagent.agent.api.router import router as agent_router
 from knowagent.common.errors import KnowAgentError
 from knowagent.documents.api.router import router as documents_router
 from knowagent.documents.infrastructure.sqlalchemy_repository import (
@@ -18,6 +19,7 @@ from knowagent.identity.api.router import router as identity_router
 from knowagent.platform.database import create_database_engine, create_session_factory
 from knowagent.platform.settings import Settings
 from knowagent.systems.api.router import router as systems_router
+from knowagent.tickets.api.router import router as tickets_router
 from knowagent.worker.celery_app import build_celery_app
 from knowagent.worker.dispatcher import CeleryIngestionDispatcher
 
@@ -77,9 +79,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def live() -> dict[str, str]:
         return {"status": "ok"}
 
+    application.include_router(agent_router, prefix="/api/v1")
     application.include_router(identity_router, prefix="/api/v1")
     application.include_router(systems_router, prefix="/api/v1")
     application.include_router(documents_router, prefix="/api/v1")
+    application.include_router(tickets_router, prefix="/api/v1")
     return application
 
 

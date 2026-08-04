@@ -17,6 +17,40 @@
 
 ## 功能变更记录
 
+### 2026-08-04 - 审查修复 Agent 与 Tickets API 跨系统隔离与 CSRF 等阻塞项
+
+类型：修复
+
+相关需求：REQ-002、REQ-007、REQ-011；AC-006、AC-007、AC-016。
+
+变更说明：
+
+1. 修复 `list_tickets` 在可见系统列表为空时回退到无 WHERE 全表查询的跨系统数据泄露：当账号没有任何可见系统时直接返回空页，不再触碰仓储先查询，避免 USER 角色读到其他业务系统工单。新增 `visible_system_ids` 用 `systems.list(status=...)` 取全部可见系统，移除原 `list_page(page=1, page_size=1000)` 的硬上限。
+2. 抽出 `knowagent/identity/api/access.py` 共享 `require_system_access` 与 `visible_system_ids`，消除 agent、tickets 两个 router 中重复实现的 `_require_system_access`/`_require_ticket_access`/`_visible_system_ids`，统一 ADMIN/SYSTEM_OWNER/USER 三类角色的系统访问语义，新增 `allow_user` 参数显式表达 USER 是否可访问 ACTIVE 系统。
+3. `ask_question` 端点改用 `CsrfContext` 强制 CSRF 校验，与其余工单写操作一致；补 `test_ask_question_missing_csrf_returns_403` 用例，并为所有已登录的 ask_question 集成测试补 CSRF 头。
+4. 将 `ReliableQuestionService` 依赖中无状态且持有 HTTP 连接池的 `HttpEmbeddingProvider`、`OpenAiCompatibleLlmProvider`、`DeterministicEvidencePolicy`、`AnswerGenerator`、prompt 提升为进程级单例，缓存在 `app.state.agent_components`，首次请求惰性创建并复用，避免每次问答都重建连接池。
+5. 抽 `tests/integration/_fakes.py` 共享 `FakeRedis`/`FakePipeline`，删除两个集成测试文件中的重复定义；新增一股 `test_list_tickets_user_without_visible_systems_returns_empty` 跨系统泄露回归用例。
+
+review 修复（2 阻塞 + 0 建议 + 2 提醒）：
+
+1. 修复 `list_tickets` 无 system_id 参数且账号可见系统为空时退化为全表扫描的跨系统泄露（P0），改为短路返回空页且不发起仓储查询。
+2. `ask_question` 改用 `CsrfContext`，补齐 CSRF 防护缺口（P1）。
+3. 将 agent/tickets 共享的系统访问与可见系统列表 helper 收敛到单一实现（P2 消重）。
+4. 无状态 Agent 组件提升为进程级单例（P1 连接复用）。
+5. `visible_system_ids` 从 `list_page` 改为不受 1000 上限的 `list`，避免大规模部署时系统被静默截断（P2）。
+6. `approve_candidate`/`reject_candidate` 先取候选再鉴权的顺序约束属候选 ID 全局 UUID 命名空间无法线性枚举，保留现状并在评估中记录为残余风险（原审查标记的 P0 #2 经复评降级为不修）。`TicketPage` 在 `page` 超过总页数时返回空 items 但 `total>0` 的行为保留，作为可分页客户端的既有契约（P2 #7 不改）。
+
+影响范围：
+
+- backend/src/knowagent/identity/api/access.py（新增）
+- backend/src/knowagent/tickets/api/router.py、backend/src/knowagent/agent/api/router.py
+- backend/tests/integration/_fakes.py（新增）、backend/tests/integration/test_agent_api.py、backend/tests/integration/test_tickets_api.py
+- docs/development/03-feature-changelog.md
+
+验证方式：后端 250 项非集成测试全部通过，总覆盖率 87.64%（80% 阈值满足）；`black`+`isort` 已格式化本次修改文件；`mypy --strict` 对 122 个源文件零错误；Pylint 9.73/10（残留 R0913/R0917 为 FastAPI 端点签名既有模式，与本次变更无关）；Bandit 中高危 0；集成测试 21 项默认 skip（`KNOWAGENT_RUN_API_INTEGRATION` 未设），collect-only 通过。
+
+后续注意：集成测试需在类生产 PostgreSQL/Redis 下设 `KNOWAGENT_RUN_API_INTEGRATION=1` 与 `KNOWAGENT_API_INTEGRATION_DATABASE_URL` 才能验证真实 SQL、CSRF、跨系统隔离与工单回流链路。`approve_candidate`/`reject_candidate` 的 NotFound 与 Authorization 顺序因候选 UUID 全局命名空间不可线性枚举而保留，后续若引入候选 ID 命名空间可枚举场景需重评。
+
 ### 2026-08-04 - Phase 2 核心服务真实集成验收通过并修复 PostgreSQL 写入顺序
 
 类型：测试 / 修复

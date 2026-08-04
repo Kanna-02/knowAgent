@@ -8,6 +8,7 @@ from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.elements import ColumnElement
 
 from knowagent.agent.domain.models import (
     EvidenceCandidateSummary,
@@ -188,6 +189,31 @@ class SqlAlchemyTicketRepository:  # pylint: disable=too-many-public-methods
 
     def count_tickets(self) -> int:
         return int(self._session.scalar(select(func.count(TicketRecord.id))) or 0)
+
+    def list_tickets_page(
+        self,
+        *,
+        system_ids: list[UUID],
+        status: TicketStatus | None,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[Ticket], int]:
+        filters: list[ColumnElement[bool]] = []
+        if system_ids:
+            filters.append(TicketRecord.system_id.in_(system_ids))
+        if status is not None:
+            filters.append(TicketRecord.status == status)
+        count_stmt = select(func.count(TicketRecord.id)).where(*filters)
+        total = int(self._session.scalar(count_stmt) or 0)
+        records = self._session.scalars(
+            select(TicketRecord)
+            .where(*filters)
+            .order_by(TicketRecord.updated_at.desc(), TicketRecord.id)
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        ).all()
+        tickets = [self._to_ticket(record) for record in records]
+        return tickets, total
 
     # ---- workflow ----
 
