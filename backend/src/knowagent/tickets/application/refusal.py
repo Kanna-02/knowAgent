@@ -124,8 +124,10 @@ class RefusalTicketService:
         else:
             ticket = self._repository.increment_ticket_occurrence(ticket_id=ticket.id, now=now)
 
-        # Persist the occurrence so every user that hit the same refusal can
-        # later look up the ticket they participated in and receive updates.
+        self._repository.add_decision(decision=decision, ticket_id=ticket.id)
+
+        # Persist the occurrence after its evidence decision because run_id is
+        # protected by a foreign key to evidence_decisions.
         self._repository.add_ticket_occurrence(
             TicketOccurrence(
                 id=uuid4(),
@@ -137,7 +139,6 @@ class RefusalTicketService:
                 created_at=now,
             )
         )
-        self._repository.add_decision(decision=decision, ticket_id=ticket.id)
         return ticket.id
 
     def _deduplication_key(

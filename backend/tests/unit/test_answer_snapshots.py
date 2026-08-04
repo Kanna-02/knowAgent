@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session
 
 from knowagent.agent.application.answer_snapshots import AnswerSnapshotService
@@ -100,6 +100,36 @@ def test_record_and_read_preserves_immutable_ticket_citation_snapshot() -> None:
         assert loaded.answer == answer
         assert loaded.degraded_reasons == ("VECTOR_UNAVAILABLE",)
         assert loaded.answer.citations[0].locators[0].ticket_id is not None
+
+
+def test_record_flushes_answer_before_citations() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    insert_order: list[str] = []
+
+    @event.listens_for(engine, "before_cursor_execute")
+    def capture_insert_order(
+        _connection: object,
+        _cursor: object,
+        statement: str,
+        _parameters: object,
+        _context: object,
+        _executemany: bool,
+    ) -> None:
+        if statement.lstrip().upper().startswith("INSERT INTO"):
+            insert_order.append(statement.split()[2])
+
+    with Session(engine) as session:
+        decision = make_decision()
+        SqlAlchemyTicketRepository(session).add_decision(decision=decision, ticket_id=None)
+        setup_service(session).record(
+            decision=decision,
+            answer=make_answer(),
+            degraded_reasons=(),
+            now=NOW,
+        )
+
+    assert insert_order.index("answers") < insert_order.index("answer_citations")
 
 
 def test_record_replay_is_idempotent_but_changed_snapshot_conflicts() -> None:

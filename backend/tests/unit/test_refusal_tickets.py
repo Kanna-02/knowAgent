@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session
 
 from knowagent.agent.domain.models import (
@@ -92,6 +92,34 @@ def test_create_from_refusal_persists_reason_and_open_ticket_atomically() -> Non
         assert len(occurrences) == 1
         assert occurrences[0].run_id == decision.run_id
         assert occurrences[0].requester_id == requester_id
+
+
+def test_create_from_refusal_flushes_decision_before_occurrence() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    insert_order: list[str] = []
+
+    @event.listens_for(engine, "before_cursor_execute")
+    def capture_insert_order(
+        _connection: object,
+        _cursor: object,
+        statement: str,
+        _parameters: object,
+        _context: object,
+        _executemany: bool,
+    ) -> None:
+        if statement.lstrip().upper().startswith("INSERT INTO"):
+            insert_order.append(statement.split()[2])
+
+    with Session(engine) as session:
+        tickets, _ = service(session)
+        tickets.create_from_refusal(
+            decision=make_decision(),
+            requester_id=uuid4(),
+            now=NOW,
+        )
+
+    assert insert_order.index("evidence_decisions") < insert_order.index("ticket_occurrences")
 
 
 def test_create_from_refusal_replaying_run_returns_same_ticket_without_increment() -> None:

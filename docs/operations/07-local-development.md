@@ -223,6 +223,18 @@ Phase 1 真实基础设施验收固定复用 `knowagent_integration`、Redis DB 
 
 成功运行后仅清理本次验收记录、S3 对象和 Redis 消息，不删除数据库或 Bucket，也不执行 `flushdb`。标准 pytest 套件默认跳过该 live 用例，避免误连本地基础设施。
 
+Phase 2 核心服务验收同样固定复用 `knowagent_integration` 和 Redis DB 15，自动读取 `backend/.env` 与 `model-service/.env`：
+
+```bash
+# PostgreSQL/pgvector、Ollama、检索、拒答工单和审核回流
+./scripts/run-phase2-integration.sh
+
+# 在上述范围上增加真实 Qwen 回答契约
+./scripts/run-phase2-integration.sh --with-llm
+```
+
+运行器只在固定数据库首次缺失时创建一次；成功后精确清理本轮记录，失败时保留现场，不按运行新建/删除数据库。`--with-llm` 使用 `backend/.env` 的 Qwen base URL、model 和 API key。
+
 ```powershell
 cd backend
 $env:PYTHONPATH = "src"

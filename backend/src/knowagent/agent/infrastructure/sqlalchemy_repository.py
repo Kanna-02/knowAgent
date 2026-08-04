@@ -54,6 +54,7 @@ class SqlAlchemyAnswerSnapshotRepository:
                 updated_at=snapshot.created_at,
             )
         )
+        self._session.flush()
         for citation in snapshot.answer.citations:
             self._session.add(
                 AnswerCitationRecord(

@@ -17,6 +17,25 @@
 
 ## 功能变更记录
 
+### 2026-08-04 - Phase 2 核心服务真实集成验收通过并修复 PostgreSQL 写入顺序
+
+类型：测试 / 修复
+
+相关需求：REQ-002、REQ-004、REQ-005、REQ-006、REQ-007、REQ-009、REQ-014；AC-004 至 AC-007 的核心服务范围。
+
+变更说明：
+
+1. 新增显式门禁的 Phase 2 live 集成用例与运行器，读取 `backend/.env`、`model-service/.env`，固定复用 `knowagent_integration` 和 Redis DB 15，不按运行创建或删除数据库。
+2. 真实验证 PostgreSQL 17/pgvector/pg_trgm、Ollama bge-m3、Qwen OpenAI 兼容流、双系统检索隔离、证据判定、答案/历史引用快照、可靠拒答与工单去重、工单状态机、审核发布和 5 分钟内工单知识回流检索。
+3. 修复答案与引用在同一次 SQLAlchemy flush 中因缺少 ORM relationship 依赖而先写子表的问题；答案父记录先 flush，再写引用。
+4. 修复拒答流程先写 `ticket_occurrences`、后写其外键依赖 `evidence_decisions` 的问题；保持原事务边界并按工单、判定、发生记录顺序持久化。
+
+质量补充 2 个写入顺序回归用例，直接断言 ORM 发出的父子 INSERT 顺序。
+
+验证方式：修复前两个回归用例分别稳定记录 `answer_citations -> answers` 和 `ticket_occurrences -> evidence_decisions` 并失败；修复后 25 项答案快照/拒答工单单测通过。后端全量 250 项通过、3 项 live 门禁跳过，总覆盖率 90.72%；118 个 Python 文件 Black 清洁，isort 通过，115 个源文件 mypy strict 零错误，本次范围 Pylint 10.00/10，Bandit 中高危 0，Bash 语法和 diff whitespace 通过。`./scripts/run-phase2-integration.sh --with-llm` 使用真实 `.env` 配置通过，2 项 live 用例在 36.85 秒内完成；Qwen 合约和完整核心服务往返均通过，Alembic `upgrade head`/`check` 无漂移。
+
+后续注意：本次证明 AC-004 至 AC-007 的领域服务和真实基础设施组合可用，但问答 API/SSE、工单 API、文档索引 Worker 接线和页面端到端流程仍未实现，因此 Phase 2 不正式关闭。
+
 ### 2026-08-04 - Phase 1 真实基础设施集成验收通过并正式关闭
 
 类型：测试 / 质量
