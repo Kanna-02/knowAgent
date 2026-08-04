@@ -17,6 +17,23 @@
 
 ## 功能变更记录
 
+### 2026-08-04 - Phase 1 真实基础设施集成验收通过并正式关闭
+
+类型：测试 / 质量
+
+相关需求：REQ-001、REQ-002、REQ-003、REQ-004、REQ-011；AC-001、AC-002、AC-003、AC-009 的 Phase 1 范围。
+
+变更说明：
+
+1. 新增显式门禁的 Phase 1 live 集成用例，运行时生成 PDF、DOCX、Markdown、XLSX 四种真实样本，覆盖 S3 上传/回读、Worker 解析切分、locator、知识发布、幂等和 v2 切换。
+2. 使用两个业务系统发布同主题不同标记知识，验证服务端越权拒绝和 `system_id + PUBLISHED` 零泄漏；模拟 Worker 租约过期并通过真实 Redis/Celery broker 只恢复目标任务一次。
+3. 验证 MinIO S3 `put/get/delete`、multipart ETag、错误凭据和不可达端点错误分类；live 结束后断言数据库验收记录、Redis key/队列长度和 Bucket 对象集合恢复到运行前状态。
+4. 验收运行器固定复用 `knowagent_integration`、Redis DB 15 和 `knowagent-phase1-it`；资源只在首次缺失时创建，不再按运行创建/删除数据库，也不执行 `flushdb`。
+
+验证方式：`./scripts/run-phase1-integration.sh` 在固定 integration 资源上连续复跑通过，最终结果为 1 项 live 用例通过，四格式、multipart、权限拒绝、幂等、v1→v2、双系统零泄漏和 1 个租约过期任务恢复均符合预期；PostgreSQL 17.10 从固定库迁移至 `c1738febb896`，复跑 `alembic check` 返回 `No new upgrade operations detected`。标准后端套件 248 项通过、1 项 live 用例按门禁跳过，总覆盖率 90.72%；新增测试 Pylint 10.00/10，Black/isort、Bash 语法和 Git diff whitespace 检查通过。
+
+后续注意：本地 MinIO 使用 HTTP，未覆盖公司对象存储 TLS/内部 CA 和真实服务端 5xx/限流；这些属于 staging/部署验证风险，不阻塞 Phase 1 关闭。本次未新增页面功能，页面连接真实后端的人工复验可随 Phase 2 问答/工单页面端到端验收执行。
+
 ### 2026-08-04 - 完成 Phase 2 审核发布重新索引、来源追踪与历史引用快照
 
 类型：新功能
@@ -139,7 +156,7 @@ review 修复（4 阻塞 + 3 建议）：
 
 后续注意：当前交付是问答内核，不含问答 API/SSE 持久事件、会话/答案引用落库、证据充分性策略、自动建单、工单处理审核回流、Rerank 和 HNSW。需要可加载 `vector` 的 PostgreSQL、真实 Embedding 服务及完整 Qwen Key 后再执行外部集成验收。
 
-### 2026-08-03 - Phase 1 集成验收有条件通过
+### 2026-08-03 - Phase 1 PostgreSQL/Redis 预验收通过
 
 类型：集成验收 / 质量门禁
 
@@ -149,7 +166,7 @@ review 修复（4 阻塞 + 3 建议）：
 
 验证方式：目标 Python 3.11.11 下后端 129 项测试全部通过、总覆盖率 91.54%；PostgreSQL `upgrade head` 和 `alembic check` 通过；真实 PG/Redis 验收脚本返回两个系统、v1/v2、B 系统 0 个发布 chunk、1 个恢复任务已派发和 6 个隔离 Redis Session key。
 
-后续注意：本机无 S3 兼容服务或测试 Bucket，真实 S3 `put/get/delete`、四格式 S3→PG→Worker 全链路和真实后端页面手测被跳过，因此 Phase 1 为有条件通过，暂不正式关闭。详见 `docs/development/20-phase1-integration-acceptance.md`。
+后续注意：当时本机无 S3 兼容服务或测试 Bucket，真实 S3 `put/get/delete`、四格式 S3→PG→Worker 全链路和真实后端页面手测被跳过，因此仅完成预验收、未正式关闭。对象存储与四格式链路已在 2026-08-04 live 验收中补齐并关闭 Phase 1，详见 `docs/development/20-phase1-integration-acceptance.md`。
 
 ### 2026-08-02 - 完成 Phase 1 文档版本、发布状态与知识强隔离基础模型
 

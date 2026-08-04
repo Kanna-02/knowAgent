@@ -85,6 +85,9 @@ severity = "MEDIUM"
 [tool.pytest.ini_options]
 addopts = "--cov=knowagent --cov-report=term-missing --cov-fail-under=80"
 testpaths = ["tests"]
+markers = [
+  "integration: tests that require explicitly configured live infrastructure",
+]
 
 [tool.coverage.run]
 branch = true

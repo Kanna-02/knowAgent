@@ -215,6 +215,14 @@ npm run dev -- --host 127.0.0.1 --port 5173
 
 ## 7. 验证
 
+Phase 1 真实基础设施验收固定复用 `knowagent_integration`、Redis DB 15 和 `knowagent-phase1-it`，数据库/Bucket 只在首次缺失时创建：
+
+```bash
+./scripts/run-phase1-integration.sh
+```
+
+成功运行后仅清理本次验收记录、S3 对象和 Redis 消息，不删除数据库或 Bucket，也不执行 `flushdb`。标准 pytest 套件默认跳过该 live 用例，避免误连本地基础设施。
+
 ```powershell
 cd backend
 $env:PYTHONPATH = "src"

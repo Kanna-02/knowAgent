@@ -9,13 +9,13 @@
 更新人/助手：Codex
 当前分支：master
 远程仓库：git@github.com:Kanna-02/knowAgent.git
-当前环境：Python 3.11.11；PostgreSQL 17.10 + vector 0.8.6 + pg_trgm 1.6；Redis 7；本地 MinIO；Node.js 24.16.0；本地 Ollama 0.3.14 + bge-m3
+当前环境：Python 3.11.11；PostgreSQL 17.10 + vector 0.8.6 + pg_trgm 1.6；Redis 8.10.0；MinIO RELEASE.2025-10-15T17-29-55Z；Node.js 24.16.0；本地 Ollama 0.3.14 + bge-m3
 ```
 
 ## 2. 当前阶段
 
 ```text
-当前阶段：Phase 2 问答与工单闭环（Phase 1 真实 S3 补验并行待办）
+当前阶段：Phase 2 问答与工单闭环（Phase 1 已完成并通过集成验收）
 阶段目标：系统隔离检索、带引用回答、可靠拒答、内置工单和审核回流
 当前任务：Phase 2 四项基础代码完成，进入问答 API/SSE、工单 API 与集成验收
 任务状态：4/4 基础代码与自动化验证完成；本地 PostgreSQL 17 已迁移到 c1738febb896，待补真实 pgvector/Embedding/Qwen 组合链路和 AC-004 至 AC-007 端到端验收
@@ -58,7 +58,7 @@
 33. 已实现发布/退役事务：新版本发布会原子切换当前指针并退役旧版本、来源和片段；发布查询只返回指定 `system_id` 下的 `PUBLISHED` 片段。
 34. 已通过复合外键将文档、版本、来源和片段的 `system_id` 串成数据库隔离链，并为系统+发布状态查询建立索引；REQ-002/REQ-011 追溯状态已推进为 `implementing`。
 35. 已完成版本/发布 review 修复：幂等请求保存原始父文档 ID并使用任务上传者校验；当前发布指针同时约束文档和系统；发布/退役统一锁序；对象上传不再长期持有版本分配行锁。
-36. 已完成 Phase 1 PostgreSQL/Redis 集成预验收：Python 3.11.11 下 129 项测试通过，PostgreSQL 16 迁移/Schema 一致性、真实 Redis Session、双系统越权拒绝、Markdown 入库、v2 发布切换、跨系统零泄漏及租约恢复派发均通过。
+36. 已完成并关闭 Phase 1：固定 `knowagent_integration`、Redis DB 15 和 `knowagent-phase1-it` 环境下，真实 S3 契约、四格式 S3→PostgreSQL→Worker、双系统越权/零泄漏、幂等、v2 发布切换和租约恢复均通过；验收资源可重复复用并在成功后恢复运行前状态。
 37. 已实现 PostgreSQL `pg_trgm` 关键词召回、pgvector 余弦召回和 RRF 融合；两个查询均在排序前强制限定 `system_id`、`PUBLISHED` 和文档来源，Embedding 故障时只降级到关键词。
 38. 已实现批量 Embedding 索引与原子写回，模型名、版本、维度、归一化、数量、超时和批大小均有契约或配置校验；新增 `vector`/`pg_trgm` 迁移和 trigram 索引。
 39. 已实现证据条数/字符预算、稳定证据编号、Qwen OpenAI 兼容 SSE 生成、结构化回答解析和引用白名单/逐字验证，引用结果携带不可变来源与 locator 快照。
@@ -77,7 +77,7 @@
 ## 4. 正在进行
 
 1. Phase 2 功能范围 4/4 的基础代码与自动化验证已完成；问答 API/SSE、工单 API、文档索引 Worker 接线和 AC-004 至 AC-007 集成验收正在排期。
-2. Phase 1 功能范围 6/6 已实现且 PostgreSQL/Redis 预验收通过；本地 MinIO 已建立并完成对象冒烟，四格式完整持久化链路仍是并行补验项。
+2. Phase 1 功能范围 6/6 已实现，并于 2026-08-04 在固定 PostgreSQL/Redis/MinIO integration 资源上完成四格式完整持久化与隔离验收，现已正式关闭。
 3. 本地 PostgreSQL 17、pgvector、pg_trgm、MinIO 和 Ollama Embedding 已就绪；等待完整 Qwen Key 完成组合联调。
 4. 等待目标 Linux 服务器资源信息以最终确定 Embedding/Rerank 推理后端、量化方式和 Python 传递依赖锁；本地 Ollama 方案不自动等同生产选型。
 
@@ -86,7 +86,7 @@
 1. 接入问答 API/SSE 与工单 API，装配可靠问答、答案快照、工单工作流和知识审核服务。
 2. 接入文档索引 Worker，并使用本地 PostgreSQL 17 + pgvector、Ollama Embedding 和完整 Qwen Key 跑通索引、双通道检索、生成、引用及审核回流样例。
 3. 完成 AC-004 至 AC-007 的端到端验收，覆盖跨系统零泄漏、可靠拒答建单、工单处理审核和发布后可检索时延。
-4. 使用本地 MinIO 补跑四种格式的 S3→PostgreSQL→Worker 完整链路和页面手测；随后在类生产 Linux 环境验证迁移锁时长、模型运行和发布回滚。
+4. 在 Phase 2 页面端到端验收中刷新真实后端页面证据；随后在 staging/类生产 Linux 环境验证公司对象存储 TLS/内部 CA、迁移锁时长、模型运行和发布回滚。
 
 ## 6. 阻塞点
 
@@ -109,7 +109,7 @@
 | `docs/README.md` | 修正需求和技术选型状态及下一步门禁 | 已完成 |
 | `docs/development/16-retrospective.md` | 将来源项目认证迁移结论同步到 TD-006 | 已完成 |
 | `docs/development/03-feature-changelog.md` | 记录架构确认和 Python 3.11 调整 | 已完成 |
-| `docs/development/20-phase1-integration-acceptance.md` | 记录 Phase 1 PostgreSQL/Redis 验收证据、跳过项和 S3 复验计划 | 已完成 |
+| `docs/development/20-phase1-integration-acceptance.md` | 记录 Phase 1 PostgreSQL/Redis/MinIO 四格式完整验收证据和遗留风险 | 已完成（正式通过） |
 | `docs/engineering/11-project-structure.md` | 完整架构方案通过确认 | 已完成 |
 | `backend/pyproject.toml` | Python 3.11 后端依赖和质量工具配置 | 已完成 |
 | `model-service/src/knowagent_model/`、`.env.example`、`pyproject.toml` | Ollama bge-m3 适配、批量/旧接口兼容、归一化、健康检查、配置和进程入口 | 已完成；生产运行时待硬件门禁 |
@@ -207,7 +207,7 @@
 | Phase 1 Python 3.11 全量测试 | 通过 | 129 项测试通过，总覆盖率 91.54%；四类运行时生成样本及边界/异常回归通过 |
 | Phase 1 PostgreSQL 16 迁移 | 通过 | 隔离数据库 `upgrade head` 与 `alembic check` 通过，无 ORM/Schema 差异 |
 | Phase 1 PostgreSQL/Redis 核心链路 | 通过 | 双系统授权、未授权上传 403、幂等、Markdown 入库、v2 发布切换、B 系统 0 发布 chunk、Redis Session 和 1 个过期任务恢复派发通过 |
-| Phase 1 S3/四格式完整链路 | 跳过 | 本机没有 S3 兼容服务或测试 Bucket；详见集成验收报告 |
+| Phase 1 最终 live 集成验收 | 通过 | 固定 integration 资源复跑通过；真实 S3 put/get/delete、multipart、四格式持久化、幂等、v2 切换、双系统零泄漏和 1 个租约过期任务恢复均符合预期 |
 | Phase 2 第 1 项后端全量测试 | 通过 | review 修复后 167 项测试通过，总覆盖率 91.06%；45 项相关测试覆盖召回、数据库异常降级/指标、索引、证据预算、Prompt、流终止、声明支撑和引用异常 |
 | Phase 2 第 1 项静态检查 | 通过 | 相关 27 个源文件 mypy strict 零错误；本次 36 个 Python 文件 Black/isort 清洁；Pylint 10.00/10；全仓 Bandit 中高危 0 |
 | Phase 2 第 1 项 Alembic | 通过（SQLite） | `upgrade head -> downgrade 3ba86a4c3d35 -> upgrade head` 和 `alembic check` 通过；真实 PostgreSQL 因 `vector` 扩展不兼容未运行 |
@@ -229,7 +229,7 @@
 3. 核心、解析器和质量工具直接版本已固定；Python 传递依赖锁仍需在目标 Linux/Python 3.11 环境生成。
 4. 本地 Ollama 适配和修复前真实 bge-m3 冒烟已通过；review 修复时服务未运行，新增 digest 强校验集成测试待恢复服务后复跑。目标 Linux 运行时、量化与完整安装尚未验证，本轮前端生产构建已通过。
 5. `npm audit --audit-level=moderate` 仍报告 React Router RSC 模式 CSRF 公告产生 2 个 high；自动修复会强制降级 `react-router-dom` 到 7.11.0，未在缺少 breaking change 评估时执行。
-6. 四类解析器已接入 S3/PostgreSQL/Celery 端口和持久任务；PostgreSQL/Redis/Markdown 核心链路已在真实服务验证，但 S3 签名、TLS、Bucket 权限、multipart、对象补偿及四格式完整组合仍待隔离 S3 环境。扫描 PDF 仅返回 `OCR_REQUIRED`，首版不执行 OCR。
+6. 四类解析器的 S3/PostgreSQL/Worker 完整组合已在本地 MinIO 验收通过；公司对象存储 TLS/内部 CA、服务端 5xx/限流和目标 Linux 厂商差异仍待 staging 验证。扫描 PDF 仅返回 `OCR_REQUIRED`，首版不执行 OCR。
 7. 本轮使用现有 Python 3.11.11 环境并在 `/tmp` 补充四个锁定依赖；FastAPI、Redis client、pytest/pytest-cov 小版本低于项目锁定版本，结果不替代目标 Linux 按完整锁定依赖安装的发布证明。
 8. Phase 2 迁移已在本地 PostgreSQL 17.10 升级到 `c1738febb896`，JSONB、向量列与复合外键成功落库；迁移锁时长、已有生产量级回填和查询计划仍待类生产数据验证。
 9. Phase 2 四项基础代码已实现，但真实 pgvector/Embedding/Qwen 尚未完成组合问答与审核回流联调；HNSW 在模型维度最终确认前不创建。问答 API/SSE、工单 API、文档索引 Worker 接线和 AC-004 至 AC-007 验收仍待完成。
@@ -241,7 +241,7 @@
 
 1. 先阅读 TD-002、TD-003、TD-009、`retrieval`/`agent`/`tickets` 模块和 `c8784d439b23`、`cc99b700f739`、`ee1a2b3c4d5e`、`c1738febb896` 四个迁移。
 2. 优先接入问答 API/SSE、工单 API 和文档索引 Worker，并装配答案快照与审核发布服务。
-3. 配置完整 Qwen Key 后，使用本地 PostgreSQL 17/pgvector、MinIO 和 Ollama 完成 AC-004 至 AC-007 端到端验收；Phase 1 四格式完整链路继续作为并行补验项。
+3. 配置完整 Qwen Key 后，使用本地 PostgreSQL 17/pgvector、MinIO 和 Ollama 完成 AC-004 至 AC-007 端到端验收。
 
 ## 11. 接手时必须先读
 
