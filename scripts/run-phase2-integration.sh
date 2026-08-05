@@ -99,6 +99,8 @@ export KNOWAGENT_REDIS_PREFIX="knowagent:phase2-it:${RUN_ID}"
 export KNOWAGENT_EMBEDDING_API_BASE="http://127.0.0.1:8100/v1"
 export KNOWAGENT_EMBEDDING_TIMEOUT_SECONDS=300
 export KNOWAGENT_RUN_PHASE2_INTEGRATION=1
+export KNOWAGENT_RUN_API_INTEGRATION=1
+export KNOWAGENT_API_INTEGRATION_DATABASE_URL="${KNOWAGENT_DATABASE_URL}"
 if [[ "${1:-}" == "--with-llm" ]]; then
   export KNOWAGENT_RUN_PHASE2_LLM_INTEGRATION=1
 elif [[ -n "${1:-}" ]]; then
@@ -131,6 +133,8 @@ fi
   "${PYTHON}" -m alembic check
   PYTHONPATH=src "${PYTHON}" -m pytest \
     tests/integration/test_phase2_live_integration.py \
+    tests/integration/test_agent_api.py \
+    tests/integration/test_tickets_api.py \
     -m integration \
     --no-cov \
     -v \

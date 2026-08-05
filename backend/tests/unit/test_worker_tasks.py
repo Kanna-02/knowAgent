@@ -18,6 +18,7 @@ def runtime_stub() -> SimpleNamespace:
         ),
         coordinator=object(),
         object_store=object(),
+        chunk_ingestion=object(),
     )
 
 

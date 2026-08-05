@@ -55,6 +55,14 @@ class FakeRedis:
     def get(self, key: object) -> str | int | None:
         return self.values.get(str(key))
 
+    def set(self, key: object, value: object, *, ex: int) -> bool:
+        assert ex > 0
+        self.values[str(key)] = str(value)
+        return True
+
+    def getdel(self, key: object) -> str | int | None:
+        return self.values.pop(str(key), None)
+
     def delete(self, *keys: object) -> int:
         deleted = 0
         for key in keys:

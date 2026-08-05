@@ -15,6 +15,7 @@ export default defineConfig(({ mode }) => {
     test: {
       environment: "jsdom",
       setupFiles: ["./src/test/setupTests.ts"],
+      fileParallelism: false,
       coverage: {
         provider: "v8",
         reporter: ["text", "html"],

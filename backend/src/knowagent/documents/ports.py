@@ -93,6 +93,7 @@ class IngestionCoordinator(Protocol):
         parser_version: str,
         schema_version: str,
         now: datetime,
+        version_status: DocumentVersionStatus = DocumentVersionStatus.CHUNKED,
     ) -> IngestionBundle: ...
 
     def fail(  # pylint: disable=too-many-arguments
@@ -118,3 +119,21 @@ class IngestionCoordinator(Protocol):
 
 class IngestionDispatcher(Protocol):  # pylint: disable=too-few-public-methods
     def enqueue(self, job_id: UUID) -> str: ...
+
+
+class ChunkIngestionHook(Protocol):  # pylint: disable=too-few-public-methods
+    """Persist parsed chunks as draft knowledge and advance the version to READY_DRAFT.
+
+    Invoked by :class:`IngestionProcessor` after the chunk manifest is written.
+    Implementations also trigger embedding indexing. Transient provider
+    failures propagate into the persistent ingestion retry state machine.
+    """
+
+    def ingest_chunks(
+        self,
+        *,
+        system_id: UUID,
+        document_version_id: UUID,
+        manifest_key: str,
+        now: datetime,
+    ) -> tuple[UUID, int]: ...

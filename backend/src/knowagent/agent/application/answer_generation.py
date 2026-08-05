@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import re
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic import ValidationError as PydanticValidationError
@@ -37,9 +40,65 @@ class _AnswerDraft(BaseModel):
     claims: list[_ClaimDraft] = Field(min_length=1)
 
 
+@dataclass(frozen=True, slots=True)
+class StreamedAnswerDelta:
+    """A grounded claim that is safe to expose before generation completes."""
+
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class StreamedAnswerCompleted:
+    """The fully validated answer emitted after the provider completes."""
+
+    answer: VerifiedAnswer
+
+
 class AnswerGenerator:  # pylint: disable=too-few-public-methods
     def __init__(self, provider: LlmProvider) -> None:
         self._provider = provider
+
+    async def generate_stream(
+        self, *, question: str, evidence: EvidenceBundle
+    ) -> AsyncIterator[StreamedAnswerDelta | StreamedAnswerCompleted]:
+        """Yield individually grounded claims, then the complete verified answer."""
+        if not evidence.items:
+            raise ValidationError("ANSWER_EVIDENCE_EMPTY", "没有可用于回答的证据")
+        parts: list[str] = []
+        completed_count = 0
+        emitted_claims = 0
+        async for event in self._provider.generate(
+            request=GenerationRequest(question=question, evidence=evidence)
+        ):
+            if event.kind is GenerationEventKind.DELTA:
+                if completed_count:
+                    raise ProviderUnavailableError("llm")
+                parts.append(event.text)
+                partial_claims = self._extract_complete_claims("".join(parts))
+                for claim in partial_claims[emitted_claims:]:
+                    claims, _ = self._validate_claims(_AnswerDraft(claims=[claim]), evidence.items)
+                    prefix = "\n" if emitted_claims else ""
+                    yield StreamedAnswerDelta(text=f"{prefix}{claims[0].text}")
+                    emitted_claims += 1
+            elif event.kind is GenerationEventKind.COMPLETED:
+                completed_count += 1
+        if completed_count != 1:
+            raise ProviderUnavailableError("llm")
+
+        draft = self._parse_draft("".join(parts))
+        claims, citations = self._validate_claims(draft, evidence.items)
+        for verified_claim in claims[emitted_claims:]:
+            prefix = "\n" if emitted_claims else ""
+            yield StreamedAnswerDelta(text=f"{prefix}{verified_claim.text}")
+            emitted_claims += 1
+        answer = VerifiedAnswer(
+            text="\n".join(claim.text for claim in claims),
+            claims=claims,
+            citations=citations,
+            model=self._provider.model,
+            prompt_version=self._provider.prompt_version,
+        )
+        yield StreamedAnswerCompleted(answer=answer)
 
     async def generate(self, *, question: str, evidence: EvidenceBundle) -> VerifiedAnswer:
         if not evidence.items:
@@ -75,6 +134,30 @@ class AnswerGenerator:  # pylint: disable=too-few-public-methods
             return _AnswerDraft.model_validate(payload)
         except (json.JSONDecodeError, PydanticValidationError) as error:
             raise ValidationError("ANSWER_FORMAT_INVALID", "回答格式无效，无法验证引用") from error
+
+    @staticmethod
+    def _extract_complete_claims(content: str) -> tuple[_ClaimDraft, ...]:
+        match = re.search(r'"claims"\s*:\s*\[', content)
+        if match is None:
+            return ()
+        decoder = json.JSONDecoder()
+        offset = match.end()
+        claims: list[_ClaimDraft] = []
+        while offset < len(content):
+            while offset < len(content) and content[offset] in " \t\r\n,":
+                offset += 1
+            if offset >= len(content) or content[offset] == "]":
+                break
+            try:
+                payload, offset = decoder.raw_decode(content, offset)
+                claims.append(_ClaimDraft.model_validate(payload))
+            except json.JSONDecodeError:
+                break
+            except PydanticValidationError as error:
+                raise ValidationError(
+                    "ANSWER_FORMAT_INVALID", "回答格式无效，无法验证引用"
+                ) from error
+        return tuple(claims)
 
     @staticmethod
     def _validate_claims(

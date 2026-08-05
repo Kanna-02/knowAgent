@@ -23,6 +23,11 @@ const SystemsPage = lazy(() =>
     default: component,
   })),
 );
+const TicketsPage = lazy(() =>
+  import("../features/tickets/TicketsPage").then(({ TicketsPage: component }) => ({
+    default: component,
+  })),
+);
 const ChangePasswordPage = lazy(() =>
   import("../features/auth/ChangePasswordPage").then(({ ChangePasswordPage: component }) => ({
     default: component,
@@ -67,8 +72,9 @@ export function App(): ReactNode {
                     }
                   >
                     <Route index element={<Navigate replace to="question" />} />
-                    <Route path="question" element={<UserHomePage />} />
-                  </Route>
+                  <Route path="question" element={<UserHomePage />} />
+                  <Route path="tickets" element={<TicketsPage />} />
+                </Route>
                   <Route
                     path="/admin"
                     element={

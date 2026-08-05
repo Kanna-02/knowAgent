@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from uuid import UUID, uuid4
 
+from knowagent.common.errors import ProviderUnavailableError
 from knowagent.documents.application.chunking import StructureAwareChunker
 from knowagent.documents.application.processor import IngestionProcessor, IngestionRecoveryService
 from knowagent.documents.domain.ingestion import (
@@ -109,6 +110,7 @@ class CoordinatorFake:
         parser_name: str,
         parser_version: str,
         schema_version: str,
+        version_status: DocumentVersionStatus,
         now: datetime,
     ) -> IngestionBundle:
         assert owner and attempt == self.bundle.job.attempt
@@ -118,7 +120,7 @@ class CoordinatorFake:
             job=self.bundle.job.complete(now=now),
             version=replace(
                 self.bundle.version,
-                status=DocumentVersionStatus.CHUNKED,
+                status=version_status,
                 chunk_manifest_key=manifest_key,
                 chunk_count=chunk_count,
                 parser_name=parser_name,
@@ -221,6 +223,16 @@ class DispatcherFake:
         return f"task-{job_id}"
 
 
+class SuccessfulChunkIngestion:
+    def ingest_chunks(self, **_: object) -> tuple[UUID, int]:
+        return uuid4(), 1
+
+
+class FailingChunkIngestion:
+    def ingest_chunks(self, **_: object) -> tuple[UUID, int]:
+        raise ProviderUnavailableError("embedding")
+
+
 def test_processor_persists_manifest_progress_and_terminal_metadata() -> None:
     coordinator = CoordinatorFake(make_bundle())
     store = ObjectStoreFake()
@@ -247,6 +259,47 @@ def test_processor_persists_manifest_progress_and_terminal_metadata() -> None:
     assert '"text":"Guide\\n\\nStable content"' in manifest
 
     assert processor.process(coordinator.bundle.job.id, worker_id="worker-2") is None
+
+
+def test_processor_completes_ready_draft_after_embedding_indexing() -> None:
+    coordinator = CoordinatorFake(make_bundle())
+    processor = IngestionProcessor(
+        coordinator=coordinator,
+        object_store=ObjectStoreFake(),
+        parser_registry=ParserRegistry.default(),
+        chunker=StructureAwareChunker(),
+        lease_seconds=600,
+        retry_base_seconds=10,
+        clock=lambda: NOW,
+        chunk_ingestion=SuccessfulChunkIngestion(),
+    )
+
+    result = processor.process(coordinator.bundle.job.id, worker_id="worker-1")
+
+    assert result is not None
+    assert result.job.status is IngestionStatus.SUCCEEDED
+    assert result.version.status is DocumentVersionStatus.READY_DRAFT
+
+
+def test_processor_retries_when_embedding_indexing_is_unavailable() -> None:
+    coordinator = CoordinatorFake(make_bundle())
+    processor = IngestionProcessor(
+        coordinator=coordinator,
+        object_store=ObjectStoreFake(),
+        parser_registry=ParserRegistry.default(),
+        chunker=StructureAwareChunker(),
+        lease_seconds=600,
+        retry_base_seconds=10,
+        clock=lambda: NOW,
+        chunk_ingestion=FailingChunkIngestion(),
+    )
+
+    result = processor.process(coordinator.bundle.job.id, worker_id="worker-1")
+
+    assert result is not None
+    assert result.job.status is IngestionStatus.RETRY_SCHEDULED
+    assert result.job.error_code == "EMBEDDING_UNAVAILABLE"
+    assert result.version.status is DocumentVersionStatus.UPLOADED
 
 
 def test_processor_retries_transient_object_store_failure_without_exposing_details() -> None:

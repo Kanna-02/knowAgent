@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import collections.abc
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import datetime
 from typing import Protocol
 from uuid import UUID
 
-from knowagent.agent.application.answer_generation import AnswerGenerator
+from knowagent.agent.application.answer_generation import (
+    AnswerGenerator,
+    StreamedAnswerCompleted,
+    StreamedAnswerDelta,
+)
 from knowagent.agent.application.evidence_decision import (
     DeterministicEvidencePolicy,
     normalize_question,
@@ -18,11 +23,13 @@ from knowagent.agent.domain.models import (
     EvidenceReasonCode,
     QuestionResolution,
     QuestionResolutionStatus,
+    QuestionStreamEvent,
+    QuestionStreamEventKind,
     VerifiedAnswer,
 )
 from knowagent.common.errors import ConflictError, ProviderUnavailableError, ValidationError
 from knowagent.retrieval.application.evidence import EvidenceOrganizer
-from knowagent.retrieval.domain.models import RetrievalResult
+from knowagent.retrieval.domain.models import EvidenceBundle, RetrievalResult
 
 GROUNDING_FAILURE_CODES = {
     "ANSWER_CITATION_REQUIRED",
@@ -156,6 +163,142 @@ class ReliableQuestionService:  # pylint: disable=too-few-public-methods,too-man
             reason_codes=(),
             degraded_reasons=retrieval.degraded_reasons,
         )
+
+    async def resolve_stream(
+        self,
+        *,
+        run_id: UUID,
+        requester_id: UUID,
+        system_id: UUID,
+        question: str,
+        required_terms: tuple[str, ...] = (),
+    ) -> collections.abc.AsyncIterator[QuestionStreamEvent]:
+        """Yield typed stream events for the SSE endpoint.
+
+        Mirrors :meth:`resolve` but emits incremental events: retrieval
+        start, evidence bundle, decision, token deltas and the final
+        grounded answer (or a refusal with the created ticket id). The
+        non-stream ``resolve`` is preserved for request/replay callers.
+        """
+        replay = self._replay_answer(run_id=run_id, system_id=system_id, question=question)
+        if replay is not None:
+            if replay.answer is not None:
+                yield QuestionStreamEvent(
+                    kind=QuestionStreamEventKind.ANSWER_COMPLETED,
+                    payload=replay.answer,
+                    run_id=run_id,
+                    degraded_reasons=replay.degraded_reasons,
+                )
+            else:
+                yield QuestionStreamEvent(
+                    kind=QuestionStreamEventKind.REFUSED,
+                    payload=replay.decision,
+                    run_id=run_id,
+                )
+            return
+
+        yield QuestionStreamEvent(
+            kind=QuestionStreamEventKind.RETRIEVAL_STARTED,
+            payload=None,
+            run_id=run_id,
+        )
+        retrieval = await self._retrieval.retrieve(system_id=system_id, query=question)
+        now = self._clock()
+        decision = self._policy.decide(
+            run_id=run_id,
+            system_id=system_id,
+            retrieval=retrieval,
+            decided_at=now,
+            required_terms=required_terms,
+        )
+        if decision.outcome.is_refusal:
+            refusal = self._record_refusal(
+                decision=decision,
+                requester_id=requester_id,
+                now=now,
+            )
+            yield QuestionStreamEvent(
+                kind=QuestionStreamEventKind.REFUSED,
+                payload=refusal.decision,
+                run_id=run_id,
+            )
+            return
+
+        evidence = self._evidence.organize(retrieval.hits)
+        yield QuestionStreamEvent(
+            kind=QuestionStreamEventKind.EVIDENCE_READY,
+            payload=evidence,
+            run_id=run_id,
+            degraded_reasons=retrieval.degraded_reasons,
+        )
+        if not evidence.items:
+            refused_decision = replace(
+                decision,
+                outcome=EvidenceDecisionOutcome.INSUFFICIENT,
+                reason_codes=(EvidenceReasonCode.EVIDENCE_BUDGET_EMPTY,),
+            )
+            refusal = self._record_refusal(
+                decision=refused_decision,
+                requester_id=requester_id,
+                now=now,
+            )
+            yield QuestionStreamEvent(
+                kind=QuestionStreamEventKind.REFUSED,
+                payload=refusal.decision,
+                run_id=run_id,
+            )
+            return
+
+        yield QuestionStreamEvent(
+            kind=QuestionStreamEventKind.DECISION,
+            payload=decision,
+            run_id=run_id,
+        )
+        try:
+            async for streamed in self._answers.generate_stream(
+                question=retrieval.query, evidence=evidence
+            ):
+                if isinstance(streamed, StreamedAnswerDelta):
+                    yield QuestionStreamEvent(
+                        kind=QuestionStreamEventKind.ANSWER_DELTA,
+                        payload=streamed.text,
+                        run_id=run_id,
+                    )
+                    continue
+                assert isinstance(streamed, StreamedAnswerCompleted)
+                self._recorder.record_sufficient(decision=decision)
+                self._snapshots.record(
+                    decision=decision,
+                    answer=streamed.answer,
+                    degraded_reasons=retrieval.degraded_reasons,
+                    now=now,
+                )
+                yield QuestionStreamEvent(
+                    kind=QuestionStreamEventKind.ANSWER_COMPLETED,
+                    payload=streamed.answer,
+                    run_id=run_id,
+                    degraded_reasons=retrieval.degraded_reasons,
+                )
+        except ValidationError as error:
+            if error.code not in GROUNDING_FAILURE_CODES:
+                if error.code.startswith("ANSWER_"):
+                    raise ProviderUnavailableError("llm") from error
+                raise
+            refused_decision = replace(
+                decision,
+                outcome=EvidenceDecisionOutcome.INSUFFICIENT,
+                reason_codes=(EvidenceReasonCode.ANSWER_NOT_GROUNDED,),
+            )
+            refusal = self._record_refusal(
+                decision=refused_decision,
+                requester_id=requester_id,
+                now=now,
+            )
+            yield QuestionStreamEvent(
+                kind=QuestionStreamEventKind.REFUSED,
+                payload=refusal.decision,
+                run_id=run_id,
+            )
 
     def _replay_answer(
         self,

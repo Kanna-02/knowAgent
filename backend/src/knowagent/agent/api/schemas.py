@@ -150,3 +150,110 @@ class QuestionResponse(BaseModel):
             policy_version=decision.policy_version,
             decided_at=decision.decided_at,
         )
+
+
+class SseAuthToken(BaseModel):
+    """One-time bearer token authorizing the SSE question stream.
+
+    ``POST /api/v1/questions/stream`` returns this token; the client then opens
+    ``GET /api/v1/questions/stream/events?token=<token>`` with the same session
+    cookie. The token is short-lived and single-use, avoiding long-lived
+    query-string credentials on the request that starts the stream.
+    """
+
+    token: str
+    account_id: UUID
+    run_id: UUID
+    system_id: UUID
+    question: str
+    required_terms: tuple[str, ...] = ()
+    expires_at: datetime
+
+
+class EvidenceItemView(BaseModel):
+    """Compact evidence preview emitted in the ``evidence_ready`` SSE event."""
+
+    evidence_id: str
+    source_name: str
+    source_version: str
+    quoted_text: str
+
+
+class RetrievalStartedEvent(BaseModel):
+    model_config = ConfigDict(use_enum_values=True)
+
+    type: str = "retrieval_started"
+    run_id: UUID
+    system_id: UUID
+    question: str
+
+
+class EvidenceReadyEvent(BaseModel):
+    model_config = ConfigDict(use_enum_values=True)
+
+    type: str = "evidence_ready"
+    run_id: UUID
+    evidence: tuple[EvidenceItemView, ...]
+    degraded_reasons: tuple[str, ...] = ()
+
+
+class DecisionEvent(BaseModel):
+    model_config = ConfigDict(use_enum_values=True)
+
+    type: str = "decision"
+    run_id: UUID
+    outcome: EvidenceDecisionOutcome
+    policy_version: str
+    reason_codes: tuple[EvidenceReasonCode, ...] = ()
+    decided_at: datetime
+
+
+class AnswerDeltaEvent(BaseModel):
+    """Incremental token delta from the LLM stream."""
+
+    model_config = ConfigDict(use_enum_values=True)
+
+    type: str = "answer_delta"
+    run_id: UUID
+    delta: str
+
+
+class AnswerCompletedEvent(BaseModel):
+    """Final structured, grounded answer with full claims and citations."""
+
+    model_config = ConfigDict(use_enum_values=True)
+
+    type: str = "answer_completed"
+    run_id: UUID
+    answer: AnswerView
+    degraded_reasons: tuple[str, ...] = ()
+
+
+class RefusedEvent(BaseModel):
+    """Refusal outcome carrying the ticket id created for knowledge gap tracking."""
+
+    model_config = ConfigDict(use_enum_values=True)
+
+    type: str = "refused"
+    run_id: UUID
+    ticket_id: UUID
+    outcome: EvidenceDecisionOutcome
+    reason_codes: tuple[EvidenceReasonCode, ...]
+    policy_version: str
+    decided_at: datetime
+
+
+class StreamErrorEvent(BaseModel):
+    """Terminal error event for system-level failures mid-stream.
+
+    Knowledge-gap refusals are emitted as ``refused``; this event covers
+    provider-unavailable and other infrastructure failures so the client
+    can distinguish them.
+    """
+
+    model_config = ConfigDict(use_enum_values=True)
+
+    type: str = "error"
+    run_id: UUID
+    code: str
+    message: str

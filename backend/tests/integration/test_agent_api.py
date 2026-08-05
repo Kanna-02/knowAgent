@@ -18,6 +18,8 @@ from knowagent.agent.domain.models import (
     EvidenceDecisionOutcome,
     EvidenceReasonCode,
     QuestionResolutionStatus,
+    QuestionStreamEvent,
+    QuestionStreamEventKind,
     VerifiedAnswer,
     VerifiedClaim,
 )
@@ -287,6 +289,38 @@ def _restore_question_service(original: object) -> None:
     agent_router._build_question_service = original  # type: ignore[assignment]
 
 
+def _patch_stream_service(answer: VerifiedAnswer) -> object:
+    from knowagent.agent.api import router as agent_router
+
+    original = agent_router._build_question_service
+
+    class _FakeStreamService:
+        async def resolve_stream(self, **kwargs: object):
+            run_id = kwargs["run_id"]
+            assert isinstance(run_id, UUID)
+            yield QuestionStreamEvent(
+                kind=QuestionStreamEventKind.RETRIEVAL_STARTED,
+                payload=None,
+                run_id=run_id,
+            )
+            yield QuestionStreamEvent(
+                kind=QuestionStreamEventKind.ANSWER_DELTA,
+                payload=answer.text,
+                run_id=run_id,
+            )
+            yield QuestionStreamEvent(
+                kind=QuestionStreamEventKind.ANSWER_COMPLETED,
+                payload=answer,
+                run_id=run_id,
+            )
+
+    def _patched(_request: object, _database: object) -> object:
+        return _FakeStreamService()
+
+    agent_router._build_question_service = _patched  # type: ignore[assignment]
+    return original
+
+
 def test_ask_question_unauthenticated_returns_401(client: TestClient) -> None:
     resp = client.post(
         "/api/v1/questions",
@@ -396,5 +430,73 @@ def test_ask_question_user_can_query_active_system(client: TestClient) -> None:
         )
         assert resp.status_code == 200
         assert resp.json()["status"] == "answered"
+    finally:
+        _restore_question_service(original)
+
+
+def test_question_stream_token_is_single_use_and_returns_sse(client: TestClient) -> None:
+    system_id = _get_test_system_id(client)
+    login = _login(client, "admin", "agent.api.admin")
+    response = client.post(
+        "/api/v1/questions/stream",
+        headers={"X-CSRF-Token": str(login["csrf_token"])},
+        json={"system_id": system_id, "question": "ESB 如何申请？"},
+    )
+    assert response.status_code == 200, response.text
+    grant = response.json()
+    assert grant["account_id"] == _get_account_id(client, ACCOUNT_NAMES[0])
+
+    answered = _make_answered_resolution(UUID(system_id))
+    assert answered.answer is not None
+    original = _patch_stream_service(answered.answer)
+    try:
+        streamed = client.get(
+            "/api/v1/questions/stream/events",
+            params={"token": grant["token"]},
+        )
+        assert streamed.status_code == 200, streamed.text
+        assert streamed.headers["content-type"].startswith("text/event-stream")
+        assert '"type": "answer_delta"' in streamed.text
+        assert '"type": "answer_completed"' in streamed.text
+
+        replay = client.get(
+            "/api/v1/questions/stream/events",
+            params={"token": grant["token"]},
+        )
+        assert replay.status_code == 401
+        assert replay.json()["code"] == "SSE_TOKEN_INVALID"
+    finally:
+        _restore_question_service(original)
+
+
+def test_question_stream_token_cannot_be_consumed_by_another_account(
+    client: TestClient,
+) -> None:
+    system_id = _get_test_system_id(client)
+    admin_login = _login(client, "admin", "agent.api.admin")
+    response = client.post(
+        "/api/v1/questions/stream",
+        headers={"X-CSRF-Token": str(admin_login["csrf_token"])},
+        json={"system_id": system_id, "question": "ESB 如何申请？"},
+    )
+    grant = response.json()
+
+    _login(client, "user", "agent.api.user")
+    denied = client.get(
+        "/api/v1/questions/stream/events",
+        params={"token": grant["token"]},
+    )
+    assert denied.status_code == 401
+
+    _login(client, "admin", "agent.api.admin")
+    answered = _make_answered_resolution(UUID(system_id))
+    assert answered.answer is not None
+    original = _patch_stream_service(answered.answer)
+    try:
+        allowed = client.get(
+            "/api/v1/questions/stream/events",
+            params={"token": grant["token"]},
+        )
+        assert allowed.status_code == 200
     finally:
         _restore_question_service(original)

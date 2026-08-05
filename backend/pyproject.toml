@@ -32,6 +32,7 @@ dependencies = [
 knowagent-bootstrap-admin = "knowagent.identity.cli:bootstrap_admin_command"
 knowagent-hash-password = "knowagent.identity.cli:hash_password_command"
 knowagent-import-users = "knowagent.identity.cli:import_users_command"
+knowagent-evaluate-phase2 = "knowagent.agent.evaluation_cli:main"
 
 [project.optional-dependencies]
 dev = [

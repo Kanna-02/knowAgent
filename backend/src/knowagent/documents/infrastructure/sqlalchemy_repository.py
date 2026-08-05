@@ -391,6 +391,7 @@ class SqlAlchemyIngestionCoordinator:
         parser_version: str,
         schema_version: str,
         now: datetime,
+        version_status: DocumentVersionStatus = DocumentVersionStatus.CHUNKED,
     ) -> IngestionBundle:
         with self._session_factory.begin() as session:
             repository, bundle = self._locked_owned_bundle(
@@ -404,7 +405,7 @@ class SqlAlchemyIngestionCoordinator:
             repository.save_version(
                 replace(
                     bundle.version,
-                    status=DocumentVersionStatus.CHUNKED,
+                    status=version_status,
                     chunk_manifest_key=manifest_key,
                     chunk_count=chunk_count,
                     parser_name=parser_name,

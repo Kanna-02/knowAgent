@@ -9,7 +9,13 @@ import type {
   BusinessSystemView,
   CurrentUser,
   SessionView,
+  SseAuthToken,
   SystemOwnerView,
+  TicketPage,
+  TicketReplyView,
+  TicketStatus,
+  TicketTransitionView,
+  TicketView,
 } from "./types";
 
 export const AUTH_UNAUTHORIZED_EVENT = "knowagent:auth-unauthorized";
@@ -147,6 +153,79 @@ export class ApiClient {
       method: "PUT",
       body: JSON.stringify({ account_ids: accountIds, replace_existing: replaceExisting }),
     });
+  }
+
+  async startQuestionStream(payload: {
+    system_id: string;
+    question: string;
+    required_terms?: string[];
+  }): Promise<SseAuthToken> {
+    return this.request<SseAuthToken>("/questions/stream", {
+      method: "POST",
+      body: JSON.stringify({
+        system_id: payload.system_id,
+        question: payload.question,
+        required_terms: payload.required_terms ?? [],
+      }),
+    });
+  }
+
+  /**SSE endpoint path for streaming question events with a single-use token.*/
+  streamEventsUrl(token: string): string {
+    return `/api/v1/questions/stream/events?token=${encodeURIComponent(token)}`;
+  }
+
+  async listTickets(filters: {
+    page: number;
+    pageSize: number;
+    systemId?: string;
+    status?: TicketStatus;
+  }): Promise<TicketPage> {
+    const query = new URLSearchParams({
+      page: String(filters.page),
+      page_size: String(filters.pageSize),
+    });
+    if (filters.systemId) query.set("system_id", filters.systemId);
+    if (filters.status) query.set("status", filters.status);
+    return this.request<TicketPage>(`/tickets?${query.toString()}`);
+  }
+
+  async getTicket(ticketId: string): Promise<TicketView> {
+    return this.request<TicketView>(`/tickets/${ticketId}`);
+  }
+
+  async listTicketReplies(ticketId: string): Promise<TicketReplyView[]> {
+    return this.request<TicketReplyView[]>(`/tickets/${ticketId}/replies`);
+  }
+
+  async listTicketTransitions(ticketId: string): Promise<TicketTransitionView[]> {
+    return this.request<TicketTransitionView[]>(`/tickets/${ticketId}/transitions`);
+  }
+
+  async replyTicket(ticketId: string, body: string): Promise<TicketReplyView> {
+    return this.request<TicketReplyView>(`/tickets/${ticketId}/reply`, {
+      method: "POST",
+      body: JSON.stringify({ body }),
+    });
+  }
+
+  async submitTicketAnswer(ticketId: string, answer: string): Promise<void> {
+    await this.request<void>(`/tickets/${ticketId}/answers`, {
+      method: "POST",
+      body: JSON.stringify({ answer }),
+    });
+  }
+
+  async transitionTicket(
+    ticketId: string,
+    action: "start" | "resolve" | "close" | "reopen",
+    body?: string,
+  ): Promise<TicketView> {
+    const init: RequestInit =
+      action === "close" && body !== undefined
+        ? { method: "POST", body: JSON.stringify({ body }) }
+        : { method: "POST" };
+    return this.request<TicketView>(`/tickets/${ticketId}/${action}`, init);
   }
 
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {

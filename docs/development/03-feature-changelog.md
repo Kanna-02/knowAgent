@@ -17,6 +17,25 @@
 
 ## 功能变更记录
 
+### 2026-08-05 - 补齐 Phase 2 流式安全、可恢复索引、评测门禁与真实集成
+
+类型：新增 / 修复 / 测试
+
+相关需求：REQ-004、REQ-005、REQ-006、REQ-007、REQ-011、REQ-018；AC-003、AC-004、AC-005、AC-006、AC-007。
+
+变更说明：
+
+1. SSE 回答改为真实增量且始终受证据约束：Provider 仍输出结构化 JSON，但服务端只在完整 claim 可解析、引用证据在白名单内且逐字引用成立后才发送 `answer_delta`，最后发送完整 `answer_completed`；原始 JSON、未闭合 claim 和未验证事实不会暴露给前端。
+2. `POST /api/v1/questions/stream` 签发的 Redis token 绑定 `account_id`，`GET /api/v1/questions/stream/events` 使用 `GETDEL` 单次消费并重新检查系统权限；其他账号无法消费，重放同一 token 返回未授权。
+3. 文档 Worker 的 Embedding 索引并入持久任务状态机：只有 chunk 和向量全部写入后才进入 `SUCCEEDED/READY_DRAFT`；Embedding 不可用记录 `EMBEDDING_UNAVAILABLE` 并按数据库重试预算恢复，重试复用已保存的 manifest、chunk 和来源，不再把索引失败当作成功。
+4. 前端完成问答和工单闭环：问答页消费真实 SSE 阶段、增量回答、拒答工单和错误事件；工单页支持系统/状态筛选、分页、详情、回复、状态流转、答案提交和审核；`vite.config.ts` 关闭 Vitest 文件并行，默认 `npm test -- --run` 可稳定执行。
+5. 新增 `knowagent-evaluate-phase2` 离线评测门禁及 JSONL 输入校验：至少 50 个真实 ESB 可回答问题、答案正确率 >=80%、引用支持率 >=95%、拒答召回率 >=90%、可靠拒答全部有工单、无知识问题零无依据回答；缺数据或任一指标不达标均以非零退出码失败。
+6. 扩展 `scripts/run-phase2-integration.sh`，统一执行真实 Worker→Ollama Embedding、Qwen 增量引用流、问答 SSE token 隔离/单次消费、Agent/Tickets API、拒答工单、审核发布和检索回流。
+
+验证方式：后端标准套件 275 passed / 24 skipped，覆盖率 86.56%；125 个源文件 `mypy --strict` 零错误；Black 检查 168 个文件清洁，isort 和 `git diff --check` 通过。前端默认完整测试 47/47 通过，TypeScript、ESLint 和生产构建通过。`./scripts/run-phase2-integration.sh --with-llm` 使用真实 PostgreSQL 17、Redis、Ollama bge-m3 和 `qwen3.5-27b` 完成 23 项集成验收，23 passed、6 warnings、耗时 36.69 秒，Alembic `upgrade head`/`check` 无漂移。真实浏览器已验证本地登录页可加载；开发库无账号，未向用户数据注入临时账号，问答/工单业务页保留人工验收步骤。
+
+后续注意：Phase 2 功能与真实服务集成范围已补齐，但 AC-004/AC-005 的质量阈值尚不能关闭，因为仓库没有用户提供的至少 50 条真实标注 ESB 可回答问题及无知识问题集。不得用合成问题或自动生成标签替代该门禁；数据到位后按 `docs/development/22-phase2-evaluation.md` 执行并记录报告。`backend/.env` 的 `qwen3.5-27b` 为本地临时模型配置，不提交密钥或覆盖 `.env.example` 的默认示例。
+
 ### 2026-08-04 - Phase 2 qwen3-max 全量测试与 Agent/Tickets API 集成验收通过
 
 类型：修复

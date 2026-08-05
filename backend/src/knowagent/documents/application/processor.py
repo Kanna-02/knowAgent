@@ -9,6 +9,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
+from knowagent.common.errors import ProviderUnavailableError
 from knowagent.documents.application.chunking import StructureAwareChunker
 from knowagent.documents.domain.ingestion import (
     DocumentVersionStatus,
@@ -23,6 +24,7 @@ from knowagent.documents.errors import (
 )
 from knowagent.documents.infrastructure.parsers.registry import ParserRegistry
 from knowagent.documents.ports import (
+    ChunkIngestionHook,
     IngestionCoordinator,
     IngestionDispatcher,
     ObjectStore,
@@ -55,6 +57,7 @@ class IngestionProcessor:  # pylint: disable=too-few-public-methods
         lease_seconds: int,
         retry_base_seconds: int,
         clock: Callable[[], datetime] | None = None,
+        chunk_ingestion: ChunkIngestionHook | None = None,
     ) -> None:
         self._coordinator = coordinator
         self._object_store = object_store
@@ -63,6 +66,7 @@ class IngestionProcessor:  # pylint: disable=too-few-public-methods
         self._lease_seconds = lease_seconds
         self._retry_base_seconds = retry_base_seconds
         self._clock = clock or (lambda: datetime.now(UTC))
+        self._chunk_ingestion = chunk_ingestion
 
     def process(self, job_id: UUID, *, worker_id: str) -> IngestionBundle | None:
         claimed = self._coordinator.claim(
@@ -121,7 +125,16 @@ class IngestionProcessor:  # pylint: disable=too-few-public-methods
                 content_type="application/json",
                 content_length=len(manifest_content),
             )
-            return self._coordinator.complete(
+            final_version_status = DocumentVersionStatus.CHUNKED
+            if self._chunk_ingestion is not None:
+                self._chunk_ingestion.ingest_chunks(
+                    system_id=parsing.version.system_id,
+                    document_version_id=parsing.version.id,
+                    manifest_key=manifest_key,
+                    now=self._clock(),
+                )
+                final_version_status = DocumentVersionStatus.READY_DRAFT
+            completed = self._coordinator.complete(
                 job_id,
                 owner=worker_id,
                 attempt=attempt,
@@ -131,7 +144,9 @@ class IngestionProcessor:  # pylint: disable=too-few-public-methods
                 parser_version=parsed.parser_version,
                 schema_version=parsed.schema_version,
                 now=self._clock(),
+                version_status=final_version_status,
             )
+            return completed
         except IngestionLeaseLostError:
             LOGGER.warning("ingestion lease lost", extra={"job_id": str(job_id)})
             return None
@@ -159,6 +174,18 @@ class IngestionProcessor:  # pylint: disable=too-few-public-methods
                 error_code="OBJECT_STORE_UNAVAILABLE",
                 error_message=("对象存储暂时不可用" if error.retryable else "对象存储请求失败"),
                 retryable=error.retryable,
+                version_status=DocumentVersionStatus.FAILED,
+                now=self._clock(),
+                retry_base_seconds=self._retry_base_seconds,
+            )
+        except ProviderUnavailableError:
+            return self._fail_safely(
+                job_id,
+                owner=worker_id,
+                attempt=attempt,
+                error_code="EMBEDDING_UNAVAILABLE",
+                error_message="向量索引服务暂时不可用",
+                retryable=True,
                 version_status=DocumentVersionStatus.FAILED,
                 now=self._clock(),
                 retry_base_seconds=self._retry_base_seconds,

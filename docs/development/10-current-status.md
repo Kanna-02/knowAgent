@@ -5,11 +5,11 @@
 ## 1. 快照时间
 
 ```text
-更新时间：2026-08-04（Phase 2 qwen3-max 全量测试与 Agent/Tickets API 集成验收通过）
+更新时间：2026-08-05（Phase 2 流式安全、可恢复索引、评测门禁和 23 项真实服务集成验收通过）
 更新人/助手：Codex
 当前分支：master
 远程仓库：git@github.com:Kanna-02/knowAgent.git
-当前环境：Python 3.11.11；PostgreSQL 17.10 + vector 0.8.6 + pg_trgm 1.6；Redis 8.10.0；MinIO RELEASE.2025-10-15T17-29-55Z；Node.js 24.16.0；本地 Ollama 0.3.14 + bge-m3
+当前环境：Python 3.11.15；PostgreSQL 17.10 + vector 0.8.6 + pg_trgm 1.6；Redis 8.10.0；MinIO RELEASE.2025-10-15T17-29-55Z；Node.js 24.16.0；本地 Ollama 0.3.14 + bge-m3；Qwen qwen3.5-27b
 ```
 
 ## 2. 当前阶段
@@ -17,8 +17,8 @@
 ```text
 当前阶段：Phase 2 问答与工单闭环（Phase 1 已完成并通过集成验收）
 阶段目标：系统隔离检索、带引用回答、可靠拒答、内置工单和审核回流
-当前任务：问答 API 与工单 API 装配完成并已通过真实 PostgreSQL 17 集成测试，进入 SSE 流式、Worker 接线与页面端到端门禁
-任务状态：4/4 基础代码完成；真实 PostgreSQL 17/pgvector、Ollama、Qwen qwen3-max、拒答工单和审核回流组合验证通过；Agent/Tickets API 装配完成并已在真实 PostgreSQL 17 跑通 18 项 API 集成测试；SSE 流式/Worker 接线/页面端到端门禁待补
+当前任务：功能与真实服务集成缺口已补齐；等待真实标注 ESB 评测集执行 AC-004/AC-005，并使用实际账号补问答/工单页面人工验收
+任务状态：4/4 功能范围完成；后端 275 passed / 24 skipped、覆盖率 86.56%，前端 47/47；真实 PostgreSQL 17、Redis、Ollama bge-m3、Qwen qwen3.5-27b、SSE、Worker、Agent/Tickets API 共 23 项集成验收通过；Phase 2 因真实质量数据和业务页人工证据未关闭
 ```
 
 ## 3. 已完成
@@ -80,24 +80,37 @@
 55. 已抽出 `backend/src/knowagent/identity/api/access.py` 共享 `require_system_access`/`visible_system_ids`，消除 agent/tickets 重复实现；`visible_system_ids` 改为不受 1000 上限的 `systems.list`。
 56. 已抽 `backend/tests/integration/_fakes.py` 共享 `FakeRedis`/`FakePipeline`，并新增 `test_agent_api.py`、`test_tickets_api.py`（21 项集成测试默认 skip，含 CSRF、跨系统泄露回归用例）。
 
+57. 已实现受证据约束的真实增量 SSE：仅完整、可解析且引用通过白名单/逐字校验的 claim 产生 `answer_delta`，最终产生 `answer_completed`；原始模型 JSON 和未验证事实不下发。
+58. 已装配 `POST /api/v1/questions/stream` 与 `GET /api/v1/questions/stream/events`：Redis token 绑定账号、TTL 120 秒并单次消费，消费时重新检查系统权限；跨账号消费和重放均有回归测试。
+59. 已接线可恢复文档索引 Worker：`ChunkIngestionService` 完成 manifest→chunk/source→Embedding→`READY_DRAFT`；Embedding 故障记录 `EMBEDDING_UNAVAILABLE` 并由持久任务状态机重试，只有索引成功才完成任务。
+60. 已实现前端页面端到端：SSE 问答页（系统选择→问题/必含术语→取 token→`EventSource` 订阅→按事件更新流式文本/工单/错误）、工单页面（列表筛选+详情抽屉+状态流转 start/resolve/close/reopen+回复+答案候选+时间线+按角色管理 UI）、壳层工单导航与 `tickets` 路由、API 类型与客户端调用、配套样式与 cursor-blink 动画。
+61. 已补本轮单测：后端 `test_answer_stream.py` 4 项、`test_question_stream.py` 5 项、`test_chunk_ingestion.py` 6 项；前端 `UserHomePage.stream.test.tsx` 2 项、`TicketsPage.test.tsx` 3 项；并同步更新 `test_worker_tasks.py`、`UserHomePage.test.tsx`、`authWorkflow.test.tsx`。
+62. 已新增 Phase 2 离线评测门禁 `knowagent-evaluate-phase2`，强制至少 50 个真实可回答 ESB 问题、正确率/引用支持率/拒答召回率阈值、拒答工单完整性和零无依据回答。
+63. 已扩展 Phase 2 集成运行器，真实 Worker→Embedding、Qwen 增量流、SSE token、Agent/Tickets API 和审核回流一次执行；`qwen3.5-27b` 下 23 passed、6 warnings、36.69 秒。
+64. 已稳定前端默认测试运行：Vitest `fileParallelism: false`，默认 47/47 通过；TypeScript、ESLint 和生产构建通过。
+65. 已补 `docs/development/22-phase2-evaluation.md`，明确真实数据、人工标注、JSONL 字段、执行命令和报告留存规则。
+66. 已通过真实浏览器验证本地登录页经 Vite→API 代理加载；开发库无账号，未注入临时用户或伪造业务数据。
+
 ## 4. 正在进行
 
-1. Phase 2 功能范围 4/4 的基础代码和核心服务真实集成验收已完成；问答 API 与工单 API 已装配完成并已在真实 PostgreSQL 17 跑通 18 项 API 集成测试，SSE 流式、文档索引 Worker 接线和页面端到端验收待实施。
+1. Phase 2 功能、自动化和真实服务集成已完成；正在等待真实标注评测集执行 AC-004/AC-005，以及实际账号的问答/工单业务页人工验收。
 2. Phase 1 功能范围 6/6 已实现，并于 2026-08-04 在固定 PostgreSQL/Redis/MinIO integration 资源上完成四格式完整持久化与隔离验收，现已正式关闭。
-3. 本地 PostgreSQL 17、pgvector、pg_trgm、MinIO、Ollama Embedding 和 Qwen 已完成 Phase 2 核心服务组合联调。
+3. 本地 PostgreSQL 17、pgvector、pg_trgm、Redis、MinIO、Ollama Embedding 和 Qwen `qwen3.5-27b` 已完成 Phase 2 API/SSE/Worker 组合联调。
 4. 等待目标 Linux 服务器资源信息以最终确定 Embedding/Rerank 推理后端、量化方式和 Python 传递依赖锁；本地 Ollama 方案不自动等同生产选型。
 
 ## 5. 未完成 / 下一步
 
-1. 接入 SSE 流式问答协议与会话持久化；Agent API（`/questions`）与 Tickets API 已装配并已通过真实 PostgreSQL 17 集成测试，SSE 流式协议和会话持久化尚未装配。
-2. 接入文档索引 Worker，将已验证的 Embedding 索引服务装配到真实文档入库流程。
-3. 在 API 和 Worker 装配后完成 AC-004 至 AC-007 的接口/页面端到端验收；核心领域服务的跨系统零泄漏、拒答建单、工单审核和回流时延已有真实证据。
-4. 在 Phase 2 页面端到端验收中刷新真实后端页面证据；随后在 staging/类生产 Linux 环境验证公司对象存储 TLS/内部 CA、迁移锁时长、模型运行和发布回滚。
+1. 用户提供至少 50 条真实标注 ESB 可回答问题及无知识问题集，按 `docs/development/22-phase2-evaluation.md` 执行质量门禁并把脱敏汇总写入验收报告。
+2. 使用实际测试账号和已发布知识，在浏览器人工验证问答增量/引用/拒答工单，以及工单列表、详情、回复、状态流转、答案提交和审核来源展示。
+3. 上述两项通过后更新路线图、追溯矩阵和验收报告，将 Phase 2 正式关闭。
+4. Phase 2 关闭后进入 staging/类生产 Linux 验证公司对象存储 TLS/内部 CA、迁移锁时长、模型运行和发布回滚。
 
 ## 6. 阻塞点
 
 | 问题 | 影响 | 需要谁处理 | 当前状态 |
 | --- | --- | --- | --- |
+| 缺至少 50 条真实标注 ESB 可回答问题和无知识问题集 | 无法真实计算 AC-004/AC-005 的正确率、引用支持率和拒答召回率，阻塞 Phase 2 关闭 | 用户/业务评测负责人 | 待提供；CLI 门禁和格式已就绪 |
+| 本地开发库无账号和业务数据 | 问答/工单业务页无法形成真实浏览器验收记录 | 用户/测试负责人 | 待使用实际测试账号；登录页已验证 |
 | 模型服务器 CPU/内存/GPU 信息未知 | 影响生产 Embedding/Rerank 运行时和量化；本地 Ollama 适配不受阻 | 运维/用户 | 待提供 |
 | 公司通知协议及真实对象存储端点契约待验证 | 影响后续通知 provider 和 S3 兼容性证明 | 用户/第三方 | 待提供/验证 |
 
@@ -105,6 +118,15 @@
 
 | 文件 | 改动说明 | 状态 |
 | --- | --- | --- |
+| `backend/src/knowagent/agent/application/answer_generation.py`、`backend/src/knowagent/agent/application/reliable_question.py`、`backend/src/knowagent/agent/domain/models.py` | 受证据约束的真实增量 claim、`QuestionStreamEvent` 领域类型与 `resolve_stream` | 已完成；真实 Qwen 增量流通过 |
+| `backend/src/knowagent/agent/api/router.py`、`backend/src/knowagent/agent/api/schemas.py` | `POST/GET /questions/stream`、账号绑定/单次 Redis token 与 SSE 事件模型 | 已完成；真实 Redis/API 集成通过 |
+| `backend/src/knowagent/documents/application/processor.py`、`backend/src/knowagent/documents/application/chunk_ingestion.py`、`backend/src/knowagent/documents/ports.py` | 可恢复 `ChunkIngestionService`、`ChunkIngestionHook` 与 `EMBEDDING_UNAVAILABLE` 重试状态 | 已完成；真实 Worker→Embedding 通过 |
+| `backend/src/knowagent/worker/tasks.py` | `_runtime()` 注入复用的 `HttpEmbeddingProvider` + `ChunkIngestionService` | 已完成；真实 Worker 集成通过 |
+| `frontend/src/api/types.ts`、`frontend/src/api/client.ts` | SSE token、Answer/Claim/Citation/Locator/Evidence 视图模型、6 种 SSE 事件、Ticket/Reply/Transition/Candidate 视图与枚举、流式问答与工单全链路调用 | 已完成 |
+| `frontend/src/features/auth/UserHomePage.tsx`、`frontend/src/features/tickets/TicketsPage.tsx`、`frontend/src/features/auth/UserShell.tsx`、`frontend/src/app/App.tsx`、`frontend/src/styles.css` | 问答页、工单页、工单导航与路由、配套样式 | 已完成（前端构建与单测通过） |
+| `backend/tests/unit/test_answer_stream.py`、`test_question_stream.py`、`test_chunk_ingestion.py`；`frontend/src/features/auth/UserHomePage.stream.test.tsx`、`frontend/src/features/tickets/TicketsPage.test.tsx` | 本轮新增单测及同步更新用例 | 已完成 |
+| `backend/src/knowagent/agent/evaluation.py`、`evaluation_cli.py`、`backend/tests/unit/test_phase2_evaluation.py`、`backend/pyproject.toml` | AC-004/AC-005 JSONL 离线评测门禁和 CLI 入口 | 已完成；真实数据待用户提供 |
+| `frontend/vite.config.ts` | 关闭文件并行，稳定默认完整测试 | 已完成；47/47 通过 |
 | `docs/product/01-requirements-clarification.md` | 同步双登录、账号来源、默认密码规则并清理框架待确认旧状态 | 已完成 |
 | `docs/engineering/04-tech-decisions.md` | 记录正式架构决策并将运行时调整为 Python 3.11 | 已完成 |
 | `docs/product/06-roadmap.md` | Phase 1 功能推进至 6/6，并保留真实基础设施集成验收门禁 | 已完成 |
@@ -115,13 +137,12 @@
 | `docs/development/16-retrospective.md` | 将来源项目认证迁移结论同步到 TD-006 | 已完成 |
 | `docs/development/03-feature-changelog.md` | 记录架构确认和 Python 3.11 调整 | 已完成 |
 | `docs/development/20-phase1-integration-acceptance.md` | 记录 Phase 1 PostgreSQL/Redis/MinIO 四格式完整验收证据和遗留风险 | 已完成（正式通过） |
-| `backend/tests/integration/test_phase2_live_integration.py`、`scripts/run-phase2-integration.sh` | Phase 2 固定资源 live 验收与真实 Qwen 可选门禁 | 已完成并通过 |
-| `docs/development/21-phase2-integration-acceptance.md` | 记录 Phase 2 核心服务验收证据、写入顺序修复和阶段关闭缺口 | 已完成（核心服务通过） |
+| `backend/tests/integration/test_phase2_live_integration.py`、`scripts/run-phase2-integration.sh` | Phase 2 固定资源 Worker/SSE/API/工单 live 验收与真实 Qwen 门禁 | 已完成；23/23 通过 |
+| `docs/development/21-phase2-integration-acceptance.md`、`22-phase2-evaluation.md` | 记录 23 项真实集成证据、阶段关闭门禁、评测输入和执行规范 | 已完成；真实质量数据待提供 |
 | `backend/src/knowagent/agent/api/`、`backend/src/knowagent/tickets/api/`、`backend/src/knowagent/identity/api/access.py` | 装配 Agent/Tickets API 端点与共享系统访问 helper，并修跨系统泄露与 CSRF 缺口 | 已完成；非集成测试 250 通过、18 项 API 集成测试已在真实 PostgreSQL 17 跑通 |
 | `backend/tests/integration/test_agent_api.py`、`test_tickets_api.py`、`_fakes.py` | Agent/Tickets API 集成测试与共享 FakeRedis | 已完成；默认 skip 待环境变量启用 |
 | `backend/tests/integration/test_agent_api.py` | 修复 `test_ask_question_validates_system_id_required` CSRF 头缺失（`d9ca72b`） | 已完成；18 项 API 集成测试在真实 PostgreSQL 17 全部通过 |
-| `backend/.env` | LLM 模型从 `qwen3.5-flash` 切换为 `qwen3-max` | 已完成；Phase 2 live 引用契约与工单往返通过 |
-| `docs/development/10-current-status.md`、`21-phase2-integration-acceptance.md` | 补记 Phase 2 qwen3-max 全量测试与 Agent/Tickets API 集成验收通过 | 已完成 |
+| `backend/.env` | 本地临时 LLM 模型切换为 `qwen3.5-27b` | 已完成；Phase 2 live 增量引用流通过；文件保持忽略 |
 | `docs/development/03-feature-changelog.md` | 记录 Agent/Tickets API 装配与 review 修复 | 已完成 |
 | `docs/engineering/11-project-structure.md` | 完整架构方案通过确认 | 已完成 |
 | `backend/pyproject.toml` | Python 3.11 后端依赖和质量工具配置 | 已完成 |
@@ -163,13 +184,13 @@
 | `backend/pyproject.toml`、`.gitignore` | 保留实质重复检测并过滤声明式短映射噪音；忽略本地 Alembic/Pylint 产物 | 已完成 |
 | `docs/operations/08-deployment.md` | 非 Docker 发布、迁移、验证与回滚基线 | 已完成（真实部署待 Phase 4） |
 | `backend/src/knowagent/retrieval/` | Embedding Provider、关键词/向量检索、RRF、证据组织、可观测降级与指标端口 | 基础代码、review 修复和真实核心服务验收已完成 |
-| `backend/src/knowagent/agent/` | 版本化 Prompt、Qwen 兼容流式生成、声明级回答和引用验证 | 基础代码与 review 修复已完成；API/持久化待后续 |
-| `backend/src/knowagent/knowledge/application/indexing.py` | 批量 Embedding、模型契约校验与原子向量写回 | 基础代码已完成；Worker 接线待后续 |
-| `backend/migrations/versions/c8784d439b23_add_phase2_vector_and_lexical_retrieval.py` | `vector`/`pg_trgm`、向量列和 trigram 索引 | SQLite 往返通过；真实 pgvector 待验收 |
+| `backend/src/knowagent/agent/` | 版本化 Prompt、Qwen grounded 增量流、声明级回答、引用验证、API/SSE 和答案快照 | 已完成；真实 `qwen3.5-27b` 集成通过，质量数据待评测 |
+| `backend/src/knowagent/knowledge/application/indexing.py` | 批量 Embedding、模型契约校验与原子向量写回 | 已完成并接入 Worker；真实 Ollama/pgvector 通过 |
+| `backend/migrations/versions/c8784d439b23_add_phase2_vector_and_lexical_retrieval.py` | `vector`/`pg_trgm`、向量列和 trigram 索引 | SQLite 往返和真实 PostgreSQL 17/pgvector 通过 |
 | `backend/tests/unit/test_*retrieval.py`、`test_*embedding*.py`、`test_evidence_organizer.py`、`test_answer_generation.py`、`test_grounded_answer.py`、`test_knowledge_indexing.py` | Phase 2 第 1 项正常、边界、异常与隔离回归 | 已完成 |
-| `backend/src/knowagent/agent/application/evidence_decision.py`、`reliable_question.py` | 确定性证据充分性、可靠拒答和故障分流 | 基础代码与单测/静态检查已完成；API/SSE 接线待补 |
-| `backend/src/knowagent/tickets/`、`backend/src/knowagent/agent/infrastructure/sqlalchemy_models.py` | 判定留痕、拒答自动建单、运行幂等和系统内时间窗合并 | 基础代码与单测/静态检查已完成；完整工单状态机待补 |
-| `backend/migrations/versions/cc99b700f739_add_evidence_decisions_and_refusal_.py` | `evidence_decisions`、`tickets`、外键、唯一约束和查询索引 | 已生成并人工修正 JSONB；迁移往返与 `alembic check` 本轮未运行 |
+| `backend/src/knowagent/agent/application/evidence_decision.py`、`reliable_question.py` | 确定性证据充分性、可靠拒答、故障分流和 SSE 事件 | 已完成；API/SSE 与真实 PostgreSQL 集成通过 |
+| `backend/src/knowagent/tickets/`、`backend/src/knowagent/agent/infrastructure/sqlalchemy_models.py` | 判定留痕、拒答自动建单、运行幂等、时间窗合并和完整工单状态机 | 已完成；真实数据库/API/审核回流通过 |
+| `backend/migrations/versions/cc99b700f739_add_evidence_decisions_and_refusal_.py` | `evidence_decisions`、`tickets`、外键、唯一约束和查询索引 | PostgreSQL 17 迁移与 `alembic check` 通过 |
 | `backend/tests/unit/test_evidence_policy.py`、`test_refusal_tickets.py`、`test_reliable_question.py` | Phase 2 第 2 项正常、边界、异常、幂等和故障分流回归 | 已完成 |
 | `backend/src/knowagent/tickets/application/review.py`、`tickets/infrastructure/sqlalchemy_repository.py` | 审核前 Embedding、工单来源/发布片段和候选发布事务 | 已完成；API 装配待补 |
 | `backend/src/knowagent/retrieval/infrastructure/sqlalchemy_search.py`、`documents/domain/models.py` | `TICKET` 来源检索和工单 locator 契约 | 已完成；真实组合链路待验收 |
@@ -236,6 +257,9 @@
 | Phase 2 第 4 项 review 修复 | 通过（运行级 PID 复验待补） | 39 项定向回归、248 项后端测试和 90.72% 覆盖率通过；model-service 39 项/90.58%，前端 42 项、TypeScript、ESLint、生产构建，双后端 mypy/Bandit、相关 Pylint、SQLite 迁移往返/check、Bash 语法和 diff 检查通过 |
 | Phase 2 核心服务 live 验收与 FK 顺序修复 | 通过 | 2 项 live 用例 36.85 秒通过；250 项标准测试通过、3 项 live 门禁跳过，覆盖率 90.72%；Black/isort、115 文件 mypy strict、本次范围 Pylint 10.00/10、Bandit 中高危 0 和 Bash 语法通过 |
 | Phase 2 qwen3-max 全量测试与 API 集成验收 | 通过 | 后端 250 项 + 21 skip（87.64%）；前端 42 项；model-service 39 项 + 1 skip（90.58%）；Phase 2 live 2 项（qwen3-max，34.87s）；Agent/Tickets API live 18 项（真实 PostgreSQL 17 `knowagent_api_integration` 库，5.57s）；Phase 1 live 1 项（真实 MinIO/S3）；mypy strict 122 文件零错误；Bandit 中高危 0；test_agent_api CSRF 头修复已提交 `d9ca72b` |
+| Phase 2 最终代码/静态验证 | 通过 | 后端 275 passed / 24 skipped，覆盖率 86.56%；125 个源文件 mypy strict 零错误；Black 检查 168 个文件清洁，isort 和 diff 检查通过。前端默认完整测试 47/47，TypeScript、ESLint、生产构建通过 |
+| Phase 2 Worker/SSE/API 真实集成 | 通过 | `qwen3.5-27b` + PostgreSQL 17 + Redis + Ollama bge-m3：23 passed、6 warnings、36.69 秒；Alembic upgrade/check 无漂移；覆盖真实 Worker→Embedding、增量 grounded stream、token 隔离/单次消费、Agent/Tickets API 和审核回流 |
+| Phase 2 浏览器检查 | 部分通过 | 本地服务经 Vite→API 代理加载登录页；开发库 0 个账号，未注入临时账号，问答/工单业务页待实际测试账号人工验收 |
 
 ## 9. 未运行验证与风险
 
@@ -247,16 +271,17 @@
 6. 四类解析器的 S3/PostgreSQL/Worker 完整组合已在本地 MinIO 验收通过；公司对象存储 TLS/内部 CA、服务端 5xx/限流和目标 Linux 厂商差异仍待 staging 验证。扫描 PDF 仅返回 `OCR_REQUIRED`，首版不执行 OCR。
 7. 本轮使用现有 Python 3.11.11 环境并在 `/tmp` 补充四个锁定依赖；FastAPI、Redis client、pytest/pytest-cov 小版本低于项目锁定版本，结果不替代目标 Linux 按完整锁定依赖安装的发布证明。
 8. Phase 2 迁移已在本地 PostgreSQL 17.10 升级到 `c1738febb896`，JSONB、向量列与复合外键成功落库；迁移锁时长、已有生产量级回填和查询计划仍待类生产数据验证。
-9. Phase 2 四项基础代码和真实 pgvector/Embedding/Qwen 核心服务组合联调已通过；HNSW 在模型维度最终确认前不创建。问答 API/SSE、工单 API、文档索引 Worker 接线和页面端到端验收仍待完成。
+9. Phase 2 功能、问答/SSE、工单 API、文档索引 Worker 和真实 pgvector/Embedding/Qwen 组合联调已通过；HNSW 在生产模型维度最终确认前不创建。剩余关闭门禁是 AC-004/AC-005 真实评测数据和业务页人工验收。
 10. PID 启动身份的沙箱外受控测试因审批服务 503 未获授权，`shellcheck` 当前不可用；脚本已通过 Bash 语法和 diff 检查，仍需在本地运行一次“伪造过期启动时间后 stop 不发送信号”的复验。model-service 全目录 Black 检查另有未改动 `ollama.py` 的既有格式差异，本次变更文件清洁。
+11. 真实 PostgreSQL/Redis/Qwen SSE 与 Worker 端到端已经通过；前端 jsdom 仍以 `FakeEventSource` 做组件回归。真实浏览器已加载登录页，但开发库无账号，未验证登录后的问答/工单交互。
+12. AC-004/AC-005 评测 CLI 已就绪，但仓库没有至少 50 条真实标注 ESB 可回答问题和真实无知识问题集；任何通过数字在数据到位前都不成立。
 
 ## 10. 继续开发建议
 
 新对话或新开发者接手时，建议下一步：
 
-1. 先阅读 TD-002、TD-003、TD-009、`retrieval`/`agent`/`tickets` 模块和 `c8784d439b23`、`cc99b700f739`、`ee1a2b3c4d5e`、`c1738febb896` 四个迁移。
-2. 优先接入问答 API/SSE、工单 API 和文档索引 Worker，并装配答案快照与审核发布服务。
-3. API 和 Worker 装配后，沿用固定 integration 资源完成 AC-004 至 AC-007 的接口与页面端到端验收。
+1. 先阅读 `docs/development/21-phase2-integration-acceptance.md`、`22-phase2-evaluation.md` 及 `agent`/`tickets` 模块，避免重复已经通过的 SSE/Worker 真实集成工作。
+2. 下一步取得真实评测集并运行 `knowagent-evaluate-phase2`；随后使用实际测试账号补问答/工单页面人工记录。两项通过后再关闭 Phase 2。
 
 ## 11. 接手时必须先读
 

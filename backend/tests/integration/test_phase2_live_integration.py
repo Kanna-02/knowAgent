@@ -5,6 +5,7 @@ import os
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from io import BytesIO
 from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
@@ -13,7 +14,11 @@ from sqlalchemy import delete, select
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session, sessionmaker
 
-from knowagent.agent.application.answer_generation import AnswerGenerator
+from knowagent.agent.application.answer_generation import (
+    AnswerGenerator,
+    StreamedAnswerCompleted,
+    StreamedAnswerDelta,
+)
 from knowagent.agent.application.answer_snapshots import AnswerSnapshotService
 from knowagent.agent.application.evidence_decision import DeterministicEvidencePolicy
 from knowagent.agent.application.reliable_question import ReliableQuestionService
@@ -35,8 +40,14 @@ from knowagent.agent.infrastructure.sqlalchemy_repository import (
 )
 from knowagent.agent.prompts import load_prompt_definition
 from knowagent.common.lifecycle import PublicationStatus
+from knowagent.documents.application.chunk_ingestion import ChunkIngestionService
+from knowagent.documents.application.processor import ChunkManifest
 from knowagent.documents.domain.ingestion import Document, DocumentVersion, DocumentVersionStatus
-from knowagent.documents.domain.models import SourceLocator, SourceType
+from knowagent.documents.domain.models import KnowledgeChunk as ParsedKnowledgeChunk
+from knowagent.documents.domain.models import (
+    SourceLocator,
+    SourceType,
+)
 from knowagent.documents.infrastructure.sqlalchemy_models import DocumentRecord
 from knowagent.identity.domain.models import AccountRole, AccountSource, AccountStatus
 from knowagent.identity.infrastructure.sqlalchemy_models import AccountRecord
@@ -105,6 +116,23 @@ class Participants:
     reviewer_id: UUID
     system_a: UUID
     system_b: UUID
+
+
+class ManifestObjectStore:
+    def __init__(self, manifest: ChunkManifest) -> None:
+        self._payload = manifest.model_dump_json().encode("utf-8")
+
+    def put(self, *, key: str, content: BytesIO, content_type: str, content_length: int) -> None:
+        del key, content, content_type, content_length
+        raise AssertionError("manifest store is read-only")
+
+    def get(self, *, key: str) -> bytes:
+        assert key == "phase2/chunks-v1.json"
+        return self._payload
+
+    def delete(self, *, key: str) -> None:
+        del key
+        raise AssertionError("manifest store is read-only")
 
 
 def _require_safe_environment(settings: Settings) -> None:
@@ -376,6 +404,109 @@ def _question_service(
     )
 
 
+def test_phase2_live_document_chunk_ingestion_indexes_embeddings() -> None:
+    settings = Settings.from_environment()
+    _require_safe_environment(settings)
+    factory = create_session_factory(create_database_engine(settings.database_url))
+    _cleanup_phase2_records(factory)
+    run_id = uuid4().hex[:8]
+    participants = _seed_participants(factory, run_id)
+    document_id, version_id = uuid4(), uuid4()
+    now = datetime.now(UTC)
+    locator = SourceLocator(
+        document_id=document_id,
+        document_version_id=version_id,
+        source_type=SourceType.MARKDOWN,
+        block_index=0,
+        heading_path=("Phase 2",),
+        paragraph_start=1,
+        paragraph_end=1,
+        line_start=1,
+        line_end=1,
+    )
+    manifest = ChunkManifest(
+        document_id=document_id,
+        document_version_id=version_id,
+        source_type=SourceType.MARKDOWN,
+        parser_name="phase2-live",
+        parser_version="1",
+        schema_version="chunks-v1",
+        chunks=(
+            ParsedKnowledgeChunk(
+                ordinal=0,
+                text=f"PHASE2-WORKER-{run_id} 发布前必须执行数据库迁移。",
+                token_count=12,
+                structure_path=("Phase 2",),
+                locators=(locator,),
+            ),
+        ),
+    )
+    completed = False
+    try:
+        with factory.begin() as session:
+            repository = SqlAlchemyKnowledgeRepository(session)
+            repository.add_document(
+                Document(
+                    id=document_id,
+                    system_id=participants.system_a,
+                    name="Phase 2 worker integration",
+                    created_by=participants.owner_id,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            repository.add_version(
+                DocumentVersion(
+                    id=version_id,
+                    document_id=document_id,
+                    system_id=participants.system_a,
+                    version_no=1,
+                    object_key="phase2/worker.md",
+                    filename="worker.md",
+                    media_type="text/markdown",
+                    size_bytes=64,
+                    sha256=hashlib.sha256(b"phase2-worker").hexdigest(),
+                    status=DocumentVersionStatus.CHUNKED,
+                    created_by=participants.owner_id,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+        source_id, chunk_count = ChunkIngestionService(
+            factory,
+            object_store=ManifestObjectStore(manifest),
+            embeddings=_embedding_provider(settings),
+            embedding_batch_size=settings.retrieval.embedding_batch_size,
+        ).ingest_chunks(
+            system_id=participants.system_a,
+            document_version_id=version_id,
+            manifest_key="phase2/chunks-v1.json",
+            now=now,
+        )
+
+        with factory() as session:
+            repository = SqlAlchemyKnowledgeRepository(session)
+            version = repository.get_version(
+                system_id=participants.system_a,
+                document_version_id=version_id,
+            )
+            chunks = repository.list_source_chunks(
+                system_id=participants.system_a,
+                source_id=source_id,
+            )
+        assert version is not None and version.status is DocumentVersionStatus.READY_DRAFT
+        assert chunk_count == 1
+        assert len(chunks) == 1
+        assert chunks[0].embedding is not None and len(chunks[0].embedding) == 1024
+        completed = True
+    finally:
+        if completed:
+            _cleanup_phase2_records(factory)
+
+    assert completed
+
+
 @pytest.mark.anyio
 @pytest.mark.skipif(
     os.getenv("KNOWAGENT_RUN_PHASE2_LLM_INTEGRATION") != "1",
@@ -411,10 +542,16 @@ async def test_phase2_live_qwen_grounded_answer_contract() -> None:
         prompt=load_prompt_definition(settings.llm.prompt_version),
     )
 
-    answer = await AnswerGenerator(provider).generate(
-        question="ESB连接超时必须设置为多少秒？",
-        evidence=evidence,
-    )
+    events = [
+        event
+        async for event in AnswerGenerator(provider).generate_stream(
+            question="ESB连接超时必须设置为多少秒？",
+            evidence=evidence,
+        )
+    ]
+    assert any(isinstance(event, StreamedAnswerDelta) for event in events[:-1])
+    assert isinstance(events[-1], StreamedAnswerCompleted)
+    answer = events[-1].answer
 
     assert answer.citations
     assert all(

@@ -8,6 +8,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session, sessionmaker
 
+from knowagent.documents.application.chunk_ingestion import ChunkIngestionService
 from knowagent.documents.application.chunking import ChunkingConfig, StructureAwareChunker
 from knowagent.documents.application.processor import IngestionProcessor, IngestionRecoveryService
 from knowagent.documents.infrastructure.parsers import ParserLimits
@@ -18,6 +19,7 @@ from knowagent.documents.infrastructure.sqlalchemy_repository import (
 from knowagent.platform.database import create_database_engine, create_session_factory
 from knowagent.platform.object_store import S3ObjectStore
 from knowagent.platform.settings import Settings
+from knowagent.retrieval.infrastructure.http_embedding import HttpEmbeddingProvider
 from knowagent.worker.celery_app import celery_app
 from knowagent.worker.dispatcher import CeleryIngestionDispatcher
 
@@ -28,6 +30,7 @@ class _WorkerRuntime:
     session_factory: sessionmaker[Session]
     coordinator: SqlAlchemyIngestionCoordinator
     object_store: S3ObjectStore
+    chunk_ingestion: ChunkIngestionService
 
 
 @lru_cache(maxsize=1)
@@ -37,11 +40,24 @@ def _runtime() -> _WorkerRuntime:
     if not storage.configured:
         raise RuntimeError("S3 object storage is not configured")
     session_factory = create_session_factory(create_database_engine(settings.database_url))
+    retrieval = settings.retrieval
+    embeddings = HttpEmbeddingProvider(
+        base_url=retrieval.embedding_base_url,
+        model=retrieval.embedding_model,
+        timeout_seconds=retrieval.embedding_timeout_seconds,
+    )
+    chunk_ingestion = ChunkIngestionService(
+        session_factory=session_factory,
+        object_store=S3ObjectStore.from_settings(storage),
+        embeddings=embeddings,
+        embedding_batch_size=retrieval.embedding_batch_size,
+    )
     return _WorkerRuntime(
         settings=settings,
         session_factory=session_factory,
         coordinator=SqlAlchemyIngestionCoordinator(session_factory),
         object_store=S3ObjectStore.from_settings(storage),
+        chunk_ingestion=chunk_ingestion,
     )
 
 
@@ -58,6 +74,7 @@ def process_ingestion(job_id: str) -> str:
         chunker=StructureAwareChunker(ChunkingConfig.from_settings(settings.document_processing)),
         lease_seconds=settings.ingestion.lease_seconds,
         retry_base_seconds=settings.ingestion.retry_base_seconds,
+        chunk_ingestion=runtime.chunk_ingestion,
     ).process(
         UUID(job_id),
         worker_id=f"{socket.gethostname()}:{os.getpid()}",

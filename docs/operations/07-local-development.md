@@ -69,7 +69,7 @@ Phase 2 关键变量：
 | `KNOWAGENT_TICKET_DEDUPLICATION_WINDOW_HOURS` | 否 | 同系统规范化问题的自动工单合并时间窗，默认 24 小时 |
 | `KNOWAGENT_LLM_API_BASE` / `LLM_API_BASE` | 生成链路必需 | Qwen OpenAI 兼容 `/v1` Base URL |
 | `KNOWAGENT_LLM_API_KEY` / `LLM_API_KEY` | 生成链路必需 | 只放本地 `.env` 或密钥设施；不能使用 `sk-` 占位值 |
-| `KNOWAGENT_LLM_MODEL` / `LLM_MODEL` | 生成链路必需 | 当前测试目标为 `qwen3.6-plus` |
+| `KNOWAGENT_LLM_MODEL` / `LLM_MODEL` | 生成链路必需 | 本地 Phase 2 临时测试目标为 `qwen3.5-27b`；示例默认值不代表验收模型 |
 | `KNOWAGENT_LLM_PROMPT_VERSION` | 生成链路必需 | 默认 `grounded-answer-v1`；必须对应随包发布且启用的 Prompt 资源 |
 
 对象存储使用 `KNOWAGENT_S3_*` 环境变量。至少配置 endpoint、bucket、region、access key 和 secret key；内部 CA 使用 `KNOWAGENT_S3_CA_BUNDLE`，不得通过关闭 TLS 校验绕过证书问题。`KNOWAGENT_S3_VERIFY_TLS` 和 `KNOWAGENT_COOKIE_SECURE` 只接受明确的 `true/false`、`yes/no`、`on/off` 或 `1/0`，拼写错误会让应用启动失败。连接/读取超时、SDK 重试次数和 multipart 阈值/分片大小均可配置，凭据只能由环境或公司密钥设施提供。
@@ -234,6 +234,15 @@ Phase 2 核心服务验收同样固定复用 `knowagent_integration` 和 Redis D
 ```
 
 运行器只在固定数据库首次缺失时创建一次；成功后精确清理本轮记录，失败时保留现场，不按运行新建/删除数据库。`--with-llm` 使用 `backend/.env` 的 Qwen base URL、model 和 API key。
+
+AC-004/AC-005 质量门禁使用人工复核后的 UTF-8 JSONL observation 文件。输入字段、标注规则、示例和报告留存方式见 `docs/development/22-phase2-evaluation.md`：
+
+```bash
+cd backend
+PYTHONPATH=src .venv/bin/knowagent-evaluate-phase2 /absolute/path/to/phase2-observations.jsonl
+```
+
+命令输出 JSON 报告，全部阈值通过时退出码为 `0`，缺少真实问题、指标未达标、拒答未建工单或出现无依据回答时退出码为 `1`。评测输入可能包含内部问题和工单 ID，只能保存在受控位置；除非已完成脱敏并获授权，不提交仓库。
 
 ```powershell
 cd backend

@@ -8,7 +8,7 @@ from typing import Self
 from uuid import UUID
 
 from knowagent.documents.domain.models import SourceLocator
-from knowagent.retrieval.domain.models import EvidenceBundle
+from knowagent.retrieval.domain.models import EvidenceBundle as EvidenceBundle
 
 
 class GenerationEventKind(StrEnum):
@@ -197,3 +197,28 @@ class QuestionResolution:
             return
         if self.answer is not None or self.ticket_id is None or not self.reason_codes:
             raise ValueError("refused resolution must include reasons and a ticket")
+
+
+class QuestionStreamEventKind(StrEnum):
+    RETRIEVAL_STARTED = "retrieval_started"
+    EVIDENCE_READY = "evidence_ready"
+    DECISION = "decision"
+    ANSWER_DELTA = "answer_delta"
+    ANSWER_COMPLETED = "answer_completed"
+    REFUSED = "refused"
+
+
+@dataclass(frozen=True, slots=True)
+class QuestionStreamEvent:
+    """Typed event emitted by :meth:`ReliableQuestionService.resolve_stream`.
+
+    The SSE layer translates each event into a ``text/event-stream`` frame.
+    ``payload`` is one of ``EvidenceBundle`` (evidence_ready), ``EvidenceDecision``
+    (decision/refused), ``str`` (answer_delta) or ``VerifiedAnswer``
+    (answer_completed); for ``retrieval_started`` it is ``None``.
+    """
+
+    kind: QuestionStreamEventKind
+    payload: object
+    run_id: UUID
+    degraded_reasons: tuple[str, ...] = ()
