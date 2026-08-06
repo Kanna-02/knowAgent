@@ -22,6 +22,7 @@ KnowAgent 是面向公司内部人员的多系统智能客服产品。Phase 0 �
 | 工程 | `engineering/02-development-principles.md` | 初版完成 |
 | 工程 | `engineering/04-tech-decisions.md` | TD-001 至 TD-011 及核心版本基线已确认 |
 | 工程 | `engineering/11-project-structure.md` | 架构已确认 |
+| 运维 | `operations/09-runtime-resource-inventory.md` | 已记录系统资源基线、本机/Docker 现有资源和 Phase 3 Rerank 缺口 |
 | 开发 | `development/03-feature-changelog.md` | 已记录 Phase 1 全部实现、评审修复与集成验收 |
 | 开发 | `development/10-current-status.md` | Phase 1 已完成真实基础设施验收，Phase 2 核心服务集成验收通过，API 装配完成，SSE/Worker/页面端到端待补 |
 | 开发 | `development/16-retrospective.md` | `knowledge-rag` 跨项目资产盘点已完成 |

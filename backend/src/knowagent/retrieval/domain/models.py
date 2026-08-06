@@ -32,6 +32,37 @@ class EmbeddingBatch:
 
 
 @dataclass(frozen=True, slots=True)
+class RerankScore:
+    index: int
+    score: float
+
+    def __post_init__(self) -> None:
+        if self.index < 0:
+            raise ValueError("rerank result index must not be negative")
+        if not math.isfinite(self.score):
+            raise ValueError("rerank score must be finite")
+
+
+@dataclass(frozen=True, slots=True)
+class RerankBatch:
+    model: str
+    model_version: str
+    results: tuple[RerankScore, ...]
+
+    def __post_init__(self) -> None:
+        if not self.model.strip() or not self.model_version.strip():
+            raise ValueError("rerank model metadata must not be blank")
+        if not self.results:
+            raise ValueError("rerank results must not be empty")
+        indexes = tuple(result.index for result in self.results)
+        scores = tuple(result.score for result in self.results)
+        if len(set(indexes)) != len(indexes):
+            raise ValueError("rerank result indexes must be unique")
+        if scores != tuple(sorted(scores, reverse=True)):
+            raise ValueError("rerank results must be ordered by descending score")
+
+
+@dataclass(frozen=True, slots=True)
 class SearchHit:
     chunk_id: UUID
     source_id: UUID
@@ -54,6 +85,7 @@ class SearchHit:
 class FusedSearchHit(SearchHit):
     fused_score: float
     channels: tuple[RetrievalChannel, ...]
+    rerank_score: float | None = None
 
     @classmethod
     def from_search_hit(

@@ -5,7 +5,7 @@
 ## 1. 快照时间
 
 ```text
-更新时间：2026-08-05（Phase 2 流式安全、可恢复索引、评测门禁和 23 项真实服务集成验收通过）
+更新时间：2026-08-06（Phase 3 代码完成；本机/Docker 资源盘点完成，Rerank 权重可复用、运行时待安装）
 更新人/助手：Codex
 当前分支：master
 远程仓库：git@github.com:Kanna-02/knowAgent.git
@@ -15,17 +15,17 @@
 ## 2. 当前阶段
 
 ```text
-当前阶段：Phase 2 问答与工单闭环（Phase 1 已完成并通过集成验收）
-阶段目标：系统隔离检索、带引用回答、可靠拒答、内置工单和审核回流
-当前任务：功能与真实服务集成缺口已补齐；等待真实标注 ESB 评测集执行 AC-004/AC-005，并使用实际账号补问答/工单页面人工验收
-任务状态：4/4 功能范围完成；后端 275 passed / 24 skipped、覆盖率 86.56%，前端 47/47；真实 PostgreSQL 17、Redis、Ollama bge-m3、Qwen qwen3.5-27b、SSE、Worker、Agent/Tickets API 共 23 项集成验收通过；Phase 2 因真实质量数据和业务页人工证据未关闭
+当前阶段：Phase 2 关闭门禁待真实评测数据；Phase 3 质量与运营增强已开始（1/4）
+阶段目标：保留 Phase 2 系统隔离问答/工单闭环，同时完成混合检索调优、Rerank 和用户可见降级
+当前任务：Phase 3 第 1 项代码、自动化和真实向量降级浏览器链路已完成；资源盘点确认已有 Rerank 权重，下一步先拆分本地加载路径，再安装缺失运行时并做真实推理
+任务状态：Phase 3 1/4 功能范围完成；后端 284 passed / 24 skipped、覆盖率 86.64%，model-service 49 passed / 1 skipped、覆盖率 85.63%，前端 47/47；真实 PostgreSQL/Redis/API/SSE/浏览器已验证向量降级拒答和工单创建。Phase 2 仍因 AC-004/AC-005 真实质量数据未关闭
 ```
 
 ## 3. 已完成
 
 1. 初始化需求、路线图、前端设计、开发规则和追溯矩阵。
 2. 完成 `knowledge-rag` 跨项目资产盘点。
-3. 已确认 TD-001 至 TD-011，包括全 Python、PostgreSQL 混合检索、独立模型服务、Celery、双入口 Redis Session、格式专用解析、S3 兼容对象存储、原生 Linux 部署、LangGraph 编排和应用框架版本基线。
+3. 已确认 TD-001 至 TD-012，包括全 Python、PostgreSQL 混合检索、独立模型服务、Celery、双入口 Redis Session、格式专用解析、S3 兼容对象存储、原生 Linux 部署、LangGraph 编排、应用框架版本基线及 `FlagEmbedding + PyTorch` Rerank 运行时。
 4. 已同步双端登录、统一账号体系、用户批量导入、管理员后台新增和首次强制改密，并完成跨文档一致性检查。
 5. 已确认四类文档解析器边界、统一 `SourceLocator`、结构化切分约束和扫描 PDF 显式失败策略。
 6. 已确认 systemd + Nginx + 版本化发布目录，以及向后兼容数据库迁移和应用回滚边界。
@@ -89,28 +89,33 @@
 63. 已扩展 Phase 2 集成运行器，真实 Worker→Embedding、Qwen 增量流、SSE token、Agent/Tickets API 和审核回流一次执行；`qwen3.5-27b` 下 23 passed、6 warnings、36.69 秒。
 64. 已稳定前端默认测试运行：Vitest `fileParallelism: false`，默认 47/47 通过；TypeScript、ESLint 和生产构建通过。
 65. 已补 `docs/development/22-phase2-evaluation.md`，明确真实数据、人工标注、JSONL 字段、执行命令和报告留存规则。
-66. 已通过真实浏览器验证本地登录页经 Vite→API 代理加载；开发库无账号，未注入临时用户或伪造业务数据。
+66. 已通过项目受控导入流程创建本地 `visual.tester` 测试用户，并创建启用的 `PHASE3_TEST` 系统；真实浏览器完成登录、首次改密、系统选择和问答提交。该数据仅存在本机开发库，不属于迁移或仓库种子。
+67. 已实现可配置加权 RRF、严格 `HttpRerankProvider`、有限候选 Rerank 和 `VECTOR_UNAVAILABLE`/`RERANK_UNAVAILABLE` 两级显式降级；两种原因可同时保留并进入日志、指标、回答/拒答 SSE。
+68. `model-service` 已实现 `/v1/rerank`、FlagEmbedding 延迟加载/线程推理/并发限制、请求资源上限和 Embedding 必需/Rerank 可降级 readiness；`FlagEmbedding==1.4.0` 仅作为 `rerank` optional extra。
+69. 前端回答与拒答均展示具体降级原因；真实 PostgreSQL 17 + Redis + API/SSE + 浏览器已验证向量服务不可用时只用关键词、可靠拒答继续建单。1280x720 与 390x844 均无横向溢出、Alert 重叠或文本截断。
+70. 已完成本机和 Docker 资源盘点：`bge-m3` 已在 Docker volume，原生/ONNX Rerank 权重已在 `knowledge-rag/deploy/models/`；四个 Python 环境均缺 Rerank 运行时，TEI 镜像/容器不存在。盘点写入 `docs/operations/09-runtime-resource-inventory.md`，未继续下载权重。
 
 ## 4. 正在进行
 
-1. Phase 2 功能、自动化和真实服务集成已完成；正在等待真实标注评测集执行 AC-004/AC-005，以及实际账号的问答/工单业务页人工验收。
+1. Phase 2 功能、自动化和真实服务集成已完成；正在等待真实标注评测集执行 AC-004/AC-005。实际本地账号已补齐并完成 Phase 3 向量降级拒答浏览器链路，完整带引用回答/工单管理人工验收仍需已发布知识和对应角色数据。
 2. Phase 1 功能范围 6/6 已实现，并于 2026-08-04 在固定 PostgreSQL/Redis/MinIO integration 资源上完成四格式完整持久化与隔离验收，现已正式关闭。
 3. 本地 PostgreSQL 17、pgvector、pg_trgm、Redis、MinIO、Ollama Embedding 和 Qwen `qwen3.5-27b` 已完成 Phase 2 API/SSE/Worker 组合联调。
-4. 等待目标 Linux 服务器资源信息以最终确定 Embedding/Rerank 推理后端、量化方式和 Python 传递依赖锁；本地 Ollama 方案不自动等同生产选型。
+4. Phase 3 第 1 项为 1/4：代码、单测、静态检查和真实向量降级页面通过；本机已有可复用 Rerank 权重，但 `model-service[rerank]` 未安装。当前先处理模型 ID/本地加载路径解耦，再安装运行时；目标 Linux 资源信息仍是生产门禁。
 
 ## 5. 未完成 / 下一步
 
 1. 用户提供至少 50 条真实标注 ESB 可回答问题及无知识问题集，按 `docs/development/22-phase2-evaluation.md` 执行质量门禁并把脱敏汇总写入验收报告。
-2. 使用实际测试账号和已发布知识，在浏览器人工验证问答增量/引用/拒答工单，以及工单列表、详情、回复、状态流转、答案提交和审核来源展示。
-3. 上述两项通过后更新路线图、追溯矩阵和验收报告，将 Phase 2 正式关闭。
-4. Phase 2 关闭后进入 staging/类生产 Linux 验证公司对象存储 TLS/内部 CA、迁移锁时长、模型运行和发布回滚。
+2. 拆分 Rerank 对外模型 ID 与本地加载路径，复用 `knowledge-rag` 已有权重；确认依赖树和缓存命中后再安装运行时，不重新下载模型。随后使用至少一条已发布知识补跑真实 Rerank 回答路径，并用 ESB 评测集对比基础 RRF 与 Rerank 质量。
+3. 使用测试负责人/系统负责人账号补工单详情、回复、状态流转、答案提交和审核来源展示；当前普通用户账号仅覆盖问答与拒答入口。
+4. 取得目标 Linux CPU/内存/GPU 信息，确定 PyTorch 原生、量化或 ONNX 替代方案并生成生产传递依赖锁；随后继续 Phase 3 多轮/版本项。
 
 ## 6. 阻塞点
 
 | 问题 | 影响 | 需要谁处理 | 当前状态 |
 | --- | --- | --- | --- |
 | 缺至少 50 条真实标注 ESB 可回答问题和无知识问题集 | 无法真实计算 AC-004/AC-005 的正确率、引用支持率和拒答召回率，阻塞 Phase 2 关闭 | 用户/业务评测负责人 | 待提供；CLI 门禁和格式已就绪 |
-| 本地开发库无账号和业务数据 | 问答/工单业务页无法形成真实浏览器验收记录 | 用户/测试负责人 | 待使用实际测试账号；登录页已验证 |
+| 本地开发库缺业务知识和负责人数据 | 已完成普通用户登录、向量降级拒答与建单；无法形成真实 Rerank 回答、工单处理/审核完整页面记录 | 用户/测试负责人 | `visual.tester` + `PHASE3_TEST` 已补；待已发布知识与负责人账号 |
+| Rerank 运行时未安装，模型 ID 与本地路径尚未解耦 | 已有权重不能在保持外部模型契约不变的前提下直接加载 | 开发 | 权重已盘点；禁止重复下载，待新增独立加载路径配置 |
 | 模型服务器 CPU/内存/GPU 信息未知 | 影响生产 Embedding/Rerank 运行时和量化；本地 Ollama 适配不受阻 | 运维/用户 | 待提供 |
 | 公司通知协议及真实对象存储端点契约待验证 | 影响后续通知 provider 和 S3 兼容性证明 | 用户/第三方 | 待提供/验证 |
 
@@ -198,6 +203,11 @@
 | `backend/migrations/versions/c1738febb896_add_phase2_answer_citation_snapshots.py` | 答案/引用表、复合隔离约束、候选发布状态和工单来源外键 | SQLite 往返/check 与 PostgreSQL 17 升级通过 |
 | `backend/tests/unit/test_knowledge_review.py`、`test_answer_snapshots.py`、`test_sqlalchemy_retrieval.py` | 审核重索引、来源追踪、历史快照和检索回归 | 已完成 |
 | `backend/src/knowagent/agent/application/reliable_question.py`、`tickets/application/review.py`、`scripts/local-env.sh`、`model-service/src/knowagent_model/settings.py` | Phase 2 第 4 项 review 并发、幂等、进程安全和配置一致性修复 | 已完成并通过自动化验证；PID 沙箱外运行复验因审批服务 503 待补 |
+| `backend/src/knowagent/retrieval/`、`backend/src/knowagent/platform/settings.py` | Phase 3 加权 RRF、Rerank provider、候选限制、严格契约与两级降级 | 已完成；后端全量、mypy、格式、安全扫描和检索核心 Pylint 通过 |
+| `model-service/src/knowagent_model/`、`model-service/pyproject.toml` | `/v1/rerank`、FlagEmbedding 运行时、资源限制、健康降级和 optional extra | 代码与自动化完成；本机依赖安装/真实模型推理收尾中，目标 Linux 锁待资源信息 |
+| `frontend/src/features/auth/UserHomePage.tsx`、`frontend/src/api/types.ts`、`frontend/src/styles.css` | 回答/拒答降级原因保存、文案和响应式 Alert | 组件回归与真实向量降级浏览器链路通过 |
+| `docs/engineering/04-tech-decisions.md`、`docs/engineering/11-project-structure.md`、`docs/product/06-roadmap.md`、`docs/product/15-frontend-design.md`、`docs/operations/07-local-development.md` | TD-012、Phase 3 进度、模块/API、UI 与本地运行说明 | 已同步 |
+| `docs/operations/09-runtime-resource-inventory.md` | 系统基线、宿主机/Docker/模型/Python 资源与缺口清单 | 已完成只读盘点；未安装或下载资源 |
 
 ## 8. 已运行验证
 
@@ -259,7 +269,10 @@
 | Phase 2 qwen3-max 全量测试与 API 集成验收 | 通过 | 后端 250 项 + 21 skip（87.64%）；前端 42 项；model-service 39 项 + 1 skip（90.58%）；Phase 2 live 2 项（qwen3-max，34.87s）；Agent/Tickets API live 18 项（真实 PostgreSQL 17 `knowagent_api_integration` 库，5.57s）；Phase 1 live 1 项（真实 MinIO/S3）；mypy strict 122 文件零错误；Bandit 中高危 0；test_agent_api CSRF 头修复已提交 `d9ca72b` |
 | Phase 2 最终代码/静态验证 | 通过 | 后端 275 passed / 24 skipped，覆盖率 86.56%；125 个源文件 mypy strict 零错误；Black 检查 168 个文件清洁，isort 和 diff 检查通过。前端默认完整测试 47/47，TypeScript、ESLint、生产构建通过 |
 | Phase 2 Worker/SSE/API 真实集成 | 通过 | `qwen3.5-27b` + PostgreSQL 17 + Redis + Ollama bge-m3：23 passed、6 warnings、36.69 秒；Alembic upgrade/check 无漂移；覆盖真实 Worker→Embedding、增量 grounded stream、token 隔离/单次消费、Agent/Tickets API 和审核回流 |
-| Phase 2 浏览器检查 | 部分通过 | 本地服务经 Vite→API 代理加载登录页；开发库 0 个账号，未注入临时账号，问答/工单业务页待实际测试账号人工验收 |
+| Phase 3 显式降级真实浏览器检查 | 通过（向量降级拒答路径） | 本地 `visual.tester` 经真实 PostgreSQL 17/Redis/API/SSE 完成首次改密、系统选择、向量不可用回退关键词、拒答建单；1280x720 与 390x844 Alert 无横向溢出/重叠。Rerank 成功/失败回答路径由组件测试覆盖，真实模型路径待补 |
+| Phase 3 三端自动化 | 通过（前端覆盖率门禁除外） | 后端 284 passed / 24 skipped（86.64%）；model-service 49 passed / 1 skipped（85.63%）；前端 47/47，TypeScript、ESLint、生产构建通过。前端全局 branch/function 覆盖率仍低于 80% |
+| Phase 3 静态与安全检查 | 通过（本次范围） | Backend 126 源文件、model-service 8 源文件 mypy strict 零错误；相关格式清洁；检索核心 Pylint 10.00/10；双后端 Bandit 中高危 0 |
+| Phase 3 本机/Docker 资源盘点 | 完成 | M1/8 GB；Python/Node/PostgreSQL/Redis/MinIO 版本已核对；`bge-m3` Docker 权重和两套 Rerank 本地权重已确认；四个 Python 环境无 Rerank 运行时，Docker 无 TEI |
 
 ## 9. 未运行验证与风险
 
@@ -273,7 +286,7 @@
 8. Phase 2 迁移已在本地 PostgreSQL 17.10 升级到 `c1738febb896`，JSONB、向量列与复合外键成功落库；迁移锁时长、已有生产量级回填和查询计划仍待类生产数据验证。
 9. Phase 2 功能、问答/SSE、工单 API、文档索引 Worker 和真实 pgvector/Embedding/Qwen 组合联调已通过；HNSW 在生产模型维度最终确认前不创建。剩余关闭门禁是 AC-004/AC-005 真实评测数据和业务页人工验收。
 10. PID 启动身份的沙箱外受控测试因审批服务 503 未获授权，`shellcheck` 当前不可用；脚本已通过 Bash 语法和 diff 检查，仍需在本地运行一次“伪造过期启动时间后 stop 不发送信号”的复验。model-service 全目录 Black 检查另有未改动 `ollama.py` 的既有格式差异，本次变更文件清洁。
-11. 真实 PostgreSQL/Redis/Qwen SSE 与 Worker 端到端已经通过；前端 jsdom 仍以 `FakeEventSource` 做组件回归。真实浏览器已加载登录页，但开发库无账号，未验证登录后的问答/工单交互。
+11. 真实 PostgreSQL/Redis/Qwen SSE 与 Worker 端到端已经通过；前端 jsdom 仍以 `FakeEventSource` 做回答和 Rerank 降级组件回归。真实浏览器已覆盖登录后的向量降级拒答与建单，带引用回答、Rerank 成功/失败和工单管理仍待真实业务数据。
 12. AC-004/AC-005 评测 CLI 已就绪，但仓库没有至少 50 条真实标注 ESB 可回答问题和真实无知识问题集；任何通过数字在数据到位前都不成立。
 
 ## 10. 继续开发建议
@@ -281,7 +294,7 @@
 新对话或新开发者接手时，建议下一步：
 
 1. 先阅读 `docs/development/21-phase2-integration-acceptance.md`、`22-phase2-evaluation.md` 及 `agent`/`tickets` 模块，避免重复已经通过的 SSE/Worker 真实集成工作。
-2. 下一步取得真实评测集并运行 `knowagent-evaluate-phase2`；随后使用实际测试账号补问答/工单页面人工记录。两项通过后再关闭 Phase 2。
+2. 下一步先按 `docs/operations/09-runtime-resource-inventory.md` 拆分本地模型加载路径，再确认依赖安装；随后完成真实推理和已发布知识的 Rerank 页面路径。并行取得真实评测集运行 `knowagent-evaluate-phase2`，两项均需记录真实质量/资源数据。
 
 ## 11. 接手时必须先读
 

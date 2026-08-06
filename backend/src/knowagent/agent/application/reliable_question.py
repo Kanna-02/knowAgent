@@ -29,7 +29,7 @@ from knowagent.agent.domain.models import (
 )
 from knowagent.common.errors import ConflictError, ProviderUnavailableError, ValidationError
 from knowagent.retrieval.application.evidence import EvidenceOrganizer
-from knowagent.retrieval.domain.models import EvidenceBundle, RetrievalResult
+from knowagent.retrieval.domain.models import RetrievalResult
 
 GROUNDING_FAILURE_CODES = {
     "ANSWER_CITATION_REQUIRED",
@@ -194,6 +194,7 @@ class ReliableQuestionService:  # pylint: disable=too-few-public-methods,too-man
                     kind=QuestionStreamEventKind.REFUSED,
                     payload=replay.decision,
                     run_id=run_id,
+                    degraded_reasons=replay.degraded_reasons,
                 )
             return
 
@@ -221,6 +222,7 @@ class ReliableQuestionService:  # pylint: disable=too-few-public-methods,too-man
                 kind=QuestionStreamEventKind.REFUSED,
                 payload=refusal.decision,
                 run_id=run_id,
+                degraded_reasons=refusal.decision.degraded_reasons,
             )
             return
 
@@ -246,6 +248,7 @@ class ReliableQuestionService:  # pylint: disable=too-few-public-methods,too-man
                 kind=QuestionStreamEventKind.REFUSED,
                 payload=refusal.decision,
                 run_id=run_id,
+                degraded_reasons=refusal.decision.degraded_reasons,
             )
             return
 
@@ -298,6 +301,7 @@ class ReliableQuestionService:  # pylint: disable=too-few-public-methods,too-man
                 kind=QuestionStreamEventKind.REFUSED,
                 payload=refusal.decision,
                 run_id=run_id,
+                degraded_reasons=refusal.decision.degraded_reasons,
             )
 
     def _replay_answer(

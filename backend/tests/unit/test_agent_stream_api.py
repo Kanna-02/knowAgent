@@ -1,10 +1,18 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
-from knowagent.agent.api.router import _consume_sse_token, _sse_token_key
+from knowagent.agent.api.router import _consume_sse_token, _render_event, _sse_token_key
 from knowagent.agent.api.schemas import SseAuthToken
+from knowagent.agent.domain.models import (
+    EvidenceDecision,
+    EvidenceDecisionOutcome,
+    EvidenceReasonCode,
+    QuestionStreamEvent,
+    QuestionStreamEventKind,
+)
 
 
 class FakeRedis:
@@ -60,3 +68,39 @@ def test_sse_token_rejects_payload_bound_to_another_account() -> None:
     )
 
     assert _consume_sse_token(redis, token=mismatched.token, account_id=account_id) is None
+
+
+def test_refused_sse_payload_preserves_explicit_degradation_reasons() -> None:
+    run_id = uuid4()
+    system_id = uuid4()
+    decision = EvidenceDecision(
+        id=uuid4(),
+        run_id=run_id,
+        system_id=system_id,
+        query="如何发布？",
+        normalized_query="如何发布",
+        outcome=EvidenceDecisionOutcome.INSUFFICIENT,
+        reason_codes=(EvidenceReasonCode.NO_EVIDENCE,),
+        score=None,
+        applied_score_threshold=0.015,
+        policy_version="evidence-v1",
+        candidates=(),
+        degraded_reasons=("VECTOR_UNAVAILABLE", "RERANK_UNAVAILABLE"),
+        decided_at=datetime.now(UTC),
+        ticket_id=uuid4(),
+    )
+    rendered = _render_event(
+        QuestionStreamEvent(
+            kind=QuestionStreamEventKind.REFUSED,
+            payload=decision,
+            run_id=run_id,
+            degraded_reasons=decision.degraded_reasons,
+        ),
+        system_id=system_id,
+        question="如何发布？",
+    )
+
+    assert rendered is not None
+    payload = json.loads(rendered.decode().removeprefix("data: "))
+    assert payload["type"] == "refused"
+    assert payload["degraded_reasons"] == ["VECTOR_UNAVAILABLE", "RERANK_UNAVAILABLE"]

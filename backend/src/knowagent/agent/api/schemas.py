@@ -241,6 +241,7 @@ class RefusedEvent(BaseModel):
     reason_codes: tuple[EvidenceReasonCode, ...]
     policy_version: str
     decided_at: datetime
+    degraded_reasons: tuple[str, ...] = ()
 
 
 class StreamErrorEvent(BaseModel):

@@ -17,6 +17,40 @@
 
 ## 功能变更记录
 
+### 2026-08-06 - Phase 3 运行资源盘点与下载门禁
+
+类型：文档 / 运维
+
+变更说明：
+
+1. 新增 `docs/operations/09-runtime-resource-inventory.md`，分别记录系统所需资源、宿主机工具链/服务/Python 环境、模型缓存、Docker 容器/镜像/卷和缺口处理顺序。
+2. 确认 Docker `deploy_ollama-models` 已包含 digest 前缀为 `79076464` 的 `bge-m3` 1.158 GB 权重；确认 `knowledge-rag/deploy/models/` 已有原生和 ONNX 两套约 2.1 GB 的 `bge-reranker-v2-m3` 权重。
+3. 确认四个现有 Python 虚拟环境均无 FlagEmbedding/PyTorch/Transformers/ONNX Runtime，Docker 无 TEI 镜像或容器；当前缺口是 Rerank 推理运行时，不是模型权重。
+4. 终止未完成的 `model-service[rerank]` pip 安装，建立“先拆分模型 ID/本地加载路径，再确认依赖树和缓存命中，最后安装运行时”的门禁；未经再次确认不下载模型权重。
+
+验证方式：只读核对 macOS 硬件、磁盘、四个 Python 环境、项目运行目录、Hugging Face/ModelScope/Ollama 缓存、PostgreSQL 17.10 与扩展、Redis 8.10、Docker 容器/镜像/卷和 Ollama `/api/tags`；`bge-m3` digest 与项目配置一致，Rerank 两套权重的主文件大小已记录。未安装依赖、未启动新容器、未下载模型权重。
+
+后续注意：当前 `KNOWAGENT_MODEL_RERANK_MODEL` 同时作为 API 模型 ID 和 FlagEmbedding 加载参数，复用本地绝对路径前需拆出独立加载路径配置；真实模型加载、峰值内存和延迟仍未验证。
+
+### 2026-08-06 - Phase 3 混合检索调优、Rerank 和显式降级
+
+类型：新增 / 变更 / 测试
+
+相关需求：REQ-005、REQ-006、REQ-009、REQ-014；AC-004、AC-005、AC-008。
+
+变更说明：
+
+1. `BasicRetrievalService` 将固定 RRF 扩展为关键词/向量可配置加权 RRF，并增加 Rerank provider、候选上限与结果 top-k；Rerank 输出只按原候选索引回填，不改变来源快照和 `system_id` 隔离边界。
+2. 新增严格 HTTP Rerank 契约：请求校验空文本与 top-k，响应校验模型名、版本、结果数量、有限分数、唯一/范围内索引和降序；任何网络、状态码、JSON 或契约异常统一映射为可降级的 `RERANK_UNAVAILABLE`。
+3. `model-service` 新增 `/v1/rerank` 和 `FlagEmbeddingRerankService`，采用延迟模型加载、线程执行、并发限制、输入/输出资源上限和脱敏耗时日志；`FlagEmbedding==1.4.0` 仅放入 `rerank` 可选依赖。Embedding 失败 readiness 返回 `503 not_ready`，仅 Rerank 失败返回 `200 degraded`。
+4. 显式降级形成闭环：向量失败回退关键词，Rerank 失败回退加权 RRF，两者同时失败保留两个原因；回答、拒答和重放 SSE 均携带 `degraded_reasons`，前端在回答/拒答前分别显示“仅使用关键词检索”或“使用基础融合排序”。
+5. 新增加权 RRF、Rerank 成功排序、非法响应、Rerank 回退、双重降级、模型服务资源上限/健康状态/输出校验、四条拒答路径字段传播和前端回答/拒答提示回归测试。
+6. 创建仅用于本机验收的 `visual.tester` 普通用户、`PHASE3_TEST` 启用系统和一条拒答工单；通过真实 PostgreSQL 17、Redis、API/SSE 和浏览器验证首次改密、系统选择、向量故障降级、拒答建单及桌面/移动布局。测试账号不属于迁移或仓库种子数据。
+
+验证方式：后端全量 284 passed / 24 skipped，覆盖率 86.64%；model-service 49 passed / 1 skipped，覆盖率 85.63%；前端 47/47 通过。Backend 126 个源文件、model-service 8 个源文件 `mypy --strict` 零错误；TypeScript、ESLint、前端生产构建通过；相关 Python/TypeScript 文件 Black/isort/Prettier 清洁；检索核心 Pylint 10.00/10；双后端 Bandit 中高危 0。真实浏览器在 1280x720 与 390x844 验证降级 Alert 无横向溢出或重叠，并完成真实拒答工单链路。
+
+后续注意：前端全局覆盖率门禁仍因既有 `TicketsPage` 缺口失败（statements 82.56%、branches 75.12%、functions 73.75%、lines 84.64%）；`npm audit` 仍有 React Router RSC 两项 high，自动修复会产生 breaking downgrade，未自动执行。PyTorch/Transformers 传递依赖和真实 `BAAI/bge-reranker-v2-m3` 推理仍需结合本机安装结果及目标 Linux CPU/内存/GPU 信息验收；真实 ESB 质量收益必须使用 Phase 2 评测集测量，不能由合成用例替代。
+
 ### 2026-08-05 - 补齐 Phase 2 流式安全、可恢复索引、评测门禁与真实集成
 
 类型：新增 / 修复 / 测试

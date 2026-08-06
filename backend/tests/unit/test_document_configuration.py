@@ -137,7 +137,13 @@ def test_llm_and_retrieval_settings_load_user_compatible_environment_names(
     monkeypatch.setenv("KNOWAGENT_EMBEDDING_API_BASE", "http://model-service:8100/v1")
     monkeypatch.setenv("KNOWAGENT_EMBEDDING_MODEL", "bge-m3")
     monkeypatch.setenv("KNOWAGENT_EMBEDDING_BATCH_SIZE", "16")
+    monkeypatch.setenv("KNOWAGENT_RERANK_API_BASE", "http://rerank:8100/v1")
+    monkeypatch.setenv("KNOWAGENT_RERANK_MODEL", "BAAI/bge-reranker-v2-m3")
+    monkeypatch.setenv("KNOWAGENT_RERANK_TIMEOUT_SECONDS", "7")
     monkeypatch.setenv("KNOWAGENT_RETRIEVAL_RESULT_TOP_K", "6")
+    monkeypatch.setenv("KNOWAGENT_RETRIEVAL_RERANK_TOP_K", "8")
+    monkeypatch.setenv("KNOWAGENT_RETRIEVAL_KEYWORD_WEIGHT", "1.5")
+    monkeypatch.setenv("KNOWAGENT_RETRIEVAL_VECTOR_WEIGHT", "2")
     monkeypatch.setenv("KNOWAGENT_EVIDENCE_POLICY_VERSION", "esb-evidence-v2")
     monkeypatch.setenv("KNOWAGENT_EVIDENCE_MIN_FUSED_SCORE", "0.02")
     monkeypatch.setenv("KNOWAGENT_EVIDENCE_MIN_SCORE_GAP", "0.001")
@@ -152,7 +158,12 @@ def test_llm_and_retrieval_settings_load_user_compatible_environment_names(
     assert settings.llm.configured is True
     assert settings.retrieval.embedding_base_url == "http://model-service:8100/v1"
     assert settings.retrieval.embedding_batch_size == 16
+    assert settings.retrieval.rerank_base_url == "http://rerank:8100/v1"
+    assert settings.retrieval.rerank_timeout_seconds == 7
     assert settings.retrieval.result_top_k == 6
+    assert settings.retrieval.rerank_top_k == 8
+    assert settings.retrieval.keyword_weight == 1.5
+    assert settings.retrieval.vector_weight == 2
     assert settings.evidence_policy.policy_version == "esb-evidence-v2"
     assert settings.evidence_policy.minimum_fused_score == 0.02
     assert settings.evidence_policy.minimum_score_gap == 0.001
@@ -168,6 +179,10 @@ def test_llm_and_retrieval_settings_reject_invalid_boundaries() -> None:
         RetrievalSettings(result_top_k=0)
     with pytest.raises(ValueError, match="result_top_k"):
         RetrievalSettings(keyword_top_k=2, vector_top_k=2, result_top_k=5)
+    with pytest.raises(ValueError, match="rerank limits"):
+        RetrievalSettings(result_top_k=10, rerank_top_k=9)
+    with pytest.raises(ValueError, match="weights"):
+        RetrievalSettings(keyword_weight=0)
     with pytest.raises(ValueError, match="evidence score"):
         EvidencePolicySettings(minimum_fused_score=-0.1)
     with pytest.raises(ValueError, match="multiplier"):

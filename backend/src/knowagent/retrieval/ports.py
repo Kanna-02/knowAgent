@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Protocol
 from uuid import UUID
 
-from knowagent.retrieval.domain.models import EmbeddingBatch, SearchHit
+from knowagent.retrieval.domain.models import EmbeddingBatch, RerankBatch, SearchHit
 
 # Provider ports intentionally expose one operation per retrieval channel.
 # pylint: disable=too-few-public-methods
@@ -27,6 +27,16 @@ class VectorSearchProvider(Protocol):
         model_version: str,
         limit: int,
     ) -> tuple[SearchHit, ...]: ...
+
+
+class RerankProvider(Protocol):
+    async def rerank(
+        self,
+        *,
+        query: str,
+        documents: tuple[str, ...],
+        top_k: int,
+    ) -> RerankBatch: ...
 
 
 class RetrievalMetrics(Protocol):

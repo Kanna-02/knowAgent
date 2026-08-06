@@ -2,7 +2,7 @@
 
 > 状态：架构方案已于 2026-08-02 通过用户确认门禁。
 >
-> 基线：本方案落实 TD-001 至 TD-011，并覆盖 REQ-001 至 REQ-018。
+> 基线：本方案落实 TD-001 至 TD-012，并覆盖 REQ-001 至 REQ-018。
 
 ## 1. 架构结论
 
@@ -86,13 +86,13 @@ conversations/tickets/documents <- analytics
 | `documents` | 上传、版本、解析、结构化切分、入库任务、发布/下线 | `DocumentService`、`DocumentParser` | `systems`, `platform` |
 | `knowledge` | 文档片段、工单知识、来源定位、索引版本和发布视图 | `KnowledgeIndexService`（基础 Embedding 写回已实现）、`CitationResolver` | `documents`, `systems` |
 | `conversations` | 会话、消息、回答、引用快照、运行记录、多轮上下文 | `ConversationService`、`RunEventStream` | `identity`, `systems` |
-| `retrieval` | 查询改写、关键词/向量混合召回、Rerank、证据候选组织 | `BasicRetrievalService`、`EvidenceOrganizer` 已实现 | `knowledge`, `conversations` |
+| `retrieval` | 查询改写、关键词/向量混合召回、Rerank、证据候选组织 | `BasicRetrievalService` 已实现加权 RRF、Rerank 与两级显式降级；`EvidenceOrganizer` 已实现 | `knowledge`, `conversations` |
 | `agent` | LangGraph 问答流程、意图分类、证据决策、降级分流、回答与引用校验 | `GroundedAnswerService`、`DeterministicEvidencePolicy`、`ReliableQuestionService`、`AnswerSnapshotService` 已实现；`QuestionWorkflow` 待补 | `retrieval`, `conversations`, Provider ports |
 | `tickets` | 自动建单、分派、回复、追加、关闭/重开、候选知识审核回流 | 自动建单、工单状态机、审核后向量发布已实现；API 编排待补 | `systems`, `conversations`, `knowledge` |
 | `notifications` | Outbox 消费、模板、公司通知 API、重试和人工重试 | `NotificationDispatcher` | `tickets`, `platform` |
 | `analytics` | 高频问题、知识缺口、使用统计、离线评测和版本对比 | 查询服务与聚合任务 | `conversations`, `tickets`, `documents` |
 | `audit` | 认证、权限、知识和工单关键操作审计 | `AuditSink`、审计查询 | `common`, `platform` |
-| `model-service` | Embedding/Rerank 推理适配、批处理、模型元数据和健康检查 | `/v1/embeddings` 已实现；`/v1/rerank` 待补 | 本地基线依赖 Ollama HTTP，不依赖业务模块 |
+| `model-service` | Embedding/Rerank 推理适配、批处理、模型元数据和健康检查 | `/v1/embeddings` 与 `/v1/rerank` 已实现；Rerank 使用可选 `FlagEmbedding + PyTorch` 运行时 | Embedding 依赖 Ollama HTTP；Rerank 模型独立延迟加载，不依赖业务模块 |
 | `web` | 用户问答、引用与工单；管理端知识、系统、账号、审计和分析 | 浏览器 UI | API 契约 |
 
 模块职责语义重叠低于 30%。`documents` 管原文件生命周期，`knowledge` 管可检索发布视图；`retrieval` 只产出证据，`agent` 决定如何回答；`tickets` 管人工闭环，`notifications` 只管可靠投递。
@@ -309,12 +309,12 @@ class AuthorizationService(Protocol):
 
 - `POST /v1/embeddings`：`EmbeddingRequest { model, texts[] }` -> `{ model, model_version, dimension, normalized, vectors[][] }`。
 - `POST /v1/rerank`：`RerankRequest { model, query, documents[], top_k }` -> `{ model, model_version, results[{ index, score }] }`。
-- `GET /health/live`：进程存活；`GET /health/ready`：模型已加载且可推理。
+- `GET /health/live`：进程存活；`GET /health/ready`：Embedding 不可用返回 `503 not_ready`，仅 Rerank 不可用返回 `200 degraded`。
 - 请求必须限制文本数、单文本长度、总字符数和并发；维度与数据库当前索引配置不一致时拒绝写入。
 
 Provider 可由内部 HTTP、自建运行时或后续公司 API 实现；领域服务只依赖上述契约。
 
-当前本地实现由 `model-service` 调用 Ollama：优先使用 `/api/embed`，旧版回退 `/api/embeddings`，再统一校验维度并归一化。该适配只存在于模型服务边界，`backend` 不感知 Ollama 协议；生产可替换为 PyTorch、ONNX Runtime 或其他内部服务而不改变主应用契约。
+当前本地 Embedding 实现由 `model-service` 调用 Ollama：优先使用 `/api/embed`，旧版回退 `/api/embeddings`，再统一校验维度并归一化。Rerank 实现通过可选 `FlagEmbedding==1.4.0` extra 延迟加载 `BAAI/bge-reranker-v2-m3`，在线程中执行受并发限制的 PyTorch 推理。两种适配都只存在于模型服务边界，`backend` 不感知供应商协议；生产可替换为 ONNX Runtime 或其他内部服务而不改变主应用契约。
 
 ## 6. 数据模型
 
@@ -395,12 +395,12 @@ DRAFT -> SUBMITTED -> APPROVED -> PUBLISHING -> PUBLISHED
 
 ### 7.2 问答、引用和拒答
 
-Phase 2 基础实现边界：`retrieval` 已提供 PostgreSQL 关键词/向量查询、`DOCUMENT/TICKET` 统一来源检索、数据库层系统/发布状态过滤、RRF 和可观测降级；`agent` 已提供版本化 Prompt、Qwen 兼容流、声明级引用校验以及按 `run_id + system_id` 持久化的答案/引用快照；`tickets` 已提供拒答建单、完整状态机和审核后 Embedding 成功才原子发布的知识回流。问答 API/SSE、会话/消息持久化、完整 `QuestionWorkflow` 和工单 API 仍待实现。
+当前实现边界：`retrieval` 已提供 PostgreSQL 关键词/向量查询、`DOCUMENT/TICKET` 统一来源检索、数据库层系统/发布状态过滤、可配置加权 RRF、有限候选 Rerank 和可观测两级降级；`agent` 已提供版本化 Prompt、Qwen 兼容流、声明级引用校验、问答 API/SSE 以及按 `run_id + system_id` 持久化的答案/引用快照；`tickets` 已提供拒答建单、完整状态机、API 和审核后 Embedding 成功才原子发布的知识回流。多轮 `QuestionWorkflow`、通知和运营分析仍待后续 Phase 3 项实现。
 
 1. 创建会话时固定 `system_id`；每次提问再次校验用户对该系统的访问权限。
 2. 事务持久化问题消息、`question_run` 和任务派发事实，提交后投递 Celery `qa` 队列并立即返回 run id。
 3. 交互 Worker 通过租约领取运行，执行工作流；工作流识别意图并基于有限历史改写检索问题，原问题始终保留。
-4. Retrieval 在数据库层限定 `system_id` 和发布状态，执行关键词/向量召回、去重融合；Rerank 不可用时记录降级并使用融合分数。
+4. Retrieval 在数据库层限定 `system_id` 和发布状态，执行关键词/向量召回和加权 RRF 去重融合；Rerank 只处理有限候选，不可用或响应非法时记录 `RERANK_UNAVAILABLE` 并保留融合顺序，向量不可用时记录 `VECTOR_UNAVAILABLE` 并只使用关键词。
 5. EvidencePolicy 基于覆盖度、相关度、来源一致性和阈值版本返回 `SUFFICIENT/INSUFFICIENT/CONFLICTING/UNAVAILABLE`。
 6. `SUFFICIENT` 才允许 LLM 基于证据生成；CitationValidator 检查答案事实是否绑定证据，失败则拒答或降级，不补造引用。
 7. 在一个数据库事务中持久化答案、引用文本/定位快照、运行结果和最终事件；SSE 读取持久事件，Redis 只加速实时唤醒。

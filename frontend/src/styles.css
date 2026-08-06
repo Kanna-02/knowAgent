@@ -466,6 +466,19 @@ p {
   margin-bottom: var(--space-3);
 }
 
+.question-stream-result,
+.question-stream-answer-wrap {
+  width: 100%;
+  margin-top: var(--space-6);
+}
+
+.question-stream-result .ant-alert,
+.question-stream-answer-wrap .ant-alert,
+.question-stream-answer-wrap .question-stream-answer {
+  width: 100%;
+  margin-top: 0;
+}
+
 .cursor-blink {
   display: inline-block;
   animation: cursor-blink 1s steps(2) infinite;

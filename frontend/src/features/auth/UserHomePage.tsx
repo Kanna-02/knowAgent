@@ -1,22 +1,10 @@
-import {
-  Alert,
-  Button,
-  Input,
-  Select,
-  Space,
-  Tag,
-  Tooltip,
-  Typography,
-} from "antd";
+import { Alert, Button, Input, Select, Space, Tag, Tooltip, Typography } from "antd";
 import { Loader2, MessageSquareText, RefreshCw, Send } from "lucide-react";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { apiClient } from "../../api/client";
-import type {
-  BusinessSystemView,
-  QuestionStreamEvent,
-} from "../../api/types";
+import type { BusinessSystemView, QuestionStreamEvent } from "../../api/types";
 import { FeedbackState } from "../../shared/FeedbackState";
 import { toUiError, type UiError } from "../../shared/uiError";
 import { useAuth } from "./authContextValue";
@@ -26,6 +14,7 @@ interface StreamState {
   streamedText: string;
   ticketId: string | null;
   errorMessage: string | null;
+  degradedReasons: string[];
 }
 
 const INITIAL_STREAM: StreamState = {
@@ -33,11 +22,13 @@ const INITIAL_STREAM: StreamState = {
   streamedText: "",
   ticketId: null,
   errorMessage: null,
+  degradedReasons: [],
 };
 
 export function UserHomePage(): ReactNode {
   const { user } = useAuth();
-  const roleLabel = user?.role === "SYSTEM_OWNER" ? "系统负责人" : user?.role === "ADMIN" ? "管理员" : "普通用户";
+  const roleLabel =
+    user?.role === "SYSTEM_OWNER" ? "系统负责人" : user?.role === "ADMIN" ? "管理员" : "普通用户";
   const [systems, setSystems] = useState<BusinessSystemView[]>([]);
   const [selectedSystemId, setSelectedSystemId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -102,6 +93,7 @@ export function UserHomePage(): ReactNode {
         case "retrieval_started":
           return { ...prev, phase: "streaming", errorMessage: null };
         case "evidence_ready":
+          return { ...prev, degradedReasons: parsed.degraded_reasons };
         case "decision":
           return prev;
         case "answer_delta":
@@ -112,12 +104,14 @@ export function UserHomePage(): ReactNode {
             phase: "completed",
             // The fully structured answer supersedes the accumulated deltas.
             streamedText: parsed.answer.text,
+            degradedReasons: parsed.degraded_reasons,
           };
         case "refused":
           return {
             ...prev,
             phase: "refused",
             ticketId: parsed.ticket_id,
+            degradedReasons: parsed.degraded_reasons,
           };
         case "error":
           return { ...prev, phase: "error", errorMessage: parsed.message };
@@ -135,6 +129,7 @@ export function UserHomePage(): ReactNode {
       streamedText: "",
       ticketId: null,
       errorMessage: null,
+      degradedReasons: [],
     });
     setSubmitting(true);
     try {
@@ -216,11 +211,11 @@ export function UserHomePage(): ReactNode {
           title={systems.length ? "请选择要咨询的业务系统" : "暂无可用业务系统"}
         />
       ) : (
-       <div className="question-composer">
+        <div className="question-composer">
           <p className="composer-context">
             当前系统：<strong>{selectedSystem.name}</strong>
           </p>
-         <Input.TextArea
+          <Input.TextArea
             value={question}
             onChange={(event) => setQuestion(event.target.value)}
             placeholder="输入问题（最多 2000 字）"
@@ -304,7 +299,13 @@ function QuestionStreamView({ state }: { state: StreamState }): ReactNode {
   }
   if (state.phase === "refused") {
     return (
-      <div className="question-stream-refused" aria-label="已拒答并创建工单">
+      <Space
+        direction="vertical"
+        size="middle"
+        className="question-stream-result"
+        aria-label="已拒答并创建工单"
+      >
+        <RetrievalDegradation reasons={state.degradedReasons} />
         <Alert
           type="warning"
           showIcon
@@ -321,31 +322,59 @@ function QuestionStreamView({ state }: { state: StreamState }): ReactNode {
             )
           }
         />
-      </div>
+      </Space>
     );
   }
   if (state.phase === "streaming" && state.streamedText === "") {
     return (
-      <div className="question-stream-streaming" aria-label="正在检索证据">
+      <Space
+        direction="vertical"
+        size="middle"
+        className="question-stream-result"
+        aria-label="正在检索证据"
+      >
+        <RetrievalDegradation reasons={state.degradedReasons} />
         <Alert type="info" showIcon message="正在检索证据..." />
-      </div>
+      </Space>
     );
   }
   return (
-    <div className="question-stream-answer" aria-label="问答回答">
-      <div className="answer-toolbar">
-        <Space>
-          <MessageSquareText size={16} />
-          <strong>回答</strong>
-          <Tag color={state.phase === "completed" ? "success" : "processing"}>
-            {state.phase === "completed" ? "已完成" : "生成中"}
-          </Tag>
-        </Space>
+    <Space direction="vertical" size="middle" className="question-stream-answer-wrap">
+      <RetrievalDegradation reasons={state.degradedReasons} />
+      <div className="question-stream-answer" aria-label="问答回答">
+        <div className="answer-toolbar">
+          <Space>
+            <MessageSquareText size={16} />
+            <strong>回答</strong>
+            <Tag color={state.phase === "completed" ? "success" : "processing"}>
+              {state.phase === "completed" ? "已完成" : "生成中"}
+            </Tag>
+          </Space>
+        </div>
+        <Typography.Paragraph style={{ whiteSpace: "pre-wrap" }}>
+          {state.streamedText}
+          {state.phase === "streaming" ? <span className="cursor-blink">▍</span> : null}
+        </Typography.Paragraph>
       </div>
-      <Typography.Paragraph style={{ whiteSpace: "pre-wrap" }}>
-        {state.streamedText}
-        {state.phase === "streaming" ? <span className="cursor-blink">▍</span> : null}
-      </Typography.Paragraph>
-    </div>
+    </Space>
+  );
+}
+
+function RetrievalDegradation({ reasons }: { reasons: string[] }): ReactNode {
+  if (reasons.length === 0) return null;
+  const descriptions: string[] = [];
+  if (reasons.includes("VECTOR_UNAVAILABLE")) {
+    descriptions.push("向量检索暂不可用，当前仅使用关键词检索");
+  }
+  if (reasons.includes("RERANK_UNAVAILABLE")) {
+    descriptions.push("重排服务暂不可用，当前使用基础融合排序");
+  }
+  return (
+    <Alert
+      type="warning"
+      showIcon
+      message="检索已降级"
+      description={descriptions.length > 0 ? descriptions.join("；") : "部分检索能力暂不可用"}
+    />
   );
 }

@@ -61,7 +61,9 @@ Phase 2 关键变量：
 | `KNOWAGENT_EMBEDDING_MODEL` | 向量链路必需 | 默认 `bge-m3`；响应模型名必须一致 |
 | `KNOWAGENT_EMBEDDING_TIMEOUT_SECONDS` | 否 | 默认 15 秒 |
 | `KNOWAGENT_EMBEDDING_BATCH_SIZE` | 否 | 索引批大小，默认 32 |
-| `KNOWAGENT_RETRIEVAL_*` | 否 | 关键词/向量/result top-k 与 RRF 参数 |
+| `KNOWAGENT_RERANK_API_BASE` / `KNOWAGENT_RERANK_MODEL` | Rerank 链路必需 | 默认模型服务 `/v1` 地址与 `BAAI/bge-reranker-v2-m3`；不可用时显式回退加权 RRF |
+| `KNOWAGENT_RERANK_TIMEOUT_SECONDS` | 否 | 后端调用 Rerank 超时，默认 5 秒 |
+| `KNOWAGENT_RETRIEVAL_*` | 否 | 关键词/向量/result top-k、RRF、通道权重、Rerank 候选/结果 top-k；权重必须为有限正数 |
 | `KNOWAGENT_EVIDENCE_MAX_*` | 否 | 证据条数和字符预算 |
 | `KNOWAGENT_EVIDENCE_POLICY_VERSION` | 否 | 证据判定策略版本，默认 `evidence-v1` |
 | `KNOWAGENT_EVIDENCE_MIN_FUSED_SCORE` / `KNOWAGENT_EVIDENCE_MIN_SCORE_GAP` | 否 | 最低融合分数和头部候选最小差值；必须为非负数 |
@@ -115,7 +117,7 @@ celery -A knowagent.worker.celery_app:celery_app beat --loglevel=INFO
 
 Celery 消息只携带 `job_id`；业务状态以 PostgreSQL 为准。Beat 定期恢复未派发任务、到期重试和租约过期任务，不能用 Celery result backend 判断入库是否完成。
 
-## 3. Embedding 模型服务
+## 3. Embedding / Rerank 模型服务
 
 本机已有 Docker volume `deploy_ollama-models`，其中 `bge-m3` 模型层约 1.158 GB。仅用于本地联调时，可从 `knowledge-rag/deploy` 恢复 Ollama 容器；Compose 会复用同名 volume，不重新下载模型权重：
 
@@ -137,6 +139,16 @@ set +a
 knowagent-model-service
 ```
 
+需要本地 Rerank 推理时安装可选 extra（会安装 PyTorch/Transformers 等较大依赖）：
+
+```bash
+python -m pip install -e ".[dev,rerank]"
+```
+
+安装前必须先核对 `docs/operations/09-runtime-resource-inventory.md`。2026-08-06 盘点已确认 `knowledge-rag/deploy/models/` 下存在原生和 ONNX 两套完整 Rerank 权重，因此不得重新下载模型权重。当前模型配置同时承担对外 ID 和加载路径；在拆出独立本地加载路径前，不要把 `KNOWAGENT_MODEL_RERANK_MODEL` 直接改成绝对路径。
+
+`KNOWAGENT_MODEL_RERANK_*` 配置模型名/版本、batch、最大长度、并发、FP16、device 及请求候选/字符上限。CPU/macOS 默认 `USE_FP16=false` 且不指定 device；目标 Linux 的 CPU/内存/GPU 未确认前不要照搬本机依赖树或并发值作为生产配置。
+
 Windows 使用 `py -3.11 -m venv .venv`、`.\.venv\Scripts\Activate.ps1` 和 `$env:` 形式加载变量。适配层默认监听 `127.0.0.1:8100`，Ollama 地址为 `127.0.0.1:11434`。验证：
 
 `.env` 中的 `KNOWAGENT_MODEL_OLLAMA_MODEL_DIGEST` 必须是 Ollama `/api/tags` 返回 digest 的 8-64 位十六进制前缀，`KNOWAGENT_MODEL_EMBEDDING_VERSION` 必须以同一前缀结尾。服务会在 readiness 和每次推理前核对实际模型；tag 或 digest 不匹配时返回未就绪，不生成或误标向量。`KNOWAGENT_MODEL_OLLAMA_HEALTH_TIMEOUT_SECONDS` 仅控制 `/api/tags` 检查，默认 5 秒，不受 300 秒推理超时影响。
@@ -146,7 +158,13 @@ curl http://127.0.0.1:8100/health/ready
 curl -X POST http://127.0.0.1:8100/v1/embeddings \
   -H 'Content-Type: application/json' \
   -d '{"model":"bge-m3","texts":["ESB 接口如何申请？"]}'
+
+curl -X POST http://127.0.0.1:8100/v1/rerank \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"BAAI/bge-reranker-v2-m3","query":"ESB 接口如何申请？","documents":["先提交系统接入申请。","联系值班人员重启服务。"],"top_k":2}'
 ```
+
+Rerank 响应应包含配置的 `model`、`model_version` 及按分数降序排列的唯一原候选索引。未安装 `rerank` extra 或模型加载失败时，`/health/ready` 在 Embedding 正常的前提下返回 `200 degraded`，后端问答继续使用加权 RRF；Embedding 失败仍返回 `503 not_ready`。
 
 响应应包含 `model=bge-m3`、配置的 `model_version`、`dimension=1024`、`normalized=true` 和一个向量。旧 Ollama 在 Apple Silicon 纯 CPU 上可能单条也需数十秒；本地测试应将 backend 的 `KNOWAGENT_EMBEDDING_TIMEOUT_SECONDS` 临时设为 `300`，不要把此值直接作为生产延迟目标。
 

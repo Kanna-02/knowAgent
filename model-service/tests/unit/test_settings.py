@@ -18,6 +18,9 @@ def test_settings_defaults_match_existing_local_bge_m3_volume() -> None:
     assert settings.ollama_max_concurrency == 1
     assert settings.ollama_timeout_seconds == 300.0
     assert settings.ollama_health_timeout_seconds == 5.0
+    assert settings.rerank_model == "BAAI/bge-reranker-v2-m3"
+    assert settings.rerank_batch_size == 4
+    assert settings.rerank_use_fp16 is False
 
 
 def test_settings_loads_environment_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -30,6 +33,11 @@ def test_settings_loads_environment_overrides(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setenv("KNOWAGENT_MODEL_MAX_REQUEST_TEXTS", "4")
     monkeypatch.setenv("KNOWAGENT_MODEL_PORT", "8200")
     monkeypatch.setenv("KNOWAGENT_MODEL_OLLAMA_HEALTH_TIMEOUT_SECONDS", "2.5")
+    monkeypatch.setenv("KNOWAGENT_MODEL_RERANK_MODEL", "custom-reranker")
+    monkeypatch.setenv("KNOWAGENT_MODEL_RERANK_MODEL_VERSION", "revision-1")
+    monkeypatch.setenv("KNOWAGENT_MODEL_RERANK_BATCH_SIZE", "3")
+    monkeypatch.setenv("KNOWAGENT_MODEL_RERANK_USE_FP16", "true")
+    monkeypatch.setenv("KNOWAGENT_MODEL_RERANK_DEVICE", "cuda:0")
 
     settings = ModelServiceSettings.from_environment()
 
@@ -41,6 +49,11 @@ def test_settings_loads_environment_overrides(monkeypatch: pytest.MonkeyPatch) -
     assert settings.max_request_texts == 4
     assert settings.port == 8200
     assert settings.ollama_health_timeout_seconds == 2.5
+    assert settings.rerank_model == "custom-reranker"
+    assert settings.rerank_model_version == "revision-1"
+    assert settings.rerank_batch_size == 3
+    assert settings.rerank_use_fp16 is True
+    assert settings.rerank_device == "cuda:0"
 
 
 @pytest.mark.parametrize(
@@ -58,8 +71,17 @@ def test_settings_loads_environment_overrides(monkeypatch: pytest.MonkeyPatch) -
         lambda: ModelServiceSettings(ollama_health_timeout_seconds=0),
         lambda: ModelServiceSettings(ollama_batch_size=3, max_request_texts=2),
         lambda: ModelServiceSettings(port=65_536),
+        lambda: ModelServiceSettings(rerank_batch_size=0),
+        lambda: ModelServiceSettings(rerank_device=" "),
     ],
 )
 def test_settings_rejects_invalid_values(factory: Callable[[], ModelServiceSettings]) -> None:
     with pytest.raises(ValueError):
         factory()
+
+
+def test_settings_rejects_invalid_rerank_boolean(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("KNOWAGENT_MODEL_RERANK_USE_FP16", "sometimes")
+
+    with pytest.raises(ValueError, match="KNOWAGENT_MODEL_RERANK_USE_FP16"):
+        ModelServiceSettings.from_environment()

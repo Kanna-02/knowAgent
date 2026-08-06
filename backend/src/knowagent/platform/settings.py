@@ -210,10 +210,17 @@ class RetrievalSettings:  # pylint: disable=too-many-instance-attributes
     embedding_model: str = "bge-m3"
     embedding_timeout_seconds: int = 15
     embedding_batch_size: int = 32
+    rerank_base_url: str = "http://127.0.0.1:8100/v1"
+    rerank_model: str = "BAAI/bge-reranker-v2-m3"
+    rerank_timeout_seconds: int = 5
     keyword_top_k: int = 20
     vector_top_k: int = 20
     result_top_k: int = 10
     rrf_k: int = 60
+    keyword_weight: float = 1.0
+    vector_weight: float = 1.0
+    rerank_candidate_top_k: int = 20
+    rerank_top_k: int = 10
     evidence_max_items: int = 6
     evidence_max_characters: int = 12_000
 
@@ -221,10 +228,13 @@ class RetrievalSettings:  # pylint: disable=too-many-instance-attributes
         values = (
             self.embedding_timeout_seconds,
             self.embedding_batch_size,
+            self.rerank_timeout_seconds,
             self.keyword_top_k,
             self.vector_top_k,
             self.result_top_k,
             self.rrf_k,
+            self.rerank_candidate_top_k,
+            self.rerank_top_k,
             self.evidence_max_items,
             self.evidence_max_characters,
         )
@@ -232,8 +242,21 @@ class RetrievalSettings:  # pylint: disable=too-many-instance-attributes
             raise ValueError("retrieval settings must be positive")
         if self.result_top_k > self.keyword_top_k + self.vector_top_k:
             raise ValueError("result_top_k exceeds the available retrieval candidates")
-        if not self.embedding_base_url.strip() or not self.embedding_model.strip():
-            raise ValueError("embedding provider settings must not be blank")
+        if not self.result_top_k <= self.rerank_top_k <= self.rerank_candidate_top_k:
+            raise ValueError("rerank limits must cover the configured result limit")
+        if self.rerank_candidate_top_k > self.keyword_top_k + self.vector_top_k:
+            raise ValueError("rerank candidate limit exceeds available retrieval candidates")
+        weights = (self.keyword_weight, self.vector_weight)
+        if any(not math.isfinite(value) or value <= 0 for value in weights):
+            raise ValueError("retrieval weights must be positive and finite")
+        provider_values = (
+            self.embedding_base_url,
+            self.embedding_model,
+            self.rerank_base_url,
+            self.rerank_model,
+        )
+        if any(not value.strip() for value in provider_values):
+            raise ValueError("retrieval provider settings must not be blank")
 
     @classmethod
     def from_environment(cls) -> RetrievalSettings:
@@ -244,10 +267,21 @@ class RetrievalSettings:  # pylint: disable=too-many-instance-attributes
             embedding_model=os.getenv("KNOWAGENT_EMBEDDING_MODEL", "bge-m3").strip(),
             embedding_timeout_seconds=int(os.getenv("KNOWAGENT_EMBEDDING_TIMEOUT_SECONDS", "15")),
             embedding_batch_size=int(os.getenv("KNOWAGENT_EMBEDDING_BATCH_SIZE", "32")),
+            rerank_base_url=os.getenv(
+                "KNOWAGENT_RERANK_API_BASE", "http://127.0.0.1:8100/v1"
+            ).strip(),
+            rerank_model=os.getenv("KNOWAGENT_RERANK_MODEL", "BAAI/bge-reranker-v2-m3").strip(),
+            rerank_timeout_seconds=int(os.getenv("KNOWAGENT_RERANK_TIMEOUT_SECONDS", "5")),
             keyword_top_k=int(os.getenv("KNOWAGENT_RETRIEVAL_KEYWORD_TOP_K", "20")),
             vector_top_k=int(os.getenv("KNOWAGENT_RETRIEVAL_VECTOR_TOP_K", "20")),
             result_top_k=int(os.getenv("KNOWAGENT_RETRIEVAL_RESULT_TOP_K", "10")),
             rrf_k=int(os.getenv("KNOWAGENT_RETRIEVAL_RRF_K", "60")),
+            keyword_weight=float(os.getenv("KNOWAGENT_RETRIEVAL_KEYWORD_WEIGHT", "1")),
+            vector_weight=float(os.getenv("KNOWAGENT_RETRIEVAL_VECTOR_WEIGHT", "1")),
+            rerank_candidate_top_k=int(
+                os.getenv("KNOWAGENT_RETRIEVAL_RERANK_CANDIDATE_TOP_K", "20")
+            ),
+            rerank_top_k=int(os.getenv("KNOWAGENT_RETRIEVAL_RERANK_TOP_K", "10")),
             evidence_max_items=int(os.getenv("KNOWAGENT_EVIDENCE_MAX_ITEMS", "6")),
             evidence_max_characters=int(os.getenv("KNOWAGENT_EVIDENCE_MAX_CHARACTERS", "12000")),
         )

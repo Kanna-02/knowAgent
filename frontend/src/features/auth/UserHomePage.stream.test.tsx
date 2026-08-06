@@ -133,7 +133,7 @@ describe("UserHomePage SSE stream", () => {
       type: "evidence_ready",
       run_id: "x",
       evidence: [],
-      degraded_reasons: [],
+      degraded_reasons: ["RERANK_UNAVAILABLE"],
     });
     await flush();
     source!.emit({
@@ -159,12 +159,14 @@ describe("UserHomePage SSE stream", () => {
         model: "qwen",
         prompt_version: "grounded-answer-v1",
       },
-      degraded_reasons: [],
+      degraded_reasons: ["RERANK_UNAVAILABLE"],
     });
     await flush();
 
     expect(view.container.textContent).toContain("第一段：完整答案");
     expect(view.container.textContent).toContain("已完成");
+    expect(view.container.textContent).toContain("检索已降级");
+    expect(view.container.textContent).toContain("基础融合排序");
   });
 
   it("surfaces refusal and ticket routing when evidence is insufficient", async () => {
@@ -201,10 +203,12 @@ describe("UserHomePage SSE stream", () => {
       reason_codes: ["no_evidence"],
       policy_version: "evidence-v1",
       decided_at: "2026-08-02T10:00:00Z",
+      degraded_reasons: ["VECTOR_UNAVAILABLE"],
     });
     await flush();
 
     expect(view.container.textContent).toContain("无法基于现有知识回答此问题");
     expect(view.container.textContent).toContain("工单");
+    expect(view.container.textContent).toContain("仅使用关键词检索");
   });
 });

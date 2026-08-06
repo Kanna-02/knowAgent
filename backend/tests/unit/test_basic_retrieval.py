@@ -7,7 +7,12 @@ import pytest
 from knowagent.common.errors import ProviderUnavailableError, ValidationError
 from knowagent.documents.domain.models import SourceLocator, SourceType
 from knowagent.retrieval.application.retrieval_service import BasicRetrievalService
-from knowagent.retrieval.domain.models import EmbeddingBatch, SearchHit
+from knowagent.retrieval.domain.models import (
+    EmbeddingBatch,
+    RerankBatch,
+    RerankScore,
+    SearchHit,
+)
 
 
 def locator() -> SourceLocator:
@@ -95,6 +100,34 @@ class StubRetrievalMetrics:
 
     def record_degradation(self, *, system_id: UUID, channel: str, reason: str) -> None:
         self.degradations.append((system_id, channel, reason))
+
+
+class StubRerankProvider:
+    def __init__(
+        self,
+        *,
+        scores: tuple[RerankScore, ...] = (),
+        unavailable: bool = False,
+    ) -> None:
+        self.scores = scores
+        self.unavailable = unavailable
+        self.calls: list[tuple[str, tuple[str, ...], int]] = []
+
+    async def rerank(
+        self,
+        *,
+        query: str,
+        documents: tuple[str, ...],
+        top_k: int,
+    ) -> RerankBatch:
+        self.calls.append((query, documents, top_k))
+        if self.unavailable:
+            raise ProviderUnavailableError("rerank")
+        return RerankBatch(
+            model="BAAI/bge-reranker-v2-m3",
+            model_version="revision-1",
+            results=self.scores,
+        )
 
 
 @pytest.mark.anyio
@@ -195,3 +228,93 @@ async def test_retrieve_rejects_blank_query_without_calling_providers() -> None:
         await service.retrieve(system_id=uuid4(), query="   ")
 
     assert vectors.calls == 0
+
+
+@pytest.mark.anyio
+async def test_retrieve_applies_weighted_rrf_before_reranking() -> None:
+    keyword_id, vector_id = uuid4(), uuid4()
+    reranker = StubRerankProvider(
+        scores=(RerankScore(index=1, score=0.9), RerankScore(index=0, score=0.2))
+    )
+    service = BasicRetrievalService(
+        embeddings=StubEmbeddingProvider(),
+        lexical=StubLexicalSearch((hit(keyword_id, score=0.9),)),
+        vectors=StubVectorSearch((hit(vector_id, score=0.95),)),
+        keyword_top_k=3,
+        vector_top_k=3,
+        result_top_k=2,
+        rrf_k=60,
+        metrics=StubRetrievalMetrics(),
+        reranker=reranker,
+        rerank_candidate_top_k=2,
+        rerank_top_k=2,
+        keyword_weight=2.0,
+        vector_weight=1.0,
+    )
+
+    result = await service.retrieve(system_id=uuid4(), query="如何部署？")
+
+    assert [item.chunk_id for item in result.hits] == [vector_id, keyword_id]
+    assert result.hits[0].rerank_score == 0.9
+    assert result.hits[1].rerank_score == 0.2
+    assert result.hits[1].fused_score > result.hits[0].fused_score
+    assert reranker.calls == [
+        ("如何部署？", ("部署前执行数据库迁移。", "部署前执行数据库迁移。"), 2)
+    ]
+    assert result.degraded_reasons == ()
+
+
+@pytest.mark.anyio
+async def test_retrieve_falls_back_to_weighted_fusion_when_rerank_is_unavailable() -> None:
+    shared_id, vector_only_id = uuid4(), uuid4()
+    metrics = StubRetrievalMetrics()
+    reranker = StubRerankProvider(unavailable=True)
+    service = BasicRetrievalService(
+        embeddings=StubEmbeddingProvider(),
+        lexical=StubLexicalSearch((hit(shared_id, score=0.9),)),
+        vectors=StubVectorSearch((hit(vector_only_id, score=0.95), hit(shared_id, score=0.85))),
+        keyword_top_k=3,
+        vector_top_k=3,
+        result_top_k=2,
+        rrf_k=60,
+        metrics=metrics,
+        reranker=reranker,
+        rerank_candidate_top_k=2,
+        rerank_top_k=2,
+    )
+    system_id = uuid4()
+
+    result = await service.retrieve(system_id=system_id, query="如何部署？")
+
+    assert [item.chunk_id for item in result.hits] == [shared_id, vector_only_id]
+    assert result.degraded_reasons == ("RERANK_UNAVAILABLE",)
+    assert metrics.degradations == [(system_id, "rerank", "rerank_unavailable")]
+
+
+@pytest.mark.anyio
+async def test_retrieve_preserves_vector_and_rerank_degradations_together() -> None:
+    keyword_hit = hit(uuid4(), score=0.75)
+    metrics = StubRetrievalMetrics()
+    service = BasicRetrievalService(
+        embeddings=StubEmbeddingProvider(unavailable=True),
+        lexical=StubLexicalSearch((keyword_hit,)),
+        vectors=StubVectorSearch(()),
+        keyword_top_k=3,
+        vector_top_k=3,
+        result_top_k=1,
+        rrf_k=60,
+        metrics=metrics,
+        reranker=StubRerankProvider(unavailable=True),
+        rerank_candidate_top_k=1,
+        rerank_top_k=1,
+    )
+    system_id = uuid4()
+
+    result = await service.retrieve(system_id=system_id, query="如何部署？")
+
+    assert result.hits[0].chunk_id == keyword_hit.chunk_id
+    assert result.degraded_reasons == ("VECTOR_UNAVAILABLE", "RERANK_UNAVAILABLE")
+    assert metrics.degradations == [
+        (system_id, "vector", "embedding_unavailable"),
+        (system_id, "rerank", "rerank_unavailable"),
+    ]

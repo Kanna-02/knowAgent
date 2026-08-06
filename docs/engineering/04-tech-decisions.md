@@ -261,6 +261,18 @@
 - **风险与回滚**：公司 Endpoint 的具体兼容差异仍需用隔离 Bucket 做真实契约测试。若不兼容，通过 `ObjectStore` 端口替换为厂商适配器；数据库对象 key 和任务协议保持不变，业务模块无需改写。
 - **确认**：用户于 2026-08-02 确认方案 A。
 
+### TD-012：FlagEmbedding + PyTorch Rerank 运行时与加权 RRF 降级
+
+- **日期**：2026-08-06
+- **决策**：Phase 3 Rerank 采用 `FlagEmbedding==1.4.0` 的 `FlagReranker`，由独立 `model-service` 通过 PyTorch 执行 `BAAI/bge-reranker-v2-m3` 推理；依赖放入 `model-service[rerank]` 可选依赖组，不污染只需要 Embedding 的基础安装。
+- **方案比较**：方案 A `FlagEmbedding + PyTorch` 与 BGE 模型官方接口一致、首版接入直接，但依赖树和内存占用较大；方案 B `sentence-transformers` API 通用，但增加一层封装且仍依赖 PyTorch；方案 C ONNX Runtime 运行包更轻、CPU 部署更可控，但需要额外导出、数值一致性和算子兼容验证。用户确认方案 A，ONNX 保留为目标 Linux 资源不足时的后续替代。
+- **检索排序**：关键词和向量通道先按可配置正权重执行加权 RRF，默认权重均为 `1.0`；只把受控数量的融合候选发送给 Rerank，Rerank 返回原候选索引和有限分数，后端严格校验模型、数量、唯一索引、范围和降序后才采用结果。
+- **显式降级**：Embedding 或向量查询不可用时保留关键词召回并标记 `VECTOR_UNAVAILABLE`；Rerank 不可用或响应非法时保留加权 RRF 顺序并标记 `RERANK_UNAVAILABLE`；两者同时失败时按发生顺序保留两个原因。降级原因进入结构化日志、指标、回答/拒答 SSE 和前端警告，不取消 `system_id` 与发布状态过滤。
+- **服务健康**：Embedding 是模型服务就绪的必要依赖，失败返回 `503 not_ready`；Rerank 是可降级依赖，单独失败返回 `200 degraded` 并在依赖详情中标记。Rerank 模型延迟加载，阻塞推理在线程中执行，并受 batch、长度、候选数、总字符数和并发上限约束。
+- **性能与成本**：Rerank 只处理融合后的有限候选，默认候选 20、返回 10、batch 4、最大并发 1，避免把交叉编码器放大到全部知识片段。PyTorch/Transformers 传递依赖较大，目标 Linux 的 CPU/内存/GPU、量化和离线 wheelhouse 信息明确前，不生成或宣称生产锁定依赖。
+- **风险与回滚**：模型下载、PyTorch 平台 wheel、内存和首请求加载延迟是主要风险。关闭 Rerank provider 或不安装 `rerank` extra 即自动回到加权 RRF；若目标 Linux 资源不满足，保持 HTTP 契约不变，将模型服务适配替换为 ONNX Runtime 或公司内部 Rerank API。
+- **确认**：用户于 2026-08-06 确认方案 A。
+
 ## 7. 架构方案：KnowAgent
 
 - **日期**：2026-08-02

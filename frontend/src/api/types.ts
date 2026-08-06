@@ -193,6 +193,7 @@ export interface RefusedEvent {
   reason_codes: EvidenceReasonCode[];
   policy_version: string;
   decided_at: string;
+  degraded_reasons: string[];
 }
 
 export interface StreamErrorEvent {

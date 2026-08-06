@@ -246,7 +246,11 @@ async def test_resolve_stream_decision_refusal_short_circuits_before_evidence() 
     events = await _collect_events(
         service(
             retrieval=StubRetrieval(
-                RetrievalResult(query="如何发布？", hits=(make_hit(score=0.001),))
+                RetrievalResult(
+                    query="如何发布？",
+                    hits=(make_hit(score=0.001),),
+                    degraded_reasons=("RERANK_UNAVAILABLE",),
+                )
             ),
             llm=StubLlm(),
             recorder=recorder,
@@ -263,6 +267,7 @@ async def test_resolve_stream_decision_refusal_short_circuits_before_evidence() 
         QuestionStreamEventKind.REFUSED,
     ]
     assert events[-1].payload.outcome is EvidenceDecisionOutcome.INSUFFICIENT
+    assert events[-1].degraded_reasons == ("RERANK_UNAVAILABLE",)
 
 
 @pytest.mark.anyio

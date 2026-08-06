@@ -61,6 +61,7 @@ from knowagent.identity.domain.models import Account, AccountRole
 from knowagent.retrieval.application.evidence import EvidenceOrganizer
 from knowagent.retrieval.application.retrieval_service import BasicRetrievalService
 from knowagent.retrieval.infrastructure.http_embedding import HttpEmbeddingProvider
+from knowagent.retrieval.infrastructure.http_rerank import HttpRerankProvider
 from knowagent.retrieval.infrastructure.sqlalchemy_search import PostgresKnowledgeSearch
 from knowagent.tickets.application.refusal import RefusalTicketService
 from knowagent.tickets.infrastructure.sqlalchemy_repository import (
@@ -233,6 +234,7 @@ def _render_event(
                 reason_codes=decision.reason_codes,
                 policy_version=decision.policy_version,
                 decided_at=decision.decided_at,
+                degraded_reasons=event.degraded_reasons,
             )
         )
     return None
@@ -320,6 +322,11 @@ def _build_question_service(
         result_top_k=retrieval_settings.result_top_k,
         rrf_k=retrieval_settings.rrf_k,
         metrics=_NoopMetrics(),
+        reranker=components.reranker,
+        rerank_candidate_top_k=retrieval_settings.rerank_candidate_top_k,
+        rerank_top_k=retrieval_settings.rerank_top_k,
+        keyword_weight=retrieval_settings.keyword_weight,
+        vector_weight=retrieval_settings.vector_weight,
     )
     evidence = EvidenceOrganizer(
         max_items=retrieval_settings.evidence_max_items,
@@ -356,16 +363,18 @@ class _AgentComponents:  # pylint: disable=too-few-public-methods
     request-scoped.
     """
 
-    __slots__ = ("embeddings", "policy", "answers")
+    __slots__ = ("embeddings", "reranker", "policy", "answers")
 
     def __init__(
         self,
         *,
         embeddings: HttpEmbeddingProvider,
+        reranker: HttpRerankProvider,
         policy: DeterministicEvidencePolicy,
         answers: AnswerGenerator,
     ) -> None:
         self.embeddings = embeddings
+        self.reranker = reranker
         self.policy = policy
         self.answers = answers
 
@@ -385,6 +394,11 @@ def _get_or_build_agent_components(request: Request) -> _AgentComponents:
         model=retrieval_settings.embedding_model,
         timeout_seconds=retrieval_settings.embedding_timeout_seconds,
     )
+    reranker = HttpRerankProvider(
+        base_url=retrieval_settings.rerank_base_url,
+        model=retrieval_settings.rerank_model,
+        timeout_seconds=retrieval_settings.rerank_timeout_seconds,
+    )
     policy = DeterministicEvidencePolicy(
         policy_version=evidence_policy_settings.policy_version,
         minimum_fused_score=evidence_policy_settings.minimum_fused_score,
@@ -400,7 +414,12 @@ def _get_or_build_agent_components(request: Request) -> _AgentComponents:
         prompt=prompt,
     )
     answers = AnswerGenerator(provider=llm)
-    components = _AgentComponents(embeddings=embeddings, policy=policy, answers=answers)
+    components = _AgentComponents(
+        embeddings=embeddings,
+        reranker=reranker,
+        policy=policy,
+        answers=answers,
+    )
     setattr(request.app.state, _AGENT_COMPONENTS_ATTR, components)
     return components
 

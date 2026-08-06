@@ -5,6 +5,18 @@ import re
 from dataclasses import dataclass
 
 
+def _environment_bool(name: str, default: bool) -> bool:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    normalized = raw_value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be a boolean")
+
+
 @dataclass(frozen=True)
 class ModelServiceSettings:  # pylint: disable=too-many-instance-attributes
     ollama_base_url: str = "http://127.0.0.1:11434"
@@ -20,6 +32,17 @@ class ModelServiceSettings:  # pylint: disable=too-many-instance-attributes
     max_total_text_chars: int = 48_000
     ollama_max_concurrency: int = 1
     ollama_keep_alive: str = "24h"
+    rerank_model: str = "BAAI/bge-reranker-v2-m3"
+    rerank_model_version: str = "BAAI-bge-reranker-v2-m3"
+    rerank_batch_size: int = 4
+    rerank_max_length: int = 512
+    rerank_max_concurrency: int = 1
+    rerank_use_fp16: bool = False
+    rerank_device: str | None = None
+    rerank_max_documents: int = 20
+    rerank_max_query_chars: int = 2_000
+    rerank_max_document_chars: int = 12_000
+    rerank_max_total_document_chars: int = 48_000
     host: str = "127.0.0.1"
     port: int = 8100
 
@@ -30,6 +53,8 @@ class ModelServiceSettings:  # pylint: disable=too-many-instance-attributes
             self.embedding_model_version,
             self.ollama_model_digest,
             self.ollama_keep_alive,
+            self.rerank_model,
+            self.rerank_model_version,
             self.host,
         )
         if any(not value.strip() for value in text_values):
@@ -51,12 +76,21 @@ class ModelServiceSettings:  # pylint: disable=too-many-instance-attributes
             self.max_text_chars,
             self.max_total_text_chars,
             self.ollama_max_concurrency,
+            self.rerank_batch_size,
+            self.rerank_max_length,
+            self.rerank_max_concurrency,
+            self.rerank_max_documents,
+            self.rerank_max_query_chars,
+            self.rerank_max_document_chars,
+            self.rerank_max_total_document_chars,
             self.port,
         )
         if any(value <= 0 for value in positive_values):
             raise ValueError("model-service numeric settings must be positive")
         if self.ollama_batch_size > self.max_request_texts:
             raise ValueError("Ollama batch size must not exceed request text limit")
+        if self.rerank_device is not None and not self.rerank_device.strip():
+            raise ValueError("rerank device must be omitted or non-blank")
         if self.port > 65_535:
             raise ValueError("model-service port must be at most 65535")
 
@@ -86,6 +120,25 @@ class ModelServiceSettings:  # pylint: disable=too-many-instance-attributes
             max_total_text_chars=int(os.getenv("KNOWAGENT_MODEL_MAX_TOTAL_TEXT_CHARS", "48000")),
             ollama_max_concurrency=int(os.getenv("KNOWAGENT_MODEL_OLLAMA_MAX_CONCURRENCY", "1")),
             ollama_keep_alive=os.getenv("KNOWAGENT_MODEL_OLLAMA_KEEP_ALIVE", "24h").strip(),
+            rerank_model=os.getenv(
+                "KNOWAGENT_MODEL_RERANK_MODEL", "BAAI/bge-reranker-v2-m3"
+            ).strip(),
+            rerank_model_version=os.getenv(
+                "KNOWAGENT_MODEL_RERANK_MODEL_VERSION", "BAAI-bge-reranker-v2-m3"
+            ).strip(),
+            rerank_batch_size=int(os.getenv("KNOWAGENT_MODEL_RERANK_BATCH_SIZE", "4")),
+            rerank_max_length=int(os.getenv("KNOWAGENT_MODEL_RERANK_MAX_LENGTH", "512")),
+            rerank_max_concurrency=int(os.getenv("KNOWAGENT_MODEL_RERANK_MAX_CONCURRENCY", "1")),
+            rerank_use_fp16=_environment_bool("KNOWAGENT_MODEL_RERANK_USE_FP16", False),
+            rerank_device=(os.getenv("KNOWAGENT_MODEL_RERANK_DEVICE", "").strip() or None),
+            rerank_max_documents=int(os.getenv("KNOWAGENT_MODEL_RERANK_MAX_DOCUMENTS", "20")),
+            rerank_max_query_chars=int(os.getenv("KNOWAGENT_MODEL_RERANK_MAX_QUERY_CHARS", "2000")),
+            rerank_max_document_chars=int(
+                os.getenv("KNOWAGENT_MODEL_RERANK_MAX_DOCUMENT_CHARS", "12000")
+            ),
+            rerank_max_total_document_chars=int(
+                os.getenv("KNOWAGENT_MODEL_RERANK_MAX_TOTAL_DOCUMENT_CHARS", "48000")
+            ),
             host=os.getenv("KNOWAGENT_MODEL_HOST", "127.0.0.1").strip(),
             port=int(os.getenv("KNOWAGENT_MODEL_PORT", "8100")),
         )
