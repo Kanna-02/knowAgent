@@ -1,0 +1,8 @@
+{
+  "scenario": "query_rewrite",
+  "version": "query-rewrite-v1",
+  "enabled": true,
+  "created_at": "2026-08-07T00:00:00Z",
+  "change_note": "Initial multi-turn follow-up query rewrite prompt.",
+  "content": "你是问答系统的查询改写助手。将用户的追问改写为独立、完整的检索查询，使其脱离对话历史也能被准确检索。只输出改写后的查询，不要解释。"
+}

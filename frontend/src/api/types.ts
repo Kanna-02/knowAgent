@@ -94,7 +94,43 @@ export interface SseAuthToken {
   system_id: string;
   question: string;
   required_terms: string[];
+  conversation_id: string | null;
+  retrieval_profile: string | null;
   expires_at: string;
+}
+
+export type ConversationMessageRole = "user" | "assistant";
+export type IntentKind = "follow_up" | "standalone";
+
+export interface ConversationView {
+  id: string;
+  system_id: string;
+  account_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConversationPage {
+  items: ConversationView[];
+  page: number;
+  page_size: number;
+  total: number;
+}
+
+export interface ConversationMessageView {
+  id: string;
+  role: ConversationMessageRole;
+  content: string;
+  intent: IntentKind | null;
+  rewritten_query: string | null;
+  rewrite_prompt_version: string | null;
+  created_at: string;
+}
+
+export interface ConversationDetail {
+  conversation: ConversationView;
+  messages: ConversationMessageView[];
 }
 
 export interface LocatorView {
@@ -154,6 +190,11 @@ export interface RetrievalStartedEvent {
   run_id: string;
   system_id: string;
   question: string;
+  rewritten_query: string | null;
+  intent: IntentKind | null;
+  rewrite_prompt_version: string | null;
+  retrieval_profile_name?: string | null;
+  retrieval_profile_version?: string | null;
 }
 
 export interface EvidenceReadyEvent {
@@ -168,6 +209,8 @@ export interface DecisionEvent {
   run_id: string;
   outcome: EvidenceDecisionOutcome;
   policy_version: string;
+  retrieval_profile_name?: string | null;
+  retrieval_profile_version?: string | null;
   reason_codes: EvidenceReasonCode[];
   decided_at: string;
 }
@@ -211,6 +254,49 @@ export type QuestionStreamEvent =
   | AnswerCompletedEvent
   | RefusedEvent
   | StreamErrorEvent;
+
+export type PromptScenario = "grounded_answer" | "query_rewrite";
+
+export interface PromptDefinitionView {
+  scenario: PromptScenario;
+  version: string;
+  content: string;
+  enabled: boolean;
+  created_at: string;
+  change_note: string;
+}
+
+export interface PromptDefinitionPage {
+  items: PromptDefinitionView[];
+  page: number;
+  page_size: number;
+  total: number;
+}
+
+export interface RetrievalProfileView {
+  name: string;
+  version: string;
+  keyword_top_k: number;
+  vector_top_k: number;
+  result_top_k: number;
+  rrf_k: number;
+  keyword_weight: number;
+  vector_weight: number;
+  rerank_candidate_top_k: number;
+  rerank_top_k: number;
+  evidence_max_items: number;
+  evidence_max_characters: number;
+  is_active: boolean;
+  created_at: string;
+  change_note: string;
+}
+
+export interface RetrievalProfilePage {
+  items: RetrievalProfileView[];
+  page: number;
+  page_size: number;
+  total: number;
+}
 
 export interface TicketView {
   id: string;

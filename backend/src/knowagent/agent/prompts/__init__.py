@@ -7,8 +7,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from knowagent.agent.domain.models import PromptDefinition
 
+GROUNDED_ANSWER_SCENARIO = "grounded_answer"
+QUERY_REWRITE_SCENARIO = "query_rewrite"
+SUPPORTED_PROMPT_SCENARIOS = frozenset({GROUNDED_ANSWER_SCENARIO, QUERY_REWRITE_SCENARIO})
+
 _PROMPT_RESOURCES = {
     "grounded-answer-v1": "grounded_answer_v1.json",
+    "query-rewrite-v1": "query_rewrite_v1.json",
 }
 
 
@@ -43,4 +48,9 @@ def load_prompt_definition(version: str) -> PromptDefinition:
     )
 
 
-__all__ = ["load_prompt_definition"]
+__all__ = [
+    "GROUNDED_ANSWER_SCENARIO",
+    "QUERY_REWRITE_SCENARIO",
+    "SUPPORTED_PROMPT_SCENARIOS",
+    "load_prompt_definition",
+]

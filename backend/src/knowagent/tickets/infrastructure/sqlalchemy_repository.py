@@ -67,6 +67,8 @@ class SqlAlchemyTicketRepository:  # pylint: disable=too-many-public-methods
             score=decision.score,
             applied_score_threshold=decision.applied_score_threshold,
             policy_version=decision.policy_version,
+            retrieval_profile_name=decision.retrieval_profile_name,
+            retrieval_profile_version=decision.retrieval_profile_version,
             candidate_summaries=[
                 {
                     "chunk_id": str(candidate.chunk_id),
@@ -521,6 +523,8 @@ class SqlAlchemyTicketRepository:  # pylint: disable=too-many-public-methods
             score=record.score,
             applied_score_threshold=record.applied_score_threshold,
             policy_version=record.policy_version,
+            retrieval_profile_name=record.retrieval_profile_name,
+            retrieval_profile_version=record.retrieval_profile_version,
             candidates=candidates,
             degraded_reasons=tuple(record.degraded_reasons),
             decided_at=_as_utc(record.created_at),

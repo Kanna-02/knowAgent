@@ -16,6 +16,7 @@ from knowagent.agent.application.evidence_decision import (
     DeterministicEvidencePolicy,
     normalize_question,
 )
+from knowagent.agent.domain.conversation import QueryRewriteResult
 from knowagent.agent.domain.models import (
     AnswerSnapshot,
     EvidenceDecision,
@@ -81,7 +82,11 @@ class ReliableQuestionService:  # pylint: disable=too-few-public-methods,too-man
         recorder: ResolutionRecorder,
         snapshots: AnswerRecorder,
         clock: Callable[[], datetime],
+        retrieval_profile_name: str | None = None,
+        retrieval_profile_version: str | None = None,
     ) -> None:
+        if (retrieval_profile_name is None) != (retrieval_profile_version is None):
+            raise ValueError("retrieval profile name and version must be set together")
         self._retrieval = retrieval
         self._evidence = evidence
         self._policy = policy
@@ -89,6 +94,16 @@ class ReliableQuestionService:  # pylint: disable=too-few-public-methods,too-man
         self._recorder = recorder
         self._snapshots = snapshots
         self._clock = clock
+        self._retrieval_profile_name = retrieval_profile_name
+        self._retrieval_profile_version = retrieval_profile_version
+
+    @property
+    def retrieval_profile_name(self) -> str | None:
+        return self._retrieval_profile_name
+
+    @property
+    def retrieval_profile_version(self) -> str | None:
+        return self._retrieval_profile_version
 
     async def resolve(
         self,
@@ -98,18 +113,24 @@ class ReliableQuestionService:  # pylint: disable=too-few-public-methods,too-man
         system_id: UUID,
         question: str,
         required_terms: tuple[str, ...] = (),
+        rewrite: QueryRewriteResult | None = None,
     ) -> QuestionResolution:
         replay = self._replay_answer(run_id=run_id, system_id=system_id, question=question)
         if replay is not None:
             return replay
-        retrieval = await self._retrieval.retrieve(system_id=system_id, query=question)
-        now = self._clock()
-        decision = self._policy.decide(
-            run_id=run_id,
+        retrieval = await self._retrieval.retrieve(
             system_id=system_id,
-            retrieval=retrieval,
-            decided_at=now,
-            required_terms=required_terms,
+            query=rewrite.rewritten_query if rewrite is not None else question,
+        )
+        now = self._clock()
+        decision = self._with_retrieval_profile(
+            self._policy.decide(
+                run_id=run_id,
+                system_id=system_id,
+                retrieval=retrieval,
+                decided_at=now,
+                required_terms=required_terms,
+            )
         )
         if decision.outcome.is_refusal:
             return self._record_refusal(
@@ -131,7 +152,11 @@ class ReliableQuestionService:  # pylint: disable=too-few-public-methods,too-man
                 now=now,
             )
         try:
-            answer = await self._answers.generate(question=retrieval.query, evidence=evidence)
+
+            answer = await self._answers.generate(
+                question=rewrite.original_query if rewrite is not None else retrieval.query,
+                evidence=evidence,
+            )
         except ValidationError as error:
             if error.code not in GROUNDING_FAILURE_CODES:
                 if error.code.startswith("ANSWER_"):
@@ -172,6 +197,7 @@ class ReliableQuestionService:  # pylint: disable=too-few-public-methods,too-man
         system_id: UUID,
         question: str,
         required_terms: tuple[str, ...] = (),
+        rewrite: QueryRewriteResult | None = None,
     ) -> collections.abc.AsyncIterator[QuestionStreamEvent]:
         """Yield typed stream events for the SSE endpoint.
 
@@ -203,14 +229,19 @@ class ReliableQuestionService:  # pylint: disable=too-few-public-methods,too-man
             payload=None,
             run_id=run_id,
         )
-        retrieval = await self._retrieval.retrieve(system_id=system_id, query=question)
-        now = self._clock()
-        decision = self._policy.decide(
-            run_id=run_id,
+        retrieval = await self._retrieval.retrieve(
             system_id=system_id,
-            retrieval=retrieval,
-            decided_at=now,
-            required_terms=required_terms,
+            query=rewrite.rewritten_query if rewrite is not None else question,
+        )
+        now = self._clock()
+        decision = self._with_retrieval_profile(
+            self._policy.decide(
+                run_id=run_id,
+                system_id=system_id,
+                retrieval=retrieval,
+                decided_at=now,
+                required_terms=required_terms,
+            )
         )
         if decision.outcome.is_refusal:
             refusal = self._record_refusal(
@@ -259,7 +290,8 @@ class ReliableQuestionService:  # pylint: disable=too-few-public-methods,too-man
         )
         try:
             async for streamed in self._answers.generate_stream(
-                question=retrieval.query, evidence=evidence
+                question=retrieval.query if rewrite is None else rewrite.original_query,
+                evidence=evidence,
             ):
                 if isinstance(streamed, StreamedAnswerDelta):
                     yield QuestionStreamEvent(
@@ -326,6 +358,13 @@ class ReliableQuestionService:  # pylint: disable=too-few-public-methods,too-man
             ticket_id=None,
             reason_codes=(),
             degraded_reasons=snapshot.degraded_reasons,
+        )
+
+    def _with_retrieval_profile(self, decision: EvidenceDecision) -> EvidenceDecision:
+        return replace(
+            decision,
+            retrieval_profile_name=self._retrieval_profile_name,
+            retrieval_profile_version=self._retrieval_profile_version,
         )
 
     def _record_refusal(

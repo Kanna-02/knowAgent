@@ -7,7 +7,15 @@ import type {
   BusinessSystemPage,
   BusinessSystemStatus,
   BusinessSystemView,
+  ConversationDetail,
+  ConversationPage,
+  ConversationView,
   CurrentUser,
+  PromptDefinitionPage,
+  PromptDefinitionView,
+  PromptScenario,
+  RetrievalProfilePage,
+  RetrievalProfileView,
   SessionView,
   SseAuthToken,
   SystemOwnerView,
@@ -159,6 +167,8 @@ export class ApiClient {
     system_id: string;
     question: string;
     required_terms?: string[];
+    conversation_id?: string | null;
+    retrieval_profile?: string | null;
   }): Promise<SseAuthToken> {
     return this.request<SseAuthToken>("/questions/stream", {
       method: "POST",
@@ -166,7 +176,97 @@ export class ApiClient {
         system_id: payload.system_id,
         question: payload.question,
         required_terms: payload.required_terms ?? [],
+        conversation_id: payload.conversation_id ?? null,
+        retrieval_profile: payload.retrieval_profile ?? null,
       }),
+    });
+  }
+
+  async listConversations(systemId: string, page = 1, pageSize = 100): Promise<ConversationPage> {
+    const query = new URLSearchParams({
+      system_id: systemId,
+      page: String(page),
+      page_size: String(pageSize),
+    });
+    return this.request<ConversationPage>(`/conversations?${query.toString()}`);
+  }
+
+  async createConversation(systemId: string, title: string): Promise<ConversationView> {
+    return this.request<ConversationView>("/conversations", {
+      method: "POST",
+      body: JSON.stringify({ system_id: systemId, title }),
+    });
+  }
+
+  async getConversation(conversationId: string): Promise<ConversationDetail> {
+    return this.request<ConversationDetail>(`/conversations/${conversationId}`);
+  }
+
+  async deleteConversation(conversationId: string): Promise<void> {
+    await this.request<void>(`/conversations/${conversationId}`, { method: "DELETE" });
+  }
+
+  async listPromptDefinitions(filters: {
+    page: number;
+    pageSize: number;
+    scenario?: PromptScenario;
+  }): Promise<PromptDefinitionPage> {
+    const query = new URLSearchParams({
+      page: String(filters.page),
+      page_size: String(filters.pageSize),
+    });
+    if (filters.scenario) query.set("scenario", filters.scenario);
+    return this.request<PromptDefinitionPage>(`/admin/prompt-definitions?${query.toString()}`);
+  }
+
+  async createPromptDefinition(payload: {
+    scenario: PromptScenario;
+    version: string;
+    content: string;
+    change_note: string;
+  }): Promise<PromptDefinitionView> {
+    return this.request<PromptDefinitionView>("/admin/prompt-definitions", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async activatePromptDefinition(
+    scenario: PromptScenario,
+    version: string,
+  ): Promise<PromptDefinitionView> {
+    return this.request<PromptDefinitionView>("/admin/prompt-definitions/activate", {
+      method: "POST",
+      body: JSON.stringify({ scenario, version }),
+    });
+  }
+
+  async listRetrievalProfiles(filters: {
+    page: number;
+    pageSize: number;
+    name?: string;
+  }): Promise<RetrievalProfilePage> {
+    const query = new URLSearchParams({
+      page: String(filters.page),
+      page_size: String(filters.pageSize),
+    });
+    if (filters.name) query.set("name", filters.name);
+    return this.request<RetrievalProfilePage>(`/admin/retrieval-profiles?${query.toString()}`);
+  }
+
+  async createRetrievalProfile(
+    payload: Omit<RetrievalProfileView, "is_active" | "created_at">,
+  ): Promise<RetrievalProfileView> {
+    return this.request<RetrievalProfileView>("/admin/retrieval-profiles", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async activateRetrievalProfile(name: string, version: string): Promise<RetrievalProfileView> {
+    return this.request<RetrievalProfileView>("/admin/retrieval-profiles/activate", {
+      method: "POST",
+      body: JSON.stringify({ name, version }),
     });
   }
 

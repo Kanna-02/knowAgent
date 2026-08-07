@@ -9,6 +9,7 @@ import httpx
 import pytest
 
 from knowagent.agent.application.answer_generation import AnswerGenerator
+from knowagent.agent.domain.conversation import ConversationMessageRole, QueryRewriteTurn
 from knowagent.agent.domain.models import GenerationEvent, GenerationRequest
 from knowagent.agent.infrastructure.openai_compatible import OpenAiCompatibleLlmProvider
 from knowagent.agent.prompts import load_prompt_definition
@@ -242,6 +243,60 @@ async def test_openai_provider_accepts_stop_reason_when_done_sentinel_is_omitted
     assert [event.kind for event in events] == ["delta", "completed"]
     assert provider.model == "qwen3.6-plus"
     assert provider.prompt_version == "grounded-answer-v1"
+
+
+@pytest.mark.anyio
+async def test_openai_provider_uses_versioned_query_rewrite_prompt() -> None:
+    rewrite_prompt = load_prompt_definition("query-rewrite-v1")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        assert body["stream"] is False
+        assert body["temperature"] == 0
+        assert body["messages"][0] == {
+            "role": "system",
+            "content": rewrite_prompt.content,
+        }
+        assert body["messages"][1] == {"role": "user", "content": "什么是 ESB？"}
+        assert body["messages"][2] == {
+            "role": "assistant",
+            "content": "ESB 是企业服务总线。",
+        }
+        assert body["messages"][3] == {
+            "role": "user",
+            "content": "请改写当前问题：那怎么发布？",
+        }
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "ESB 发布流程"}}]},
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAiCompatibleLlmProvider(
+            base_url="https://dashscope.example/compatible-mode/v1",
+            api_key="secret",
+            model="qwen3.6-plus",
+            timeout_seconds=30,
+            prompt=load_prompt_definition("grounded-answer-v1"),
+            rewrite_prompt=rewrite_prompt,
+            client=client,
+        )
+        rewritten = await provider.rewrite_query(
+            question="那怎么发布？",
+            history_turns=(
+                QueryRewriteTurn(
+                    role=ConversationMessageRole.USER,
+                    content="什么是 ESB？",
+                ),
+                QueryRewriteTurn(
+                    role=ConversationMessageRole.ASSISTANT,
+                    content="ESB 是企业服务总线。",
+                ),
+            ),
+        )
+
+    assert rewritten == "ESB 发布流程"
+    assert provider.rewrite_prompt_version == "query-rewrite-v1"
 
 
 def test_openai_provider_rejects_invalid_configuration() -> None:

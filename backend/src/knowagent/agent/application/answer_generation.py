@@ -64,6 +64,8 @@ class AnswerGenerator:  # pylint: disable=too-few-public-methods
         """Yield individually grounded claims, then the complete verified answer."""
         if not evidence.items:
             raise ValidationError("ANSWER_EVIDENCE_EMPTY", "没有可用于回答的证据")
+        model = self._provider.model
+        prompt_version = self._provider.prompt_version
         parts: list[str] = []
         completed_count = 0
         emitted_claims = 0
@@ -95,14 +97,16 @@ class AnswerGenerator:  # pylint: disable=too-few-public-methods
             text="\n".join(claim.text for claim in claims),
             claims=claims,
             citations=citations,
-            model=self._provider.model,
-            prompt_version=self._provider.prompt_version,
+            model=model,
+            prompt_version=prompt_version,
         )
         yield StreamedAnswerCompleted(answer=answer)
 
     async def generate(self, *, question: str, evidence: EvidenceBundle) -> VerifiedAnswer:
         if not evidence.items:
             raise ValidationError("ANSWER_EVIDENCE_EMPTY", "没有可用于回答的证据")
+        model = self._provider.model
+        prompt_version = self._provider.prompt_version
         parts: list[str] = []
         completed_count = 0
         async for event in self._provider.generate(
@@ -123,8 +127,8 @@ class AnswerGenerator:  # pylint: disable=too-few-public-methods
             text="\n".join(claim.text for claim in claims),
             claims=claims,
             citations=citations,
-            model=self._provider.model,
-            prompt_version=self._provider.prompt_version,
+            model=model,
+            prompt_version=prompt_version,
         )
 
     @staticmethod

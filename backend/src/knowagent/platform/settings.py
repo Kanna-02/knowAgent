@@ -181,6 +181,7 @@ class LlmSettings:
     api_key: str = field(default="", repr=False)
     model: str = ""
     prompt_version: str = "grounded-answer-v1"
+    rewrite_prompt_version: str = "query-rewrite-v1"
     timeout_seconds: int = 60
 
     def __post_init__(self) -> None:
@@ -188,6 +189,8 @@ class LlmSettings:
             raise ValueError("LLM timeout must be positive")
         if not self.prompt_version.strip():
             raise ValueError("LLM prompt version must not be blank")
+        if not self.rewrite_prompt_version.strip():
+            raise ValueError("LLM rewrite prompt version must not be blank")
 
     @property
     def configured(self) -> bool:
@@ -200,6 +203,9 @@ class LlmSettings:
             api_key=_preferred_environment("KNOWAGENT_LLM_API_KEY", "LLM_API_KEY"),
             model=_preferred_environment("KNOWAGENT_LLM_MODEL", "LLM_MODEL"),
             prompt_version=os.getenv("KNOWAGENT_LLM_PROMPT_VERSION", "grounded-answer-v1").strip(),
+            rewrite_prompt_version=os.getenv(
+                "KNOWAGENT_LLM_REWRITE_PROMPT_VERSION", "query-rewrite-v1"
+            ).strip(),
             timeout_seconds=int(os.getenv("KNOWAGENT_LLM_TIMEOUT_SECONDS", "60")),
         )
 

@@ -18,6 +18,8 @@ class QuestionRequest(BaseModel):
     system_id: UUID
     question: str = Field(min_length=1, max_length=2000)
     required_terms: list[str] = Field(default_factory=list, max_length=20)
+    conversation_id: UUID | None = None
+    retrieval_profile: str | None = Field(default=None, max_length=64)
 
     @property
     def required_terms_tuple(self) -> tuple[str, ...]:
@@ -104,6 +106,8 @@ class QuestionResponse(BaseModel):
     degraded_reasons: tuple[str, ...] = ()
     decision_outcome: EvidenceDecisionOutcome
     policy_version: str
+    retrieval_profile_name: str | None = None
+    retrieval_profile_version: str | None = None
     decided_at: datetime
 
     @classmethod
@@ -148,6 +152,8 @@ class QuestionResponse(BaseModel):
             degraded_reasons=resolution.degraded_reasons,
             decision_outcome=decision.outcome,
             policy_version=decision.policy_version,
+            retrieval_profile_name=decision.retrieval_profile_name,
+            retrieval_profile_version=decision.retrieval_profile_version,
             decided_at=decision.decided_at,
         )
 
@@ -167,6 +173,8 @@ class SseAuthToken(BaseModel):
     system_id: UUID
     question: str
     required_terms: tuple[str, ...] = ()
+    conversation_id: UUID | None = None
+    retrieval_profile: str | None = None
     expires_at: datetime
 
 
@@ -186,6 +194,11 @@ class RetrievalStartedEvent(BaseModel):
     run_id: UUID
     system_id: UUID
     question: str
+    rewritten_query: str | None = None
+    intent: str | None = None
+    rewrite_prompt_version: str | None = None
+    retrieval_profile_name: str | None = None
+    retrieval_profile_version: str | None = None
 
 
 class EvidenceReadyEvent(BaseModel):
@@ -204,6 +217,8 @@ class DecisionEvent(BaseModel):
     run_id: UUID
     outcome: EvidenceDecisionOutcome
     policy_version: str
+    retrieval_profile_name: str | None = None
+    retrieval_profile_version: str | None = None
     reason_codes: tuple[EvidenceReasonCode, ...] = ()
     decided_at: datetime
 

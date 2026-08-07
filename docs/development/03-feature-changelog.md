@@ -17,6 +17,18 @@
 
 ## 功能变更记录
 
+### 2026-08-07 - Phase 3 review 修复（1 P0 + 2 P1 + 2 P2 + 3 P3）
+
+类型：修复
+
+相关文件：`backend/src/knowagent/agent/api/router.py`、`backend/src/knowagent/agent/infrastructure/openai_compatible.py`、`backend/src/knowagent/agent/application/query_rewriter.py`、`backend/src/knowagent/agent/api/admin_schemas.py`、`backend/src/knowagent/agent/application/conversation_service.py`、`backend/src/knowagent/agent/api/conversations_router.py`、`frontend/src/features/admin/ConfigurationPage.tsx`、`AI_DEVELOPMENT_RULES.md`
+
+变更说明：1. P0：`OpenAiCompatibleLlmProvider` 新增 `with_prompt_definition(prompt)` 返回 shares HTTP client 的浅拷贝，`_build_question_service` 与 `_maybe_rewrite_query` 改为每请求构造 immutable LLM copy，不再 mutate 共享 singleton provider，彻底消除并发请求互相覆盖 active prompt 的竞态。2. P1.1：SSE stream 的用户问题改为在 prelude 阶段（第一个 yield 之前）持久化，助手回答在 `ANSWER_COMPLETED` terminal 事件持久化；客户端断连或 `ProviderUnavailableError` 不再导致用户问题丢失。3. P1.2：`query_rewriter.rewrite()` 的 broad except 与 `OpenAiCompatibleLlmProvider.rewrite_query/generate` 的 except 块均添加 `LOGGER.warning` 降级日志，遵守 §16.4「降级过程必须记录日志」。4. P2.1：`SavePromptDefinitionRequest.content` 增加 `max_length=12000`，与前端 `maxLength={12000}` 对齐。5. P2.2：前端 `ConfigurationPage.ProfileDrawer` 新增 3 个跨字段 validator（结果 Top-K ≤ 关键词+向量 Top-K、Rerank 候选 ≤ 关键词+向量 Top-K、结果 Top-K ≤ Rerank 结果 ≤ Rerank 候选），提交前阻断并提示用户。6. P3.1：`_persist_stream_terminal_turn` 中 `assert isinstance(answer, VerifiedAnswer)` 改为显式 `TypeError`，不被 `python -O` 剥离。7. P3.2：新建 `REWRITE_CONTEXT_HISTORY_LIMIT = 10` 常量并在 `conversations_router.CONVERSATION_HISTORY_LIMIT = 50` 添加注释说明两者用途差异。8. P3.3：`_resolve_active_prompts` 增加可选 `request` 参数，结果缓存到 `request.state`，单请求内多个 call site 不再重复 SELECT。9. 新增 §16.8「apply_patch 失败即停与行号锚定整段替换」规则到 `AI_DEVELOPMENT_RULES.md`。
+
+验证方式：后端 312 个单测全部通过；前端 ConfigurationPage 5 个 + UserHomePage.stream 2 个测试通过。Black/isort 通过；mypy 已改文件零错误（仅本仓既有 pgvector stub import-not-found）；Pylint 9.78/10；Bandit 中高危 0；TypeScript `tsc --noEmit` 通过。
+
+后续注意：P3.3 缓存为同一 `request.state` 作用域，不支持跨请求命中，符合当前同步问答的单请求模型；如未来引入跨请求会话缓存需另设独立缓存层。
+
 ### 2026-08-06 - Phase 3 运行资源盘点与下载门禁
 
 类型：文档 / 运维

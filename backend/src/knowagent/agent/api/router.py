@@ -31,22 +31,45 @@ from knowagent.agent.api.schemas import (
 )
 from knowagent.agent.application.answer_generation import AnswerGenerator
 from knowagent.agent.application.answer_snapshots import AnswerSnapshotService
+from knowagent.agent.application.conversation_service import (
+    REWRITE_CONTEXT_HISTORY_LIMIT,
+    ConversationService,
+)
 from knowagent.agent.application.evidence_decision import DeterministicEvidencePolicy
+from knowagent.agent.application.query_rewriter import QueryRewriter
 from knowagent.agent.application.reliable_question import ReliableQuestionService
+from knowagent.agent.domain.conversation import (
+    DEFAULT_RETRIEVAL_PROFILE_NAME,
+    DEFAULT_RETRIEVAL_PROFILE_VERSION,
+    ConversationMessageRole,
+    QueryRewriteResult,
+    QueryRewriteTurn,
+)
 from knowagent.agent.domain.models import (
     EvidenceBundle,
     EvidenceDecision,
+    PromptDefinition,
+    QuestionResolution,
     QuestionStreamEvent,
     QuestionStreamEventKind,
     VerifiedAnswer,
 )
 from knowagent.agent.infrastructure.openai_compatible import OpenAiCompatibleLlmProvider
+from knowagent.agent.infrastructure.prompt_repository import PromptRepository
+from knowagent.agent.infrastructure.retrieval_profile_repository import (
+    RetrievalProfileRepository,
+)
 from knowagent.agent.infrastructure.sqlalchemy_repository import (
     SqlAlchemyAnswerSnapshotRepository,
 )
-from knowagent.agent.prompts import load_prompt_definition
+from knowagent.agent.prompts import (
+    GROUNDED_ANSWER_SCENARIO,
+    QUERY_REWRITE_SCENARIO,
+    load_prompt_definition,
+)
 from knowagent.common.errors import (
     KnowAgentError,
+    NotFoundError,
     ProviderUnavailableError,
 )
 from knowagent.identity.api.access import require_system_access as _require_shared
@@ -82,6 +105,63 @@ SSE_TOKEN_PREFIX = "sse-question:"
 
 def _sse_token_key(account_id: UUID, token: str) -> str:
     return f"{SSE_TOKEN_PREFIX}{account_id}:{token}"
+
+
+def _resolve_active_prompts(
+    database: Session,
+    *,
+    request: Request | None = None,
+) -> tuple[PromptDefinition | None, PromptDefinition | None]:
+    """Resolve the active prompt definitions for each supported scenario.
+
+    Returns ``(answer_prompt, rewrite_prompt)`` for the caller to apply via
+    ``OpenAiCompatibleLlmProvider.with_prompt_definition`` on a per-request
+    copy. Scenarios without an enabled row keep the packaged prompt loaded at
+    process startup; the shared provider itself is never mutated, so
+    concurrent requests cannot overwrite each other's prompt selection.
+
+    When ``request`` is supplied the resolved prompts are cached on
+    ``request.state`` so subsequent calls in the same request (e.g. by
+    ``_build_question_service`` and ``_maybe_rewrite_query``) reuse the same
+    result rather than issuing redundant SELECT queries.
+    """
+    if request is not None:
+        cached: tuple[PromptDefinition | None, PromptDefinition | None] | None = getattr(
+            request.state, _ACTIVE_PROMPTS_ATTR, None
+        )
+        if cached is not None:
+            return cached
+    repository = PromptRepository(database)
+    answer_prompt = repository.get_active(GROUNDED_ANSWER_SCENARIO)
+    rewrite_prompt = repository.get_active(QUERY_REWRITE_SCENARIO)
+    pair: tuple[PromptDefinition | None, PromptDefinition | None] = (
+        answer_prompt,
+        rewrite_prompt,
+    )
+    if request is not None:
+        setattr(request.state, _ACTIVE_PROMPTS_ATTR, pair)
+    return pair
+
+
+def _build_request_llm(
+    shared_llm: OpenAiCompatibleLlmProvider,
+    *,
+    answer_prompt: PromptDefinition | None,
+    rewrite_prompt: PromptDefinition | None,
+) -> OpenAiCompatibleLlmProvider:
+    """Return an immutable per-request LLM copy bound to the resolved prompts.
+
+    Falls back to the packaged prompt loaded at process startup when the
+    database has no enabled row for a scenario. The HTTP client and
+    configuration are shared with ``shared_llm`` so the connection pool is
+    reused; only the active prompt fields are replaced on the copy.
+    """
+    llm = shared_llm
+    if answer_prompt is not None:
+        llm = llm.with_prompt_definition(answer_prompt)
+    if rewrite_prompt is not None:
+        llm = llm.with_prompt_definition(rewrite_prompt)
+    return llm
 
 
 def _consume_sse_token(redis: RedisClient, *, token: str, account_id: UUID) -> SseAuthToken | None:
@@ -143,7 +223,7 @@ def _format_sse(event: object) -> bytes:
     return f"data: {data}\n\n".encode("utf-8")
 
 
-async def _stream_resolution(
+async def _stream_resolution(  # pylint: disable=too-many-arguments
     question_service: ReliableQuestionService,
     *,
     run_id: UUID,
@@ -151,7 +231,39 @@ async def _stream_resolution(
     system_id: UUID,
     question: str,
     required_terms: tuple[str, ...],
+    conversation_id: UUID | None = None,
+    retrieval_profile: str | None = None,
+    database: Session | None = None,
+    request: Request | None = None,
 ) -> AsyncIterator[bytes]:
+    # The retrieval profile has already been applied to ``question_service`` by
+    # ``_build_question_service`` before this iterator starts, so the parameter
+    # is unused here. It is kept in the signature so the SSE authorizer can pass
+    # it through from the minted token for future stream-time reauthorization.
+    del retrieval_profile
+    rewrite = None
+    if conversation_id is not None and database is not None and request is not None:
+        rewrite = await _maybe_rewrite_query_safe(
+            database=database,
+            system_id=system_id,
+            account_id=requester_id,
+            question=question,
+            conversation_id=conversation_id,
+            request=request,
+        )
+    # Persist the user question before the first stream event is yielded, so
+    # it survives even if the client disconnects mid-stream or the provider
+    # becomes unavailable.
+    if conversation_id is not None and database is not None:
+        _persist_stream_user_turn(
+            database=database,
+            system_id=system_id,
+            account_id=requester_id,
+            conversation_id=conversation_id,
+            question=question,
+            rewrite=rewrite,
+            now=datetime.now(UTC),
+        )
     try:
         async for event in question_service.resolve_stream(
             run_id=run_id,
@@ -159,8 +271,36 @@ async def _stream_resolution(
             system_id=system_id,
             question=question,
             required_terms=required_terms,
+            rewrite=rewrite,
         ):
-            rendered = _render_event(event, system_id=system_id, question=question)
+            if conversation_id is not None and database is not None:
+                _persist_stream_terminal_turn(
+                    database=database,
+                    system_id=system_id,
+                    account_id=requester_id,
+                    conversation_id=conversation_id,
+                    event=event,
+                    now=datetime.now(UTC),
+                )
+            if event.kind is QuestionStreamEventKind.RETRIEVAL_STARTED and rewrite is not None:
+                rendered = _render_event(
+                    event,
+                    system_id=system_id,
+                    question=question,
+                    rewritten_query=rewrite.rewritten_query,
+                    intent=rewrite.intent,
+                    rewrite_prompt_version=rewrite.prompt_version,
+                    retrieval_profile_name=question_service.retrieval_profile_name,
+                    retrieval_profile_version=question_service.retrieval_profile_version,
+                )
+            else:
+                rendered = _render_event(
+                    event,
+                    system_id=system_id,
+                    question=question,
+                    retrieval_profile_name=question_service.retrieval_profile_name,
+                    retrieval_profile_version=question_service.retrieval_profile_version,
+                )
             if rendered is not None:
                 yield rendered
     except ProviderUnavailableError:
@@ -180,6 +320,11 @@ def _render_event(
     *,
     system_id: UUID,
     question: str,
+    rewritten_query: str | None = None,
+    intent: str | None = None,
+    rewrite_prompt_version: str | None = None,
+    retrieval_profile_name: str | None = None,
+    retrieval_profile_version: str | None = None,
 ) -> bytes | None:
     if event.kind is QuestionStreamEventKind.RETRIEVAL_STARTED:
         return _format_sse(
@@ -187,6 +332,11 @@ def _render_event(
                 run_id=event.run_id,
                 system_id=system_id,
                 question=question,
+                rewritten_query=rewritten_query,
+                intent=intent,
+                rewrite_prompt_version=rewrite_prompt_version,
+                retrieval_profile_name=retrieval_profile_name,
+                retrieval_profile_version=retrieval_profile_version,
             )
         )
     if event.kind is QuestionStreamEventKind.EVIDENCE_READY:
@@ -207,6 +357,8 @@ def _render_event(
                 run_id=event.run_id,
                 outcome=decision.outcome,
                 policy_version=decision.policy_version,
+                retrieval_profile_name=decision.retrieval_profile_name,
+                retrieval_profile_version=decision.retrieval_profile_version,
                 reason_codes=decision.reason_codes,
                 decided_at=decision.decided_at,
             )
@@ -275,15 +427,232 @@ async def ask_question(
             details={"feature": "question_answering"},
         )
     run_id = uuid4()
-    question_service = _build_question_service(request, database)
+    now = datetime.now(UTC)
+    rewrite = await _maybe_rewrite_query(
+        database=database,
+        system_id=payload.system_id,
+        account_id=context.account.id,
+        question=payload.question,
+        conversation_id=payload.conversation_id,
+        components=_get_or_build_agent_components(request),
+        request=request,
+    )
+    question_service = _build_question_service(
+        request,
+        database,
+        retrieval_profile_name=payload.retrieval_profile,
+    )
     resolution = await question_service.resolve(
         run_id=run_id,
         requester_id=context.account.id,
         system_id=payload.system_id,
         question=payload.question,
         required_terms=payload.required_terms_tuple,
+        rewrite=rewrite,
     )
+    if payload.conversation_id is not None:
+        _persist_conversation_turn(
+            database=database,
+            system_id=payload.system_id,
+            account_id=context.account.id,
+            conversation_id=payload.conversation_id,
+            question=payload.question,
+            rewrite=rewrite,
+            resolution=resolution,
+            now=now,
+        )
     return QuestionResponse.from_resolution(resolution)
+
+
+async def _maybe_rewrite_query(  # pylint: disable=too-many-arguments
+    *,
+    database: Session,
+    system_id: UUID,
+    account_id: UUID,
+    question: str,
+    conversation_id: UUID | None,
+    components: _AgentComponents,
+    request: Request | None = None,
+) -> QueryRewriteResult | None:
+    """Classify intent and rewrite follow-up questions using conversation history.
+
+    Returns ``None`` when no conversation is specified. When the conversation
+    has no prior history the question is treated as standalone. LLM failures
+    degrade gracefully to the original question with a standalone intent.
+    """
+    if conversation_id is None:
+        return None
+    answer_prompt, rewrite_prompt = _resolve_active_prompts(database=database, request=request)
+    local_llm = _build_request_llm(
+        components.llm,
+        answer_prompt=answer_prompt,
+        rewrite_prompt=rewrite_prompt,
+    )
+    conversation_service = ConversationService(database)
+    # Conversations are personal even when several users can access a system.
+    conversation_service.get_conversation(
+        conversation_id=conversation_id,
+        system_id=system_id,
+        account_id=account_id,
+    )
+    history_messages = conversation_service.list_messages(
+        conversation_id=conversation_id,
+        system_id=system_id,
+        limit=REWRITE_CONTEXT_HISTORY_LIMIT,
+    )
+    history = tuple(
+        QueryRewriteTurn(role=message.role, content=message.content) for message in history_messages
+    )
+    rewriter = QueryRewriter(provider=local_llm)
+    return await rewriter.rewrite(
+        question=question,
+        history_turns=history,
+    )
+
+
+async def _maybe_rewrite_query_safe(
+    *,
+    database: Session,
+    system_id: UUID,
+    account_id: UUID,
+    question: str,
+    conversation_id: UUID | None,
+    request: Request,
+) -> QueryRewriteResult | None:
+    """Stream-safe variant that reads shared components from app state.
+
+    The SSE stream consumer runs after the POST mint, so it cannot rely on the
+    request-scoped component resolution used by ``ask_question``. This helper
+    reads the shared components from app state instead.
+    """
+    if conversation_id is None:
+        return None
+    components = _get_or_build_agent_components(request)
+    return await _maybe_rewrite_query(
+        database=database,
+        system_id=system_id,
+        account_id=account_id,
+        question=question,
+        conversation_id=conversation_id,
+        components=components,
+        request=request,
+    )
+
+
+def _persist_conversation_turn(  # pylint: disable=too-many-arguments
+    *,
+    database: Session,
+    system_id: UUID,
+    account_id: UUID,
+    conversation_id: UUID,
+    question: str,
+    rewrite: QueryRewriteResult | None,
+    resolution: QuestionResolution,
+    now: datetime,
+) -> None:
+    """Persist the user question and assistant answer to the conversation."""
+    service = ConversationService(database)
+    service.get_conversation(
+        conversation_id=conversation_id,
+        system_id=system_id,
+        account_id=account_id,
+    )
+    service.append_message(
+        conversation_id=conversation_id,
+        system_id=system_id,
+        role=ConversationMessageRole.USER,
+        content=question,
+        intent=rewrite.intent if rewrite is not None else None,
+        rewritten_query=rewrite.rewritten_query if rewrite is not None else None,
+        rewrite_prompt_version=rewrite.prompt_version if rewrite is not None else None,
+        now=now,
+    )
+    if resolution.answer is not None:
+        service.append_message(
+            conversation_id=conversation_id,
+            system_id=system_id,
+            role=ConversationMessageRole.ASSISTANT,
+            content=resolution.answer.text,
+            now=now,
+        )
+
+
+def _persist_stream_terminal_turn(
+    *,
+    database: Session,
+    system_id: UUID,
+    account_id: UUID,
+    conversation_id: UUID,
+    event: QuestionStreamEvent,
+    now: datetime,
+) -> None:
+    """Persist the assistant answer when the stream reaches a terminal event.
+
+    The user question is already persisted in the stream prelude by
+    ``_persist_stream_user_turn``, so this function only appends the
+    assistant message on ``ANSWER_COMPLETED``. ``REFUSED`` events do not
+    produce an assistant message; the refusal ticket is recorded separately.
+    """
+    if event.kind not in {
+        QuestionStreamEventKind.ANSWER_COMPLETED,
+        QuestionStreamEventKind.REFUSED,
+    }:
+        return
+    service = ConversationService(database)
+    service.get_conversation(
+        conversation_id=conversation_id,
+        system_id=system_id,
+        account_id=account_id,
+    )
+    if event.kind is QuestionStreamEventKind.ANSWER_COMPLETED:
+        answer = event.payload
+        if not isinstance(answer, VerifiedAnswer):
+            raise TypeError(
+                f"ANSWER_COMPLETED event payload must be VerifiedAnswer, "
+                f"got {type(answer).__name__}"
+            )
+        service.append_message(
+            conversation_id=conversation_id,
+            system_id=system_id,
+            role=ConversationMessageRole.ASSISTANT,
+            content=answer.text,
+            now=now,
+        )
+
+
+def _persist_stream_user_turn(  # pylint: disable=too-many-arguments
+    *,
+    database: Session,
+    system_id: UUID,
+    account_id: UUID,
+    conversation_id: UUID,
+    question: str,
+    rewrite: QueryRewriteResult | None,
+    now: datetime,
+) -> None:
+    """Persist the user question at the start of an SSE stream.
+
+    Called before the first stream event is yielded, so the user question is
+    preserved even if the client disconnects mid-stream or the LLM provider
+    becomes unavailable. The assistant answer is persisted separately on
+    ``ANSWER_COMPLETED`` by ``_persist_stream_terminal_turn``.
+    """
+    service = ConversationService(database)
+    service.get_conversation(
+        conversation_id=conversation_id,
+        system_id=system_id,
+        account_id=account_id,
+    )
+    service.append_message(
+        conversation_id=conversation_id,
+        system_id=system_id,
+        role=ConversationMessageRole.USER,
+        content=question,
+        intent=rewrite.intent if rewrite is not None else None,
+        rewritten_query=rewrite.rewritten_query if rewrite is not None else None,
+        rewrite_prompt_version=rewrite.prompt_version if rewrite is not None else None,
+        now=now,
+    )
 
 
 def _require_system_access(
@@ -305,35 +674,85 @@ def _require_system_access(
 def _build_question_service(
     request: Request,
     database: Session,
+    *,
+    retrieval_profile_name: str | None = None,
 ) -> ReliableQuestionService:
     settings = request.app.state.settings
     retrieval_settings = settings.retrieval
     ticket_settings = settings.tickets
 
     components = _get_or_build_agent_components(request)
+    answer_prompt, rewrite_prompt = _resolve_active_prompts(database=database, request=request)
+    local_llm = _build_request_llm(
+        components.llm,
+        answer_prompt=answer_prompt,
+        rewrite_prompt=rewrite_prompt,
+    )
+
+    # An explicit profile name must resolve; the implicit default may use the
+    # packaged settings fallback before the seed migration has run.
+    profile_repository = RetrievalProfileRepository(database)
+    requested_profile_name = retrieval_profile_name or DEFAULT_RETRIEVAL_PROFILE_NAME
+    profile = profile_repository.get_active(requested_profile_name)
+    if retrieval_profile_name is not None and profile is None:
+        raise NotFoundError(
+            "RETRIEVAL_PROFILE_NOT_FOUND",
+            "检索配置不存在或未激活",
+        )
+    effective_profile_name = profile.name if profile is not None else DEFAULT_RETRIEVAL_PROFILE_NAME
+    effective_profile_version = (
+        profile.version if profile is not None else DEFAULT_RETRIEVAL_PROFILE_VERSION
+    )
+
     embeddings = components.embeddings
     search = PostgresKnowledgeSearch(database)
+    keyword_top_k = (
+        profile.keyword_top_k if profile is not None else retrieval_settings.keyword_top_k
+    )
+    vector_top_k = profile.vector_top_k if profile is not None else retrieval_settings.vector_top_k
+    result_top_k = profile.result_top_k if profile is not None else retrieval_settings.result_top_k
+    rrf_k = profile.rrf_k if profile is not None else retrieval_settings.rrf_k
+    keyword_weight = (
+        profile.keyword_weight if profile is not None else retrieval_settings.keyword_weight
+    )
+    vector_weight = (
+        profile.vector_weight if profile is not None else retrieval_settings.vector_weight
+    )
+    rerank_candidate_top_k = (
+        profile.rerank_candidate_top_k
+        if profile is not None
+        else retrieval_settings.rerank_candidate_top_k
+    )
+    rerank_top_k = profile.rerank_top_k if profile is not None else retrieval_settings.rerank_top_k
+    evidence_max_items = (
+        profile.evidence_max_items if profile is not None else retrieval_settings.evidence_max_items
+    )
+    evidence_max_characters = (
+        profile.evidence_max_characters
+        if profile is not None
+        else retrieval_settings.evidence_max_characters
+    )
     retrieval = BasicRetrievalService(
         embeddings=embeddings,
         lexical=search,
         vectors=search,
-        keyword_top_k=retrieval_settings.keyword_top_k,
-        vector_top_k=retrieval_settings.vector_top_k,
-        result_top_k=retrieval_settings.result_top_k,
-        rrf_k=retrieval_settings.rrf_k,
+        keyword_top_k=keyword_top_k,
+        vector_top_k=vector_top_k,
+        result_top_k=result_top_k,
+        rrf_k=rrf_k,
         metrics=_NoopMetrics(),
         reranker=components.reranker,
-        rerank_candidate_top_k=retrieval_settings.rerank_candidate_top_k,
-        rerank_top_k=retrieval_settings.rerank_top_k,
-        keyword_weight=retrieval_settings.keyword_weight,
-        vector_weight=retrieval_settings.vector_weight,
+        rerank_candidate_top_k=rerank_candidate_top_k,
+        rerank_top_k=rerank_top_k,
+        keyword_weight=keyword_weight,
+        vector_weight=vector_weight,
     )
     evidence = EvidenceOrganizer(
-        max_items=retrieval_settings.evidence_max_items,
-        max_characters=retrieval_settings.evidence_max_characters,
+        max_items=evidence_max_items,
+        max_characters=evidence_max_characters,
     )
     policy = components.policy
-    answers = components.answers
+    answers = AnswerGenerator(provider=local_llm)
     ticket_repository = SqlAlchemyTicketRepository(database)
     refusal = RefusalTicketService(
         repository=ticket_repository,
@@ -350,6 +769,8 @@ def _build_question_service(
         recorder=refusal,
         snapshots=snapshots,
         clock=lambda: datetime.now(UTC),
+        retrieval_profile_name=effective_profile_name,
+        retrieval_profile_version=effective_profile_version,
     )
 
 
@@ -363,7 +784,7 @@ class _AgentComponents:  # pylint: disable=too-few-public-methods
     request-scoped.
     """
 
-    __slots__ = ("embeddings", "reranker", "policy", "answers")
+    __slots__ = ("embeddings", "reranker", "policy", "answers", "llm")
 
     def __init__(
         self,
@@ -372,14 +793,22 @@ class _AgentComponents:  # pylint: disable=too-few-public-methods
         reranker: HttpRerankProvider,
         policy: DeterministicEvidencePolicy,
         answers: AnswerGenerator,
+        llm: OpenAiCompatibleLlmProvider,
     ) -> None:
         self.embeddings = embeddings
         self.reranker = reranker
         self.policy = policy
         self.answers = answers
+        self.llm = llm
 
 
 _AGENT_COMPONENTS_ATTR = "agent_components"
+
+# Per-request cache of active prompt definitions. The two scenarios are read
+# on every question request and stream event, but the active prompt set
+# does not change within a single request, so we cache it on ``request.state``
+# after the first resolution.
+_ACTIVE_PROMPTS_ATTR = "active_prompts"
 
 
 def _get_or_build_agent_components(request: Request) -> _AgentComponents:
@@ -406,12 +835,14 @@ def _get_or_build_agent_components(request: Request) -> _AgentComponents:
         degraded_score_multiplier=evidence_policy_settings.degraded_score_multiplier,
     )
     prompt = load_prompt_definition(settings.llm.prompt_version)
+    rewrite_prompt = load_prompt_definition(settings.llm.rewrite_prompt_version)
     llm = OpenAiCompatibleLlmProvider(
         base_url=settings.llm.base_url,
         api_key=settings.llm.api_key,
         model=settings.llm.model,
         timeout_seconds=settings.llm.timeout_seconds,
         prompt=prompt,
+        rewrite_prompt=rewrite_prompt,
     )
     answers = AnswerGenerator(provider=llm)
     components = _AgentComponents(
@@ -419,6 +850,7 @@ def _get_or_build_agent_components(request: Request) -> _AgentComponents:
         reranker=reranker,
         policy=policy,
         answers=answers,
+        llm=llm,
     )
     setattr(request.app.state, _AGENT_COMPONENTS_ATTR, components)
     return components
@@ -465,6 +897,8 @@ async def start_question_stream(
         system_id=payload.system_id,
         question=payload.question,
         required_terms=payload.required_terms_tuple,
+        conversation_id=payload.conversation_id,
+        retrieval_profile=payload.retrieval_profile,
         expires_at=expires_at,
     )
     redis.set(
@@ -510,7 +944,13 @@ async def question_stream_events(  # pylint: disable=too-many-arguments
         account=context.account,
         database=database,
     )
-    question_service = _build_question_service(request, database)
+    conversation_id = stored.conversation_id
+    retrieval_profile = stored.retrieval_profile
+    question_service = _build_question_service(
+        request,
+        database,
+        retrieval_profile_name=retrieval_profile,
+    )
 
     async def event_source() -> AsyncIterator[bytes]:
         async for chunk in _stream_resolution(
@@ -520,6 +960,10 @@ async def question_stream_events(  # pylint: disable=too-many-arguments
             system_id=system_id,
             question=question,
             required_terms=required_terms,
+            conversation_id=conversation_id,
+            retrieval_profile=retrieval_profile,
+            database=database,
+            request=request,
         ):
             yield chunk
 

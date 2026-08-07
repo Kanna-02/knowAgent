@@ -156,6 +156,8 @@ class EvidenceDecision:  # pylint: disable=too-many-instance-attributes
     degraded_reasons: tuple[str, ...]
     decided_at: datetime
     ticket_id: UUID | None = None
+    retrieval_profile_name: str | None = None
+    retrieval_profile_version: str | None = None
 
     def __post_init__(self) -> None:
         if not self.query.strip() or not self.normalized_query.strip():
@@ -170,6 +172,15 @@ class EvidenceDecision:  # pylint: disable=too-many-instance-attributes
             raise ValueError("evidence decision score must be finite")
         if self.decided_at.tzinfo is None:
             raise ValueError("evidence decision time must be timezone-aware")
+        if (self.retrieval_profile_name is None) != (self.retrieval_profile_version is None):
+            raise ValueError("retrieval profile name and version must be set together")
+        if self.retrieval_profile_name is not None and not self.retrieval_profile_name.strip():
+            raise ValueError("retrieval profile name must not be blank")
+        if (
+            self.retrieval_profile_version is not None
+            and not self.retrieval_profile_version.strip()
+        ):
+            raise ValueError("retrieval profile version must not be blank")
         if self.outcome is EvidenceDecisionOutcome.SUFFICIENT and self.reason_codes:
             raise ValueError("sufficient evidence decision must not include refusal reasons")
         if self.outcome.is_refusal and not self.reason_codes:

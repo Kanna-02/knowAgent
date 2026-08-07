@@ -18,6 +18,7 @@ from knowagent.agent.domain.models import (
     GenerationEvent,
     GenerationRequest,
     QuestionResolutionStatus,
+    QuestionStreamEventKind,
     VerifiedAnswer,
 )
 from knowagent.common.errors import ConflictError, ProviderUnavailableError
@@ -174,6 +175,8 @@ def service(
     llm: StubLlm,
     recorder: RecordingResolutionRecorder,
     evidence_max_characters: int = 500,
+    retrieval_profile_name: str | None = None,
+    retrieval_profile_version: str | None = None,
 ) -> ReliableQuestionService:
     return ReliableQuestionService(
         retrieval=retrieval,
@@ -188,6 +191,8 @@ def service(
         recorder=recorder,
         snapshots=recorder,
         clock=lambda: NOW,
+        retrieval_profile_name=retrieval_profile_name,
+        retrieval_profile_version=retrieval_profile_version,
     )
 
 
@@ -213,6 +218,27 @@ async def test_resolve_with_sufficient_evidence_returns_verified_answer() -> Non
     assert recorder.sufficient[0].outcome is EvidenceDecisionOutcome.SUFFICIENT
     assert recorder.answers[0][1] == result.answer
     assert recorder.refusals == []
+
+
+@pytest.mark.anyio
+async def test_resolve_records_effective_retrieval_profile_version() -> None:
+    recorder = RecordingResolutionRecorder()
+    result = await service(
+        retrieval=StubRetrieval(RetrievalResult(query="如何发布？", hits=(make_hit(),))),
+        llm=StubLlm(),
+        recorder=recorder,
+        retrieval_profile_name="default",
+        retrieval_profile_version="profile-v2",
+    ).resolve(
+        run_id=uuid4(),
+        requester_id=uuid4(),
+        system_id=uuid4(),
+        question="如何发布？",
+    )
+
+    assert result.decision.retrieval_profile_name == "default"
+    assert result.decision.retrieval_profile_version == "profile-v2"
+    assert recorder.sufficient[0].retrieval_profile_version == "profile-v2"
 
 
 @pytest.mark.anyio
@@ -395,3 +421,76 @@ async def test_resolve_when_retrieval_unavailable_propagates_system_failure_with
 
     assert recorder.sufficient == []
     assert recorder.refusals == []
+
+
+class _QueryCapturingRetrieval:
+    def __init__(self, result: RetrievalResult) -> None:
+        self._result = result
+        self.captured_query: str | None = None
+
+    async def retrieve(self, *, system_id: UUID, query: str) -> RetrievalResult:
+        del system_id
+        self.captured_query = query
+        return self._result
+
+
+@pytest.mark.anyio
+async def test_resolve_with_rewrite_provides_rewritten_query_to_retrieval() -> None:
+    """When a rewrite is supplied, retrieval sees the rewritten query."""
+    from knowagent.agent.domain.conversation import IntentKind, QueryRewriteResult
+
+    recorder = RecordingResolutionRecorder()
+    retrieval = _QueryCapturingRetrieval(
+        RetrievalResult(query="rewritten", hits=(make_hit(),)),
+    )
+    rewrite = QueryRewriteResult(
+        intent=IntentKind.FOLLOW_UP,
+        rewritten_query="什么是 ESB？它支持哪些协议？",
+        original_query="它支持哪些协议？",
+    )
+    result = await service(
+        retrieval=retrieval,
+        llm=StubLlm(),
+        recorder=recorder,
+    ).resolve(
+        run_id=uuid4(),
+        requester_id=uuid4(),
+        system_id=uuid4(),
+        question="它支持哪些协议？",
+        rewrite=rewrite,
+    )
+
+    assert result.status is QuestionResolutionStatus.ANSWERED
+    assert retrieval.captured_query == rewrite.rewritten_query
+
+
+@pytest.mark.anyio
+async def test_resolve_stream_with_rewrite_uses_rewritten_query_for_retrieval() -> None:
+    """The streamed path also routes the rewritten query to retrieval."""
+    from knowagent.agent.domain.conversation import IntentKind, QueryRewriteResult
+
+    recorder = RecordingResolutionRecorder()
+    retrieval = _QueryCapturingRetrieval(
+        RetrievalResult(query="rewritten", hits=(make_hit(),)),
+    )
+    rewrite = QueryRewriteResult(
+        intent=IntentKind.FOLLOW_UP,
+        rewritten_query="什么是 ESB？它支持哪些协议？",
+        original_query="它支持哪些协议？",
+    )
+    events = []
+    async for event in service(
+        retrieval=retrieval,
+        llm=StubLlm(),
+        recorder=recorder,
+    ).resolve_stream(
+        run_id=uuid4(),
+        requester_id=uuid4(),
+        system_id=uuid4(),
+        question="它支持哪些协议？",
+        rewrite=rewrite,
+    ):
+        events.append(event)
+
+    assert retrieval.captured_query == rewrite.rewritten_query
+    assert any(event.kind is QuestionStreamEventKind.ANSWER_COMPLETED for event in events)

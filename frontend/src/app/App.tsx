@@ -18,6 +18,11 @@ const AdminShell = lazy(() =>
     default: component,
   })),
 );
+const ConfigurationPage = lazy(() =>
+  import("../features/admin/ConfigurationPage").then(({ ConfigurationPage: component }) => ({
+    default: component,
+  })),
+);
 const SystemsPage = lazy(() =>
   import("../features/admin/SystemsPage").then(({ SystemsPage: component }) => ({
     default: component,
@@ -72,9 +77,9 @@ export function App(): ReactNode {
                     }
                   >
                     <Route index element={<Navigate replace to="question" />} />
-                  <Route path="question" element={<UserHomePage />} />
-                  <Route path="tickets" element={<TicketsPage />} />
-                </Route>
+                    <Route path="question" element={<UserHomePage />} />
+                    <Route path="tickets" element={<TicketsPage />} />
+                  </Route>
                   <Route
                     path="/admin"
                     element={
@@ -86,6 +91,7 @@ export function App(): ReactNode {
                     <Route index element={<Navigate replace to="accounts" />} />
                     <Route path="accounts" element={<AccountsPage />} />
                     <Route path="systems" element={<SystemsPage />} />
+                    <Route path="configuration" element={<ConfigurationPage />} />
                   </Route>
                   <Route
                     path="/forbidden"

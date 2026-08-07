@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { apiClient } from "../../api/client";
-import type { BusinessSystemView, QuestionStreamEvent } from "../../api/types";
+import type { BusinessSystemView, ConversationView, QuestionStreamEvent } from "../../api/types";
 import { click, flush, mountWithAuth, mouseDown, type MountedView } from "../../test/renderTestApp";
 import type { AuthContextValue } from "./authContextValue";
 import { UserHomePage } from "./UserHomePage";
 
 const SYSTEM_ID = "20000000-0000-0000-0000-000000000001";
+const CONVERSATION_ID = "40000000-0000-0000-0000-000000000001";
 
 const system: BusinessSystemView = {
   id: SYSTEM_ID,
@@ -15,6 +16,15 @@ const system: BusinessSystemView = {
   description: null,
   status: "ACTIVE",
   owners: [],
+  created_at: "2026-08-02T10:00:00Z",
+  updated_at: "2026-08-02T10:00:00Z",
+};
+
+const conversation: ConversationView = {
+  id: CONVERSATION_ID,
+  system_id: SYSTEM_ID,
+  account_id: "10000000-0000-0000-0000-000000000001",
+  title: "问题",
   created_at: "2026-08-02T10:00:00Z",
   updated_at: "2026-08-02T10:00:00Z",
 };
@@ -86,6 +96,13 @@ async function selectSystem(container: HTMLElement): Promise<void> {
 describe("UserHomePage SSE stream", () => {
   it("renders the streamed answer until completion", async () => {
     vi.spyOn(apiClient, "listSystems").mockResolvedValue([system]);
+    vi.spyOn(apiClient, "listConversations").mockResolvedValue({
+      items: [],
+      page: 1,
+      page_size: 100,
+      total: 0,
+    });
+    vi.spyOn(apiClient, "createConversation").mockResolvedValue(conversation);
     (globalThis as { EventSource: unknown }).EventSource = FakeEventSource;
     window.EventSource = FakeEventSource as unknown as typeof EventSource;
 
@@ -101,6 +118,8 @@ describe("UserHomePage SSE stream", () => {
       system_id: SYSTEM_ID,
       question: "问题",
       required_terms: [],
+      conversation_id: CONVERSATION_ID,
+      retrieval_profile: null,
       expires_at: "2026-08-02T12:00:00Z",
     });
 
@@ -118,6 +137,7 @@ describe("UserHomePage SSE stream", () => {
       system_id: SYSTEM_ID,
       question: "问题",
       required_terms: [],
+      conversation_id: CONVERSATION_ID,
     });
 
     const source = FakeEventSource.last;
@@ -127,6 +147,9 @@ describe("UserHomePage SSE stream", () => {
       run_id: "x",
       system_id: SYSTEM_ID,
       question: "问题",
+      rewritten_query: "企业服务总线问题",
+      intent: "follow_up",
+      rewrite_prompt_version: "query-rewrite-v1",
     });
     await flush();
     source!.emit({
@@ -167,10 +190,18 @@ describe("UserHomePage SSE stream", () => {
     expect(view.container.textContent).toContain("已完成");
     expect(view.container.textContent).toContain("检索已降级");
     expect(view.container.textContent).toContain("基础融合排序");
+    expect(view.container.textContent).toContain("已关联上下文");
   });
 
   it("surfaces refusal and ticket routing when evidence is insufficient", async () => {
     vi.spyOn(apiClient, "listSystems").mockResolvedValue([system]);
+    vi.spyOn(apiClient, "listConversations").mockResolvedValue({
+      items: [],
+      page: 1,
+      page_size: 100,
+      total: 0,
+    });
+    vi.spyOn(apiClient, "createConversation").mockResolvedValue(conversation);
     (globalThis as { EventSource: unknown }).EventSource = FakeEventSource;
     window.EventSource = FakeEventSource as unknown as typeof EventSource;
     vi.spyOn(apiClient, "startQuestionStream").mockResolvedValue({
@@ -180,6 +211,8 @@ describe("UserHomePage SSE stream", () => {
       system_id: SYSTEM_ID,
       question: "问题",
       required_terms: [],
+      conversation_id: CONVERSATION_ID,
+      retrieval_profile: null,
       expires_at: "2026-08-02T12:00:00Z",
     });
 

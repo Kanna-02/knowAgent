@@ -417,6 +417,95 @@ p {
   width: min(100%, 360px);
 }
 
+.question-session {
+  display: grid;
+  gap: var(--space-4);
+  margin-top: var(--space-5);
+}
+
+.conversation-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: var(--toolbar-height);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.conversation-selector {
+  width: min(100%, 420px);
+}
+
+.conversation-thread {
+  display: grid;
+  gap: var(--space-3);
+  max-height: 52vh;
+  overflow-y: auto;
+  padding-right: var(--space-2);
+}
+
+.conversation-empty {
+  min-height: 120px;
+  display: grid;
+  place-items: center;
+  color: var(--color-text-secondary);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.conversation-message {
+  min-width: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+}
+
+.conversation-message-user {
+  justify-self: end;
+  width: min(88%, 760px);
+  background: var(--color-surface-elevated);
+}
+
+.conversation-message-assistant {
+  width: min(100%, 880px);
+  border-left: 3px solid var(--color-primary);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+}
+
+.conversation-message-heading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.conversation-message-label {
+  display: block;
+  color: var(--color-text-secondary);
+  font-size: var(--font-small-size);
+  font-weight: var(--font-heading-weight);
+}
+
+.conversation-message .ant-typography {
+  margin-bottom: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.current-conversation-turn {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.configuration-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 var(--space-4);
+}
+
+.configuration-form-grid .ant-input-number {
+  width: 100%;
+}
+
 .system-selection-state {
   display: grid;
   min-height: 280px;
@@ -444,6 +533,10 @@ p {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
+}
+
+.question-session .question-composer {
+  margin-top: 0;
 }
 
 .composer-context {
@@ -685,5 +778,28 @@ p {
 
   .system-selector {
     width: 100%;
+  }
+
+  .conversation-toolbar {
+    align-items: stretch;
+  }
+
+  .conversation-selector {
+    flex: 1;
+    width: auto;
+    min-width: 0;
+  }
+
+  .conversation-thread {
+    max-height: none;
+  }
+
+  .conversation-message-user,
+  .conversation-message-assistant {
+    width: 100%;
+  }
+
+  .configuration-form-grid {
+    grid-template-columns: 1fr;
   }
 }

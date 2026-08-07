@@ -9,6 +9,8 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 from redis import Redis
 
+from knowagent.agent.api.configuration_router import router as configuration_router
+from knowagent.agent.api.conversations_router import router as conversations_router
 from knowagent.agent.api.router import router as agent_router
 from knowagent.common.errors import KnowAgentError
 from knowagent.documents.api.router import router as documents_router
@@ -80,6 +82,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"status": "ok"}
 
     application.include_router(agent_router, prefix="/api/v1")
+    application.include_router(conversations_router, prefix="/api/v1")
+    application.include_router(configuration_router, prefix="/api/v1")
     application.include_router(identity_router, prefix="/api/v1")
     application.include_router(systems_router, prefix="/api/v1")
     application.include_router(documents_router, prefix="/api/v1")
