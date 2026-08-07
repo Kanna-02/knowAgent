@@ -467,7 +467,7 @@ function ProfileDrawer({
           <Button onClick={onClose}>取消</Button>
         </Space>
       </Form>
-  </Drawer>
+    </Drawer>
   );
 }
 
@@ -480,8 +480,7 @@ const validateRetrievalResultBudget: CrossFieldValidator = (getFieldValue, value
   const keyword = getFieldValue("keyword_top_k");
   const vector = getFieldValue("vector_top_k");
   if (typeof keyword !== "number" || typeof vector !== "number") return undefined;
-  if (value > keyword + vector)
-    return "结果 Top-K 不能超过关键词与向量 Top-K 之和";
+  if (value > keyword + vector) return "结果 Top-K 不能超过关键词与向量 Top-K 之和";
   return undefined;
 };
 
@@ -489,8 +488,7 @@ const validateRerankCandidateBudget: CrossFieldValidator = (getFieldValue, value
   const keyword = getFieldValue("keyword_top_k");
   const vector = getFieldValue("vector_top_k");
   if (typeof keyword !== "number" || typeof vector !== "number") return undefined;
-  if (value > keyword + vector)
-    return "Rerank 候选数不能超过关键词与向量 Top-K 之和";
+  if (value > keyword + vector) return "Rerank 候选数不能超过关键词与向量 Top-K 之和";
   return undefined;
 };
 
@@ -532,13 +530,13 @@ function NumberField({
       rules={[
         { required: true },
         {
-          validator: async (_rule, value) => {
-            if (!crossFieldValidator || !form || value == null) return;
+          validator: (_rule, value) => {
+            if (!crossFieldValidator || !form || value == null) return Promise.resolve();
             const message = crossFieldValidator(
               (field) => form.getFieldValue(field),
               value as number,
             );
-            if (message) throw new Error(message);
+            return message ? Promise.reject(new Error(message)) : Promise.resolve();
           },
         },
       ]}

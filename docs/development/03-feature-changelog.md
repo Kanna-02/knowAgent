@@ -17,6 +17,69 @@
 
 ## 功能变更记录
 
+### 2026-08-07 - 追溯状态修正：Phase 3 第 2 项已实现，标记为完成
+
+类型：文档 / 追溯修正
+
+相关需求：REQ-008、REQ-014；AC-004、AC-005、AC-008。
+
+相关文件：`docs/product/06-roadmap.md`、`docs/development/10-current-status.md`、`docs/development/17-traceability-matrix.md`。
+
+变更说明：
+
+1. 路线图与状态文档此前将 Phase 3 第 2 项「多轮上下文、意图识别、提示词和检索配置版本」按「未完成」计入进度，但代码核对发现其早已随 Phase 3 第 1 项切片落地。
+2. 实际代码现状：`agent/application/query_rewriter.py` 提供规则门控 + LLM 支撑的意图识别与多轮查询重写；`agent/domain/conversation.py` 定义 `Conversation`/`ConversationMessage`/`IntentKind`/`QueryRewriteTurn`/`QueryRewriteResult` 与 `RetrievalProfile`；`agent/api/configuration_router.py` 提供 `prompt-definitions` 与 `retrieval-profiles` 的 list/get/save/activate 管理端点；`agent/api/conversations_router.py` 提供多轮历史回查；两份 Phase 3 迁移与前端 `ConfigurationPage`、`test_phase3_configuration_api.py`、`test_query_rewriter.py`、`test_retrieval_profile_repository.py` 等测试齐备。
+3. 据此修正：roadmap Phase 3 总进度 2/4 → 3/4，第 2 项标注「已完成」；current-status 当前阶段块同步为 3/4；traceability REQ-008 由 `skeleton`/「待实现」推进为 `implementing` 并补齐实现文件清单，REQ-014 备注的「数据库 Profile、激活切换和效果回滚待后续 Phase 3 项」改为「已补齐」，并补充前端管理 UI 与集成测试已落地。REQ-008 真实质量评测 AC-004/AC-005 仍待补数据，故仅推进到 `implementing` 而非 `done`。
+
+影响范围：仅文档与追溯矩阵，未改任何代码或迁移。
+
+验证方式：阅读代码确认上述文件、端点、测试均已实现；本地运行既有 `test_query_rewriter.py`、`test_retrieval_profile_repository.py`、`test_conversation_service.py`、`test_document_configuration.py` 与 `test_phase3_configuration_api.py` 在 309 passed 范围内全部通过（本机缺 boto3/botocore 的 12 项 collection error 与本项无关）。
+
+后续注意：此次仅状态对齐，未新增 89 行以外的能力。Phase 3 真正剩余的是第 3 项通知、第 4 项前端页面与横向质量门禁。
+
+### 2026-08-07 - Phase 3 第 4 项前端：文档版本、分析仪表盘和审计日志管理页
+
+类型：新增 / 测试
+
+相关需求：REQ-011、REQ-012、REQ-013；AC-003、AC-006、AC-007、AC-010、AC-011。
+
+相关文件：`frontend/src/features/admin/DocumentsPage.tsx`、`frontend/src/features/admin/AnalyticsPage.tsx`、`frontend/src/features/admin/AuditLogsPage.tsx`、对应 3 个测试文件、`frontend/src/api/client.ts`、`frontend/src/api/types.ts`、`frontend/src/app/App.tsx`、`frontend/src/features/admin/AdminShell.tsx`、`frontend/src/styles.css`。
+
+变更说明：
+
+1. 文档版本管理页按业务系统分页展示文档，并在详情抽屉中展示版本、处理状态与发布状态；草稿/退役版本支持确认发布，已发布版本支持确认退役，操作完成后同步刷新版本与文档当前发布状态。
+2. 分析仪表盘按业务系统并行加载问题概览、高频问题和知识缺口；使用 4 个紧凑统计项与 2 个扫描型表格展示问题量、拒答、工单和缺口来源，不引入额外图表依赖。
+3. 审计日志页提供 action、object_type、result 过滤、服务端分页、请求 ID/操作者/对象/详情展示和可恢复错误状态；该页保持 ADMIN 全局视角，不增加业务系统筛选。
+4. 3 个页面以路由级懒加载接入 `/admin/documents`、`/admin/analytics`、`/admin/audit-logs`，管理侧栏使用 Lucide 图标新增对应入口；API 客户端与类型层覆盖后端 8 个端点，列表请求均保留分页、最新请求胜出和原位重试语义。
+5. 新增 11 项组件测试，覆盖正常加载、错误重试、刷新、过期请求忽略、抽屉 Portal 展示和发布确认；修复测试异步链稳定方式，并将 Ant Design 跨字段 validator 恢复为显式 Promise 契约。
+
+影响范围：管理后台导航、路由、API 类型/客户端、文档运营、质量分析、审计查看和响应式样式；未新增前端依赖，未改变后端 API 或数据库 schema。
+
+验证方式：前端默认完整测试 63/63 通过；`tsc --noEmit`、ESLint（零 warning）、Prettier 检查和 Vite 生产构建通过。覆盖率运行的 63 项测试全部通过，但全局语句/分支/函数/行覆盖率为 78.29%/65.90%/72.93%/80.83%，仍低于全局 80% 门禁；主要缺口在既有 API client 和 TicketsPage。`npm audit --audit-level=moderate` 仍报告 React Router RSC 模式 2 个 high，自动修复会强制降级到 7.11.0，未执行 breaking force fix。
+
+后续注意：三个页面尚未在真实 PostgreSQL/API 登录会话中完成桌面与移动浏览器人工验收；Phase 3 仍为 3/4，剩余第 3 项公司通知 API、失败重试和通知记录。
+
+### 2026-08-07 - Phase 3 第 4 项后端：文档生命周期、对话分析、高频问题、知识缺口和审计
+
+类型：新增 / 测试
+
+相关需求：REQ-011、REQ-012、REQ-013；AC-003、AC-006、AC-007、AC-010、AC-011。
+
+相关文件：`backend/src/knowagent/documents/api/lifecycle_router.py`、`backend/src/knowagent/documents/api/lifecycle_schemas.py`、`backend/src/knowagent/analytics/domain/models.py`、`backend/src/knowagent/analytics/application/analytics_service.py`、`backend/src/knowagent/analytics/api/router.py`、`backend/src/knowagent/analytics/api/schemas.py`、`backend/src/knowagent/audit/domain/models.py`、`backend/src/knowagent/audit/application/audit_query_service.py`、`backend/src/knowagent/audit/api/router.py`、`backend/src/knowagent/audit/api/schemas.py`、`backend/src/knowagent/api/app.py`、`backend/tests/unit/test_document_lifecycle.py`、`backend/tests/unit/test_analytics_service.py`、`backend/tests/unit/test_audit_query_service.py`。
+
+变更说明：
+
+1. 文档生命周期管理：新增 4 个管理端点——`GET /systems/{system_id}/documents`、`GET /systems/{system_id}/documents/{document_id}/versions`、`POST .../versions/{version_id}/publish`、`POST .../versions/{version_id}/retire`；发布/退役复用既有 `KnowledgePublicationService` 保证发布原子切换当前指针并退役旧版本来源/片段，并在事后写入 `document.publish`/`document.retire` 审计；访问控制复用 `require_system_access` + `MANAGEMENT_ROLES = {SYSTEM_OWNER, ADMIN}`，写端点使用 `CsrfContext`。
+2. 对话分析：新增 3 个管理端点——系统概览（用户问题数、拒答数、未解决/已解决工单数与总数）、高频问题（按规范化问题聚合 occurrence_count 总和并降序排序，带 refusal/ticket 子计数）、知识缺口（合并 `EvidenceDecisionRecord` 的 `INSUFFICIENT` 拒答与开放工单 occurrence 合并去重，按时序排序）；窗口默认最近 30 天且 tz-safe 归一化，top_n 由 FastAPI Query 约束在 1-100。
+3. 管理审计日志查询：新增 `GET /admin/audit-logs`，支持按 actor/action/object_type/object_id/result/时间窗过滤与分页，结果按 `created_at desc, id desc` 排序；复用既有 `AuditQueryService`（read side），写侧 `SqlAlchemyAuditSink` 早已由 identity/tickets/agent 共享；通过 `AdminContext` 强制仅 ADMIN 可见。
+4. 路由注册到 `api/app.py`，新增 `analytics`、`audit` 两个顶级包遵循模块化单体分层（domain/application/api/infrastructure）。
+
+影响范围：仅后端新增只读分析与管理写端点，不改变已有问答/工单/检索链路；新模块不触碰既有数据库 schema，复用既有表读侧。
+
+验证方式：`tests/unit/test_document_lifecycle.py` 10 项、`tests/unit/test_analytics_service.py` 6 项、`tests/unit/test_audit_query_service.py` 10 项全部通过；运行 `tests/unit` 排除本机缺 boto3/botocore 的 5 项既有 collection error 后共 309 passed、0 failed。新模块 Black/isort 清洁，mypy --strict 20 文件零错误，Pylint 10.00/10，Bandit 中高危 0。
+
+后续注意：前端管理页面（文档版本管理、分析仪表盘、审计日志查看）尚未实现；本轮只覆盖后端 API 与领域服务。12 项 collection error 均因本机缺 boto3/botocore 可选依赖，恢复依赖后既有集成测试可正常运行。
+
 ### 2026-08-07 - Phase 3 review 修复（1 P0 + 2 P1 + 2 P2 + 3 P3）
 
 类型：修复

@@ -142,7 +142,7 @@ describe("TicketsPage", () => {
     vi.spyOn(apiClient, "listTicketReplies").mockResolvedValue([]);
     vi.spyOn(apiClient, "listTicketTransitions").mockResolvedValue([]);
 
-const ownerUser = ownerAuth.user as NonNullable<typeof ownerAuth.user>;
+    const ownerUser = ownerAuth.user as NonNullable<typeof ownerAuth.user>;
     const userAuth: AuthContextValue = {
       ...ownerAuth,
       user: {

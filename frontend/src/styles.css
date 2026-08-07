@@ -803,3 +803,57 @@ p {
     grid-template-columns: 1fr;
   }
 }
+
+.analytics-overview-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+.overview-stat {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+}
+
+.analytics-tables-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-6);
+}
+
+.analytics-section-title {
+  font-size: var(--font-h3-size);
+  font-weight: var(--font-heading-weight);
+  margin-bottom: var(--space-3);
+}
+
+.audit-id {
+  font-size: var(--font-small-size);
+  color: var(--color-text-secondary);
+}
+
+.audit-detail-content {
+  margin-top: var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  max-height: 400px;
+  overflow: auto;
+}
+
+.audit-detail-content pre {
+  margin: 0;
+  font-size: var(--font-small-size);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+@media (max-width: 1023px) {
+  .analytics-tables-row {
+    grid-template-columns: 1fr;
+  }
+}

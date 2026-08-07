@@ -5,7 +5,7 @@
 ## 1. 快照时间
 
 ```text
-更新时间：2026-08-06（Phase 3 代码完成；本机/Docker 资源盘点完成，Rerank 权重可复用、运行时待安装）
+更新时间：2026-08-07（Phase 3 第 4 项文档版本、分析仪表盘和审计日志管理页完成）
 更新人/助手：Codex
 当前分支：master
 远程仓库：git@github.com:Kanna-02/knowAgent.git
@@ -15,10 +15,10 @@
 ## 2. 当前阶段
 
 ```text
-当前阶段：Phase 2 关闭门禁待真实评测数据；Phase 3 质量与运营增强已开始（1/4）
-阶段目标：保留 Phase 2 系统隔离问答/工单闭环，同时完成混合检索调优、Rerank 和用户可见降级
-当前任务：Phase 3 第 1 项代码、自动化和真实向量降级浏览器链路已完成；资源盘点确认已有 Rerank 权重，下一步先拆分本地加载路径，再安装缺失运行时并做真实推理
-任务状态：Phase 3 1/4 功能范围完成；后端 284 passed / 24 skipped、覆盖率 86.64%，model-service 49 passed / 1 skipped、覆盖率 85.63%，前端 47/47；真实 PostgreSQL/Redis/API/SSE/浏览器已验证向量降级拒答和工单创建。Phase 2 仍因 AC-004/AC-005 真实质量数据未关闭
+当前阶段：Phase 2 关闭门禁待真实评测数据；Phase 3 质量与运营增强进行中（3/4）
+阶段目标：保留 Phase 2 系统隔离问答/工单闭环，同时完成混合检索调优、Rerank、用户可见降级、多轮上下文与意图识别、提示词与检索配置版本化，以及文档生命周期、对话分析、高频问题、知识缺口与审计运营能力
+当前任务：Phase 3 第 1、2、4 项已完成；下一步实现第 3 项公司通知 API、失败重试和通知记录，并补本地缺失运行时（boto3/pymupdf）以恢复全部已有集成测试
+任务状态：Phase 3 3/4 功能范围完成。第 4 项后端 8 端点 + 26 项单测、前端文档版本/分析仪表盘/审计日志 3 个管理页 + 11 项组件测试均已落地；前端完整测试 63/63、TypeScript、ESLint、Prettier 和生产构建通过。覆盖率运行全部测试通过，但全局语句/分支/函数/行覆盖率 78.29%/65.90%/72.93%/80.83% 未满足 80% 门禁；真实登录会话浏览器验收待补。Phase 2 仍因 AC-004/AC-005 真实质量数据未关闭
 ```
 
 ## 3. 已完成
@@ -94,20 +94,23 @@
 68. `model-service` 已实现 `/v1/rerank`、FlagEmbedding 延迟加载/线程推理/并发限制、请求资源上限和 Embedding 必需/Rerank 可降级 readiness；`FlagEmbedding==1.4.0` 仅作为 `rerank` optional extra。
 69. 前端回答与拒答均展示具体降级原因；真实 PostgreSQL 17 + Redis + API/SSE + 浏览器已验证向量服务不可用时只用关键词、可靠拒答继续建单。1280x720 与 390x844 均无横向溢出、Alert 重叠或文本截断。
 70. 已完成本机和 Docker 资源盘点：`bge-m3` 已在 Docker volume，原生/ONNX Rerank 权重已在 `knowledge-rag/deploy/models/`；四个 Python 环境均缺 Rerank 运行时，TEI 镜像/容器不存在。盘点写入 `docs/operations/09-runtime-resource-inventory.md`，未继续下载权重。
+71. 已实现 Phase 3 第 4 项后端：文档/版本列表与发布/退役、系统概览/高频问题/知识缺口、全局审计日志分页过滤共 8 个端点，新增 26 项单测；发布/退役复用 `KnowledgePublicationService`，访问控制复用 `require_system_access`、`AdminContext` 与 `MANAGEMENT_ROLES`。
+72. 已实现 Phase 3 第 4 项前端：`DocumentsPage`、`AnalyticsPage`、`AuditLogsPage` 以路由级懒加载接入管理后台，覆盖系统选择、分页/过滤、版本抽屉、发布/退役确认、问题统计、高频问题、知识缺口和审计详情。
+73. 已新增 11 项组件测试并完成前端全量验证：63/63 测试、TypeScript、ESLint、Prettier 和 Vite 生产构建通过；全局覆盖率门禁仍受 API client 与 TicketsPage 既有缺口影响，依赖审计仍有 React Router RSC 模式 2 个 high。
 
 ## 4. 正在进行
 
 1. Phase 2 功能、自动化和真实服务集成已完成；正在等待真实标注评测集执行 AC-004/AC-005。实际本地账号已补齐并完成 Phase 3 向量降级拒答浏览器链路，完整带引用回答/工单管理人工验收仍需已发布知识和对应角色数据。
 2. Phase 1 功能范围 6/6 已实现，并于 2026-08-04 在固定 PostgreSQL/Redis/MinIO integration 资源上完成四格式完整持久化与隔离验收，现已正式关闭。
 3. 本地 PostgreSQL 17、pgvector、pg_trgm、Redis、MinIO、Ollama Embedding 和 Qwen `qwen3.5-27b` 已完成 Phase 2 API/SSE/Worker 组合联调。
-4. Phase 3 第 1 项为 1/4：代码、单测、静态检查和真实向量降级页面通过；本机已有可复用 Rerank 权重，但 `model-service[rerank]` 未安装。当前先处理模型 ID/本地加载路径解耦，再安装运行时；目标 Linux 资源信息仍是生产门禁。
+4. Phase 3 为 3/4：第 1、2、4 项代码和自动化已完成；第 4 项三个管理页待真实登录会话浏览器验收。第 3 项公司通知 API、失败重试和通知记录尚未实现；Rerank 真实推理与目标 Linux 资源信息仍是独立生产门禁。
 
 ## 5. 未完成 / 下一步
 
 1. 用户提供至少 50 条真实标注 ESB 可回答问题及无知识问题集，按 `docs/development/22-phase2-evaluation.md` 执行质量门禁并把脱敏汇总写入验收报告。
 2. 拆分 Rerank 对外模型 ID 与本地加载路径，复用 `knowledge-rag` 已有权重；确认依赖树和缓存命中后再安装运行时，不重新下载模型。随后使用至少一条已发布知识补跑真实 Rerank 回答路径，并用 ESB 评测集对比基础 RRF 与 Rerank 质量。
 3. 使用测试负责人/系统负责人账号补工单详情、回复、状态流转、答案提交和审核来源展示；当前普通用户账号仅覆盖问答与拒答入口。
-4. 取得目标 Linux CPU/内存/GPU 信息，确定 PyTorch 原生、量化或 ONNX 替代方案并生成生产传递依赖锁；随后继续 Phase 3 多轮/版本项。
+4. 实现 Phase 3 第 3 项公司通知 API、失败重试和通知记录；取得目标 Linux CPU/内存/GPU 信息后，再确定 PyTorch 原生、量化或 ONNX 替代方案并生成生产传递依赖锁。
 
 ## 6. 阻塞点
 
@@ -123,6 +126,8 @@
 
 | 文件 | 改动说明 | 状态 |
 | --- | --- | --- |
+| `frontend/src/features/admin/DocumentsPage.tsx`、`AnalyticsPage.tsx`、`AuditLogsPage.tsx` | Phase 3 第 4 项文档版本、分析仪表盘和审计日志管理页 | 已完成；11 项组件测试通过，真实登录会话浏览器验收待补 |
+| `frontend/src/api/client.ts`、`frontend/src/api/types.ts`、`frontend/src/app/App.tsx`、`frontend/src/features/admin/AdminShell.tsx`、`frontend/src/styles.css` | 8 个管理端点客户端/类型、3 个懒加载路由、管理导航和响应式样式 | 已完成；TypeScript、ESLint、Prettier、Vite 构建通过 |
 | `backend/src/knowagent/agent/application/answer_generation.py`、`backend/src/knowagent/agent/application/reliable_question.py`、`backend/src/knowagent/agent/domain/models.py` | 受证据约束的真实增量 claim、`QuestionStreamEvent` 领域类型与 `resolve_stream` | 已完成；真实 Qwen 增量流通过 |
 | `backend/src/knowagent/agent/api/router.py`、`backend/src/knowagent/agent/api/schemas.py` | `POST/GET /questions/stream`、账号绑定/单次 Redis token 与 SSE 事件模型 | 已完成；真实 Redis/API 集成通过 |
 | `backend/src/knowagent/documents/application/processor.py`、`backend/src/knowagent/documents/application/chunk_ingestion.py`、`backend/src/knowagent/documents/ports.py` | 可恢复 `ChunkIngestionService`、`ChunkIngestionHook` 与 `EMBEDDING_UNAVAILABLE` 重试状态 | 已完成；真实 Worker→Embedding 通过 |
@@ -213,6 +218,8 @@
 
 | 命令/方式 | 结果 | 说明 |
 | --- | --- | --- |
+| Phase 3 第 4 项前端 test/typecheck/lint/format/build | 通过 | 19 个测试文件、63/63 测试通过；`tsc --noEmit`、ESLint 零 warning、Prettier 检查和 Vite 生产构建成功；三个页面生成独立懒加载产物 |
+| Phase 3 第 4 项前端覆盖率/依赖审计 | 未通过门禁 | 覆盖率运行 63/63 测试通过，语句/分支/函数/行 78.29%/65.90%/72.93%/80.83%，低于全局 80%；`npm audit` 报 React Router RSC 模式 2 个 high，force fix 会产生 breaking downgrade，未执行 |
 | `rg` 认证关键词交叉检查 | 通过 | 双登录、账号来源、首次改密、Argon2id、Redis Session 和 TD-006 均已贯穿相关文档 |
 | `rg` 冲突与旧状态检查 | 通过 | 未发现用户免登录、TD-006 待决定或产品文档待用户确认的遗留表述 |
 | `rg` TD-007 交叉检查 | 通过 | 技术清单、决策正文、REQ-004/REQ-005 追溯关系和当前状态一致 |
@@ -289,12 +296,14 @@
 11. 真实 PostgreSQL/Redis/Qwen SSE 与 Worker 端到端已经通过；前端 jsdom 仍以 `FakeEventSource` 做回答和 Rerank 降级组件回归。真实浏览器已覆盖登录后的向量降级拒答与建单，带引用回答、Rerank 成功/失败和工单管理仍待真实业务数据。
 12. AC-004/AC-005 评测 CLI 已就绪，但仓库没有至少 50 条真实标注 ESB 可回答问题和真实无知识问题集；任何通过数字在数据到位前都不成立。
 
+13. Phase 3 第 4 项三个管理页尚未在真实 PostgreSQL/API 登录会话中完成桌面与移动浏览器验收；组件行为、错误恢复和生产构建已有自动化保护。
+
 ## 10. 继续开发建议
 
 新对话或新开发者接手时，建议下一步：
 
 1. 先阅读 `docs/development/21-phase2-integration-acceptance.md`、`22-phase2-evaluation.md` 及 `agent`/`tickets` 模块，避免重复已经通过的 SSE/Worker 真实集成工作。
-2. 下一步先按 `docs/operations/09-runtime-resource-inventory.md` 拆分本地模型加载路径，再确认依赖安装；随后完成真实推理和已发布知识的 Rerank 页面路径。并行取得真实评测集运行 `knowagent-evaluate-phase2`，两项均需记录真实质量/资源数据。
+2. 下一步实现 Phase 3 第 3 项公司通知 API、失败重试和通知记录；并行按 `docs/operations/09-runtime-resource-inventory.md` 拆分本地模型加载路径并取得真实评测集，分别完成真实 Rerank 推理与 `knowagent-evaluate-phase2` 质量门禁。
 
 ## 11. 接手时必须先读
 

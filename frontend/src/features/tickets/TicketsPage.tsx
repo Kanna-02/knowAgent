@@ -12,13 +12,7 @@ import {
   Tag,
   Timeline,
 } from "antd";
-import {
-  ArrowRight,
-  CheckCircle2,
-  Lock,
-  MessageSquarePlus,
-  RefreshCw,
-} from "lucide-react";
+import { ArrowRight, CheckCircle2, Lock, MessageSquarePlus, RefreshCw } from "lucide-react";
 import { Ticket as TicketIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -380,9 +374,7 @@ function TicketDetailDrawer({
         <div className="ticket-detail">
           <div className="ticket-detail-header">
             <h2>{ticket.title}</h2>
-            <Tag color={STATUS_COLOR[ticket.status]}>
-              {STATUS_LABEL[ticket.status]}
-            </Tag>
+            <Tag color={STATUS_COLOR[ticket.status]}>{STATUS_LABEL[ticket.status]}</Tag>
           </div>
           <p className="ticket-detail-question">{ticket.question}</p>
           <dl className="ticket-meta">
@@ -531,9 +523,7 @@ function TicketDetailDrawer({
                     <Space direction="vertical" size={0}>
                       <strong>{transition.action}</strong>
                       <span className="muted">
-                        {transition.from_status
-                          ? STATUS_LABEL[transition.from_status]
-                          : "新建"}
+                        {transition.from_status ? STATUS_LABEL[transition.from_status] : "新建"}
                         <ArrowRight size={12} /> {STATUS_LABEL[transition.to_status]}
                       </span>
                       <span className="muted">

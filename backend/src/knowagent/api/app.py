@@ -13,7 +13,10 @@ from knowagent.agent.api.configuration_router import router as configuration_rou
 from knowagent.agent.api.conversations_router import router as conversations_router
 from knowagent.agent.api.router import router as agent_router
 from knowagent.common.errors import KnowAgentError
+from knowagent.analytics.api.router import router as analytics_router
+from knowagent.audit.api.router import router as audit_router
 from knowagent.documents.api.router import router as documents_router
+from knowagent.documents.api.lifecycle_router import router as documents_lifecycle_router
 from knowagent.documents.infrastructure.sqlalchemy_repository import (
     SqlAlchemyIngestionCoordinator,
 )
@@ -88,6 +91,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(systems_router, prefix="/api/v1")
     application.include_router(documents_router, prefix="/api/v1")
     application.include_router(tickets_router, prefix="/api/v1")
+    application.include_router(documents_lifecycle_router, prefix="/api/v1")
+    application.include_router(analytics_router, prefix="/api/v1")
+    application.include_router(audit_router, prefix="/api/v1")
     return application
 
 

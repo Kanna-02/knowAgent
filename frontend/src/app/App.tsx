@@ -18,6 +18,16 @@ const AdminShell = lazy(() =>
     default: component,
   })),
 );
+const AnalyticsPage = lazy(() =>
+  import("../features/admin/AnalyticsPage").then(({ AnalyticsPage: component }) => ({
+    default: component,
+  })),
+);
+const AuditLogsPage = lazy(() =>
+  import("../features/admin/AuditLogsPage").then(({ AuditLogsPage: component }) => ({
+    default: component,
+  })),
+);
 const ConfigurationPage = lazy(() =>
   import("../features/admin/ConfigurationPage").then(({ ConfigurationPage: component }) => ({
     default: component,
@@ -25,6 +35,11 @@ const ConfigurationPage = lazy(() =>
 );
 const SystemsPage = lazy(() =>
   import("../features/admin/SystemsPage").then(({ SystemsPage: component }) => ({
+    default: component,
+  })),
+);
+const DocumentsPage = lazy(() =>
+  import("../features/admin/DocumentsPage").then(({ DocumentsPage: component }) => ({
     default: component,
   })),
 );
@@ -92,6 +107,9 @@ export function App(): ReactNode {
                     <Route path="accounts" element={<AccountsPage />} />
                     <Route path="systems" element={<SystemsPage />} />
                     <Route path="configuration" element={<ConfigurationPage />} />
+                    <Route path="documents" element={<DocumentsPage />} />
+                    <Route path="analytics" element={<AnalyticsPage />} />
+                    <Route path="audit-logs" element={<AuditLogsPage />} />
                   </Route>
                   <Route
                     path="/forbidden"

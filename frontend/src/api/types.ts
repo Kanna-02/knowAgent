@@ -4,6 +4,123 @@ export type AccountSource = "LOCAL_IMPORT" | "ADMIN_CREATED" | "SSO";
 export type BusinessSystemStatus = "ACTIVE" | "DISABLED";
 export type SystemRole = "SYSTEM_OWNER";
 
+export type PublicationStatus = "DRAFT" | "PUBLISHED" | "RETIRED";
+export type DocumentVersionStatus =
+  "UPLOADED" | "PARSING" | "CHUNKING" | "CHUNKED" | "READY_DRAFT" | "OCR_REQUIRED" | "FAILED";
+export type GapSource = "refusal" | "unsolved_ticket";
+
+export interface DocumentView {
+  id: string;
+  system_id: string;
+  name: string;
+  current_published_version_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DocumentPage {
+  items: DocumentView[];
+  page: number;
+  page_size: number;
+  total: number;
+}
+
+export interface DocumentVersionView {
+  id: string;
+  document_id: string;
+  system_id: string;
+  version_no: number;
+  filename: string;
+  media_type: string;
+  size_bytes: number;
+  sha256: string;
+  status: DocumentVersionStatus;
+  publish_status: PublicationStatus;
+  chunk_count: number;
+  parser_name: string | null;
+  parser_version: string | null;
+  published_at: string | null;
+  retired_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DocumentVersionPage {
+  items: DocumentVersionView[];
+  page: number;
+  page_size: number;
+  total: number;
+}
+
+export interface PublishVersionResponse {
+  document_id: string;
+  version_id: string;
+  system_id: string;
+  publish_status: PublicationStatus;
+  published_at: string;
+}
+
+export interface RetireVersionResponse {
+  document_id: string;
+  version_id: string;
+  system_id: string;
+  publish_status: PublicationStatus;
+  retired_at: string;
+}
+
+export interface SystemOverviewView {
+  system_id: string;
+  question_count: number;
+  refusal_count: number;
+  open_ticket_count: number;
+  resolved_ticket_count: number;
+  total_ticket_count: number;
+}
+
+export interface FrequentQuestionView {
+  normalized_question: string;
+  occurrence_count: number;
+  refusal_count: number;
+  ticket_count: number;
+}
+
+export interface FrequentQuestionPage {
+  items: FrequentQuestionView[];
+  total: number;
+}
+
+export interface KnowledgeGapView {
+  normalized_question: string;
+  gap_source: GapSource;
+  occurrence_count: number;
+  last_seen_at: string;
+}
+
+export interface KnowledgeGapPage {
+  items: KnowledgeGapView[];
+  total: number;
+}
+
+export interface AuditLogView {
+  id: string;
+  actor_id: string | null;
+  action: string;
+  object_type: string | null;
+  object_id: string | null;
+  result: string;
+  request_id: string | null;
+  context_data: Record<string, string | number | boolean> | null;
+  created_at: string;
+  detail: string | null;
+}
+
+export interface AuditLogPage {
+  items: AuditLogView[];
+  page: number;
+  page_size: number;
+  total: number;
+}
+
 export interface SystemRoleView {
   system_id: string;
   role: SystemRole;

@@ -7,10 +7,17 @@ import type {
   BusinessSystemPage,
   BusinessSystemStatus,
   BusinessSystemView,
+  AuditLogPage,
   ConversationDetail,
   ConversationPage,
   ConversationView,
+  DocumentPage,
+  DocumentVersionPage,
   CurrentUser,
+  FrequentQuestionPage,
+  KnowledgeGapPage,
+  PublishVersionResponse,
+  RetireVersionResponse,
   PromptDefinitionPage,
   PromptDefinitionView,
   PromptScenario,
@@ -19,6 +26,7 @@ import type {
   SessionView,
   SseAuthToken,
   SystemOwnerView,
+  SystemOverviewView,
   TicketPage,
   TicketReplyView,
   TicketStatus,
@@ -326,6 +334,127 @@ export class ApiClient {
         ? { method: "POST", body: JSON.stringify({ body }) }
         : { method: "POST" };
     return this.request<TicketView>(`/tickets/${ticketId}/${action}`, init);
+  }
+
+  async listDocuments(
+    systemId: string,
+    filters: { page: number; pageSize: number },
+  ): Promise<DocumentPage> {
+    const query = new URLSearchParams({
+      page: String(filters.page),
+      page_size: String(filters.pageSize),
+    });
+    return this.request<DocumentPage>(`/systems/${systemId}/documents?${query.toString()}`);
+  }
+
+  async listDocumentVersions(
+    systemId: string,
+    documentId: string,
+    filters: { page: number; pageSize: number },
+  ): Promise<DocumentVersionPage> {
+    const query = new URLSearchParams({
+      page: String(filters.page),
+      page_size: String(filters.pageSize),
+    });
+    return this.request<DocumentVersionPage>(
+      `/systems/${systemId}/documents/${documentId}/versions?${query.toString()}`,
+    );
+  }
+
+  async publishDocumentVersion(
+    systemId: string,
+    documentId: string,
+    versionId: string,
+  ): Promise<PublishVersionResponse> {
+    return this.request<PublishVersionResponse>(
+      `/systems/${systemId}/documents/${documentId}/versions/${versionId}/publish`,
+      { method: "POST" },
+    );
+  }
+
+  async retireDocumentVersion(
+    systemId: string,
+    documentId: string,
+    versionId: string,
+  ): Promise<RetireVersionResponse> {
+    return this.request<RetireVersionResponse>(
+      `/systems/${systemId}/documents/${documentId}/versions/${versionId}/retire`,
+      { method: "POST" },
+    );
+  }
+
+  async getSystemOverview(
+    systemId: string,
+    window?: { started_at?: string; ended_at?: string },
+  ): Promise<SystemOverviewView> {
+    const query = new URLSearchParams();
+    if (window?.started_at) query.set("started_at", window.started_at);
+    if (window?.ended_at) query.set("ended_at", window.ended_at);
+    const qs = query.toString();
+    return this.request<SystemOverviewView>(
+      `/systems/${systemId}/analytics/overview${qs ? `?${qs}` : ""}`,
+    );
+  }
+
+  async listFrequentQuestions(
+    systemId: string,
+    filters: {
+      started_at?: string;
+      ended_at?: string;
+      top_n?: number;
+    },
+  ): Promise<FrequentQuestionPage> {
+    const query = new URLSearchParams();
+    if (filters.started_at) query.set("started_at", filters.started_at);
+    if (filters.ended_at) query.set("ended_at", filters.ended_at);
+    if (filters.top_n !== undefined) query.set("top_n", String(filters.top_n));
+    const qs = query.toString();
+    return this.request<FrequentQuestionPage>(
+      `/systems/${systemId}/analytics/frequent-questions${qs ? `?${qs}` : ""}`,
+    );
+  }
+
+  async listKnowledgeGaps(
+    systemId: string,
+    filters: {
+      started_at?: string;
+      ended_at?: string;
+      top_n?: number;
+    },
+  ): Promise<KnowledgeGapPage> {
+    const query = new URLSearchParams();
+    if (filters.started_at) query.set("started_at", filters.started_at);
+    if (filters.ended_at) query.set("ended_at", filters.ended_at);
+    if (filters.top_n !== undefined) query.set("top_n", String(filters.top_n));
+    const qs = query.toString();
+    return this.request<KnowledgeGapPage>(
+      `/systems/${systemId}/analytics/knowledge-gaps${qs ? `?${qs}` : ""}`,
+    );
+  }
+
+  async listAuditLogs(filters: {
+    page: number;
+    pageSize: number;
+    actor_id?: string;
+    action?: string;
+    object_type?: string;
+    object_id?: string;
+    result?: string;
+    started_at?: string;
+    ended_at?: string;
+  }): Promise<AuditLogPage> {
+    const query = new URLSearchParams({
+      page: String(filters.page),
+      page_size: String(filters.pageSize),
+    });
+    if (filters.actor_id) query.set("actor_id", filters.actor_id);
+    if (filters.action) query.set("action", filters.action);
+    if (filters.object_type) query.set("object_type", filters.object_type);
+    if (filters.object_id) query.set("object_id", filters.object_id);
+    if (filters.result) query.set("result", filters.result);
+    if (filters.started_at) query.set("started_at", filters.started_at);
+    if (filters.ended_at) query.set("ended_at", filters.ended_at);
+    return this.request<AuditLogPage>(`/admin/audit-logs?${query.toString()}`);
   }
 
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
