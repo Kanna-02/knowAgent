@@ -52,6 +52,31 @@ export interface DocumentVersionPage {
   total: number;
 }
 
+export interface IngestionJobView {
+  job_id: string;
+  document_id: string;
+  document_version_id: string;
+  version_no: number;
+  system_id: string;
+  document_name: string;
+  filename: string;
+  media_type: string;
+  version_status: DocumentVersionStatus;
+  publish_status: PublicationStatus;
+  status: "QUEUED" | "RUNNING" | "RETRY_SCHEDULED" | "SUCCEEDED" | "FAILED";
+  stage: "STORED" | "PARSING" | "CHUNKING" | "COMPLETED";
+  progress: number;
+  attempt: number;
+  max_attempts: number;
+  error_code: string | null;
+  error_message: string | null;
+  next_retry_at: string | null;
+  lease_expires_at: string | null;
+  celery_task_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface PublishVersionResponse {
   document_id: string;
   version_id: string;

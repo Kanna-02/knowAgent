@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { act } from "react";
 
 import { ApiError, apiClient } from "../../api/client";
 import type {
@@ -7,6 +8,7 @@ import type {
   DocumentVersionPage,
   DocumentVersionView,
   DocumentView,
+  IngestionJobView,
   PublishVersionResponse,
   RetireVersionResponse,
 } from "../../api/types";
@@ -68,6 +70,31 @@ const versionPage: DocumentVersionPage = {
   total: 1,
 };
 
+const ingestionJob: IngestionJobView = {
+  job_id: "50000000-0000-0000-0000-000000000001",
+  document_id: doc.id,
+  document_version_id: version.id,
+  version_no: 1,
+  system_id: system.id,
+  document_name: doc.name,
+  filename: version.filename,
+  media_type: version.media_type,
+  version_status: "READY_DRAFT",
+  publish_status: "DRAFT",
+  status: "SUCCEEDED",
+  stage: "COMPLETED",
+  progress: 100,
+  attempt: 1,
+  max_attempts: 3,
+  error_code: null,
+  error_message: null,
+  next_retry_at: null,
+  lease_expires_at: null,
+  celery_task_id: "celery-1",
+  created_at: version.created_at,
+  updated_at: version.updated_at,
+};
+
 const publishResponse: PublishVersionResponse = {
   document_id: doc.id,
   version_id: version.id,
@@ -120,6 +147,63 @@ afterEach(async () => {
 });
 
 describe("DocumentsPage", () => {
+  it("imports a document into the selected system and shows the ingestion job", async () => {
+    vi.spyOn(apiClient, "listSystems").mockResolvedValue([system]);
+    vi.spyOn(apiClient, "listDocuments").mockResolvedValue({ ...docPage, items: [] });
+    const upload = vi.spyOn(apiClient, "uploadDocument").mockResolvedValue(ingestionJob);
+
+    const view = await mountWithAuth(<DocumentsPage />, auth, "/admin/documents");
+    views.push(view);
+    await settleChain();
+
+    await click(view.container.querySelector('[aria-label="导入文档"]')!);
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(["# Guide\n"], "guide.md", { type: "text/markdown" });
+    await act(async () => {
+      Object.defineProperty(input, "files", { configurable: true, value: [file] });
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      await Promise.resolve();
+    });
+    await click(document.querySelector('[aria-label="开始导入"]')!);
+    await flush();
+
+    expect(upload).toHaveBeenCalledWith(system.id, file, expect.any(Object));
+    expect(document.body.textContent).toContain("入库任务已完成");
+  });
+
+  it("allows a failed ingestion job to be retried", async () => {
+    vi.spyOn(apiClient, "listSystems").mockResolvedValue([system]);
+    vi.spyOn(apiClient, "listDocuments").mockResolvedValue({ ...docPage, items: [] });
+    vi.spyOn(apiClient, "uploadDocument").mockResolvedValue({
+      ...ingestionJob,
+      status: "FAILED",
+      progress: 60,
+      error_code: "EMBEDDING_UNAVAILABLE",
+      error_message: "向量服务暂时不可用",
+    });
+    const retry = vi.spyOn(apiClient, "retryIngestionJob").mockResolvedValue(ingestionJob);
+
+    const view = await mountWithAuth(<DocumentsPage />, auth, "/admin/documents");
+    views.push(view);
+    await settleChain();
+    await click(view.container.querySelector('[aria-label="导入文档"]')!);
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(["# Guide\n"], "guide.md", { type: "text/markdown" });
+    await act(async () => {
+      Object.defineProperty(input, "files", { configurable: true, value: [file] });
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      await Promise.resolve();
+    });
+    await click(document.querySelector('[aria-label="开始导入"]')!);
+    await flush();
+    expect(document.body.textContent).toContain("向量服务暂时不可用");
+
+    await click(document.querySelector('[aria-label="重试入库"]')!);
+    await flush();
+    expect(retry).toHaveBeenCalledWith(ingestionJob.job_id);
+    expect(document.body.textContent).toContain("入库任务已完成");
+  });
+
   it("loads systems and documents, then shows versions drawer", async () => {
     vi.spyOn(apiClient, "listSystems").mockResolvedValue([system]);
     vi.spyOn(apiClient, "listDocuments").mockResolvedValue(docPage);

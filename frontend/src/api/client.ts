@@ -15,6 +15,7 @@ import type {
   DocumentVersionPage,
   CurrentUser,
   FrequentQuestionPage,
+  IngestionJobView,
   KnowledgeGapPage,
   NotificationConfigurationUpdate,
   NotificationConfigurationView,
@@ -353,6 +354,30 @@ export class ApiClient {
     return this.request<DocumentPage>(`/systems/${systemId}/documents?${query.toString()}`);
   }
 
+  async uploadDocument(
+    systemId: string,
+    file: File,
+    options: { documentName?: string; documentId?: string; idempotencyKey?: string } = {},
+  ): Promise<IngestionJobView> {
+    const form = new FormData();
+    form.append("file", file);
+    if (options.documentName?.trim()) form.append("document_name", options.documentName.trim());
+    if (options.documentId) form.append("document_id", options.documentId);
+    return this.request<IngestionJobView>(`/systems/${systemId}/documents`, {
+      method: "POST",
+      headers: { "Idempotency-Key": options.idempotencyKey ?? crypto.randomUUID() },
+      body: form,
+    });
+  }
+
+  async getIngestionJob(jobId: string): Promise<IngestionJobView> {
+    return this.request<IngestionJobView>(`/ingestion-jobs/${jobId}`);
+  }
+
+  async retryIngestionJob(jobId: string): Promise<IngestionJobView> {
+    return this.request<IngestionJobView>(`/ingestion-jobs/${jobId}/retry`, { method: "POST" });
+  }
+
   async listDocumentVersions(
     systemId: string,
     documentId: string,
@@ -503,7 +528,8 @@ export class ApiClient {
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const headers = new Headers(init.headers);
     headers.set("Accept", "application/json");
-    if (init.body) headers.set("Content-Type", "application/json");
+    if (init.body && !(init.body instanceof FormData))
+      headers.set("Content-Type", "application/json");
     if (this.csrfToken && init.method && init.method !== "GET") {
       headers.set("X-CSRF-Token", this.csrfToken);
     }

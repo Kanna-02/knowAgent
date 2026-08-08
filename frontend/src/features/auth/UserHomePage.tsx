@@ -355,22 +355,29 @@ export function UserHomePage(): ReactNode {
   return (
     <section className="question-workspace">
       <div className="question-toolbar">
-        <div>
+        <div className="question-toolbar-heading">
+          <div className="question-toolbar-kicker">
+            <MessageSquareText size={16} aria-hidden="true" />
+            <span>知识问答</span>
+          </div>
           <h1>问答</h1>
-          <p>{roleLabel} · 选择业务系统后提问，回答将逐字流式返回并附引用</p>
+          <p>{roleLabel} · 回答将基于已发布知识并附带引用</p>
         </div>
-        <Select<string>
-          value={selectedSystemId}
-          loading={loading}
-          className="system-selector"
-          placeholder="选择业务系统"
-          aria-label="选择业务系统"
-          options={systems.map((item) => ({
-            value: item.id,
-            label: `${item.name} (${item.code})`,
-          }))}
-          onChange={changeSystem}
-        />
+        <div className="question-toolbar-system">
+          <span className="question-toolbar-label">业务系统</span>
+          <Select<string>
+            value={selectedSystemId}
+            loading={loading}
+            className="system-selector"
+            placeholder="选择业务系统"
+            aria-label="选择业务系统"
+            options={systems.map((item) => ({
+              value: item.id,
+              label: `${item.name} (${item.code})`,
+            }))}
+            onChange={changeSystem}
+          />
+        </div>
       </div>
       {systemError && systems.length === 0 ? (
         <FeedbackState
@@ -391,16 +398,19 @@ export function UserHomePage(): ReactNode {
       ) : (
         <div className="question-session">
           <div className="conversation-toolbar">
-            <Select<string>
-              value={selectedConversationId}
-              loading={conversationLoading}
-              className="conversation-selector"
-              placeholder="新会话"
-              aria-label="选择会话"
-              options={conversations.map((item) => ({ value: item.id, label: item.title }))}
-              onChange={selectConversation}
-            />
-            <Space size="small">
+            <div className="conversation-toolbar-title">
+              <span className="conversation-toolbar-label">当前对话</span>
+              <Select<string>
+                value={selectedConversationId}
+                loading={conversationLoading}
+                className="conversation-selector"
+                placeholder="新会话"
+                aria-label="选择会话"
+                options={conversations.map((item) => ({ value: item.id, label: item.title }))}
+                onChange={selectConversation}
+              />
+            </div>
+            <Space size="small" className="conversation-toolbar-actions">
               <Tooltip title="新建会话">
                 <Button
                   icon={<Plus size={16} />}
@@ -449,52 +459,64 @@ export function UserHomePage(): ReactNode {
           )}
           {stream.phase !== "idle" ? <QuestionStreamView state={stream} /> : null}
           <div className="question-composer">
-            <p className="composer-context">
-              当前系统：<strong>{selectedSystem.name}</strong>
-            </p>
-            <Input.TextArea
-              value={question}
-              onChange={(event) => setQuestion(event.target.value)}
-              placeholder="输入问题（最多 2000 字）"
-              maxLength={2000}
-              autoSize={{ minRows: 2, maxRows: 6 }}
-              aria-label="问题输入"
-            />
-            <Input
-              value={requiredTerms}
-              onChange={(event) => setRequiredTerms(event.target.value)}
-              placeholder="必含术语，逗号分隔（可选）"
-              maxLength={200}
-              aria-label="必含术语"
-            />
-            <Space>
-              <Button
-                type="primary"
-                icon={
-                  submitting || stream.phase === "streaming" || stream.phase === "preparing" ? (
-                    <Loader2 size={16} className="spin" />
-                  ) : (
-                    <Send size={16} />
-                  )
-                }
-                aria-label="提交问题"
-                loading={submitting}
-                disabled={!question.trim()}
-                onClick={() => void submitQuestion()}
-              >
-                提交问题
-              </Button>
-              {stream.phase !== "idle" ? (
-                <Tooltip title="清空当前结果">
-                  <Button
-                    icon={<RefreshCw size={16} />}
-                    aria-label="清空当前结果"
-                    disabled={submitting}
-                    onClick={resetConversation}
-                  />
-                </Tooltip>
-              ) : null}
-            </Space>
+            <div className="composer-input-shell">
+              <Input.TextArea
+                value={question}
+                onChange={(event) => setQuestion(event.target.value)}
+                placeholder="向知识库提问"
+                maxLength={2000}
+                autoSize={{ minRows: 2, maxRows: 6 }}
+                aria-label="问题输入"
+                onPressEnter={(event) => {
+                  if (!event.shiftKey) {
+                    event.preventDefault();
+                    void submitQuestion();
+                  }
+                }}
+              />
+              <div className="composer-action-row">
+                <span className="composer-context">
+                  当前系统：<strong>{selectedSystem.name}</strong>
+                </span>
+                <Button
+                  type="primary"
+                  shape="circle"
+                  icon={
+                    submitting || stream.phase === "streaming" || stream.phase === "preparing" ? (
+                      <Loader2 size={16} className="spin" />
+                    ) : (
+                      <Send size={16} />
+                    )
+                  }
+                  aria-label="提交问题"
+                  loading={submitting}
+                  disabled={!question.trim()}
+                  onClick={() => void submitQuestion()}
+                />
+              </div>
+            </div>
+            <div className="composer-secondary-row">
+              <Input
+                value={requiredTerms}
+                onChange={(event) => setRequiredTerms(event.target.value)}
+                placeholder="必含术语，逗号分隔（可选）"
+                maxLength={200}
+                aria-label="必含术语"
+                prefix={<span className="composer-secondary-label">检索约束</span>}
+              />
+              <Space>
+                {stream.phase !== "idle" ? (
+                  <Tooltip title="清空当前结果">
+                    <Button
+                      icon={<RefreshCw size={16} />}
+                      aria-label="清空当前结果"
+                      disabled={submitting}
+                      onClick={resetConversation}
+                    />
+                  </Tooltip>
+                ) : null}
+              </Space>
+            </div>
           </div>
         </div>
       )}

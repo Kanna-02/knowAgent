@@ -150,6 +150,28 @@ describe("ApiClient", () => {
     );
   });
 
+  it("sends document imports as multipart without overriding the browser content type", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(jsonResponse({ job_id: "job-1" }));
+    const client = new ApiClient();
+    const file = new File(["# Guide"], "guide.md", { type: "text/markdown" });
+
+    await client.uploadDocument("system-1", file, {
+      documentName: "Guide",
+      documentId: "document-1",
+      idempotencyKey: "import-1",
+    });
+
+    const init = fetchMock.mock.calls[0]?.[1];
+    const headers = new Headers(init?.headers);
+    expect(headers.get("Content-Type")).toBeNull();
+    expect(headers.get("Idempotency-Key")).toBe("import-1");
+    expect((init?.body as FormData).get("file")).toBe(file);
+    expect((init?.body as FormData).get("document_name")).toBe("Guide");
+    expect((init?.body as FormData).get("document_id")).toBe("document-1");
+  });
+
   it("normalizes an empty gateway error into a traceable API error", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(null, {

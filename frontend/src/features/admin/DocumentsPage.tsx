@@ -1,6 +1,21 @@
-import { App, Button, Drawer, Popconfirm, Select, Space, Table, Tag, Tooltip } from "antd";
+import {
+  Alert,
+  App,
+  Button,
+  Drawer,
+  Modal,
+  Popconfirm,
+  Progress,
+  Select,
+  Space,
+  Table,
+  Tag,
+  Tooltip,
+  Upload,
+} from "antd";
 import type { TablePaginationConfig } from "antd/es/table";
-import { Archive, ChevronRight, FileText, RefreshCw, Rocket } from "lucide-react";
+import type { UploadFile } from "antd/es/upload/interface";
+import { Archive, ChevronRight, FileText, RefreshCw, Rocket, UploadCloud } from "lucide-react";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -9,6 +24,7 @@ import type {
   BusinessSystemView,
   DocumentView,
   DocumentVersionView,
+  IngestionJobView,
   PublicationStatus,
 } from "../../api/types";
 import { FeedbackState } from "../../shared/FeedbackState";
@@ -18,6 +34,21 @@ const publishStatusLabels: Record<PublicationStatus, { label: string; color: str
   DRAFT: { label: "草稿", color: "default" },
   PUBLISHED: { label: "已发布", color: "success" },
   RETIRED: { label: "已退役", color: "warning" },
+};
+
+const ingestionStatusLabels: Record<IngestionJobView["status"], string> = {
+  QUEUED: "排队中",
+  RUNNING: "处理中",
+  RETRY_SCHEDULED: "等待重试",
+  SUCCEEDED: "已完成",
+  FAILED: "失败",
+};
+
+const ingestionStageLabels: Record<IngestionJobView["stage"], string> = {
+  STORED: "文件已保存",
+  PARSING: "解析文档",
+  CHUNKING: "切分知识片段",
+  COMPLETED: "索引完成",
 };
 
 function formatFileSize(bytes: number): string {
@@ -57,6 +88,12 @@ export function DocumentsPage(): ReactNode {
   const [versionsDrawerOpen, setVersionsDrawerOpen] = useState(false);
   const [selectedDocument, setSelectedDocument] = useState<DocumentView | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadFileList, setUploadFileList] = useState<UploadFile[]>([]);
+  const [uploadName, setUploadName] = useState("");
+  const [uploadJob, setUploadJob] = useState<IngestionJobView | null>(null);
+  const [uploadError, setUploadError] = useState<UiError | null>(null);
+  const [uploading, setUploading] = useState(false);
 
   const systemsRequestId = useRef(0);
   const docsRequestId = useRef(0);
@@ -188,6 +225,66 @@ export function DocumentsPage(): ReactNode {
     }
   };
 
+  const openUpload = (): void => {
+    setUploadFileList([]);
+    setUploadName("");
+    setUploadJob(null);
+    setUploadError(null);
+    setUploadOpen(true);
+  };
+
+  const closeUpload = (): void => {
+    if (uploading) return;
+    setUploadOpen(false);
+  };
+
+  const submitUpload = async (): Promise<void> => {
+    const file = uploadFileList[0]?.originFileObj;
+    if (!selectedSystemId || !file) {
+      setUploadError(toUiError(new Error("请选择要导入的文档"), "请选择要导入的文档"));
+      return;
+    }
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const job = await apiClient.uploadDocument(selectedSystemId, file, {
+        documentName: uploadName,
+      });
+      setUploadJob(job);
+      void message.success("文档已提交入库");
+      await loadDocuments(selectedSystemId, 1, docsPageSize);
+      setDocsPage(1);
+    } catch (error: unknown) {
+      setUploadError(toUiError(error, "文档导入失败"));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const retryUpload = async (): Promise<void> => {
+    if (!uploadJob) return;
+    setUploading(true);
+    setUploadError(null);
+    try {
+      setUploadJob(await apiClient.retryIngestionJob(uploadJob.job_id));
+    } catch (error: unknown) {
+      setUploadError(toUiError(error, "入库任务重试失败"));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!uploadJob || uploadJob.status === "SUCCEEDED" || uploadJob.status === "FAILED") return;
+    const timerId = window.setTimeout(() => {
+      void apiClient
+        .getIngestionJob(uploadJob.job_id)
+        .then(setUploadJob)
+        .catch((error: unknown) => setUploadError(toUiError(error, "入库任务状态获取失败")));
+    }, 2000);
+    return () => window.clearTimeout(timerId);
+  }, [uploadJob]);
+
   return (
     <section className="page-section">
       <div className="page-heading-row">
@@ -195,6 +292,15 @@ export function DocumentsPage(): ReactNode {
           <h1>文档版本管理</h1>
           <p>管理业务系统的文档发布与退役</p>
         </div>
+        <Button
+          type="primary"
+          icon={<UploadCloud size={16} />}
+          aria-label="导入文档"
+          disabled={!selectedSystemId}
+          onClick={openUpload}
+        >
+          导入文档
+        </Button>
       </div>
       <div className="table-toolbar">
         <Space wrap>
@@ -429,6 +535,88 @@ export function DocumentsPage(): ReactNode {
           ]}
         />
       </Drawer>
+      <Modal
+        title={
+          <span className="drawer-title">
+            <UploadCloud size={18} /> 导入知识文档
+          </span>
+        }
+        open={uploadOpen}
+        destroyOnHidden
+        onCancel={closeUpload}
+        okText="开始导入"
+        cancelText="关闭"
+        okButtonProps={{
+          "aria-label": "开始导入",
+          loading: uploading,
+          disabled: uploadFileList.length === 0 || !selectedSystemId || uploadJob !== null,
+        }}
+        onOk={() => void submitUpload()}
+      >
+        <div className="document-upload-form">
+          <Upload.Dragger
+            accept=".pdf,.docx,.md,.markdown,.xlsx"
+            maxCount={1}
+            multiple={false}
+            fileList={uploadFileList}
+            beforeUpload={() => false}
+            onChange={({ fileList }) => setUploadFileList(fileList.slice(-1))}
+            onRemove={() => {
+              setUploadFileList([]);
+              return true;
+            }}
+          >
+            <p className="ant-upload-drag-icon">
+              <UploadCloud size={28} aria-hidden="true" />
+            </p>
+            <p className="ant-upload-text">点击或拖拽文档到这里</p>
+            <p className="ant-upload-hint">
+              支持 PDF、DOCX、Markdown 和 XLSX，单个文件不超过 25 MB
+            </p>
+          </Upload.Dragger>
+          <label className="document-upload-name">
+            <span>知识库名称（可选）</span>
+            <input
+              value={uploadName}
+              maxLength={255}
+              placeholder="留空时使用文件名"
+              onChange={(event) => setUploadName(event.target.value)}
+            />
+          </label>
+          {uploadError ? <Alert type="error" showIcon message={uploadError.message} /> : null}
+          {uploadJob ? (
+            <div className="document-upload-job" aria-live="polite">
+              <div className="document-upload-job-header">
+                <strong>{uploadJob.document_name}</strong>
+                <Tag color={uploadJob.status === "FAILED" ? "error" : "processing"}>
+                  {ingestionStatusLabels[uploadJob.status]}
+                </Tag>
+              </div>
+              <Progress
+                percent={uploadJob.progress}
+                {...(uploadJob.status === "FAILED" ? { status: "exception" as const } : {})}
+              />
+              <span className="drawer-context">
+                {ingestionStageLabels[uploadJob.stage]} · v{uploadJob.version_no}
+                {uploadJob.error_message ? ` · ${uploadJob.error_message}` : ""}
+              </span>
+              {uploadJob.status === "FAILED" ? (
+                <Button
+                  icon={<RefreshCw size={15} />}
+                  aria-label="重试入库"
+                  loading={uploading}
+                  onClick={() => void retryUpload()}
+                >
+                  重试入库
+                </Button>
+              ) : null}
+              {uploadJob.status === "SUCCEEDED" ? (
+                <span className="document-upload-success">入库任务已完成，可在版本列表中发布</span>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      </Modal>
     </section>
   );
 }

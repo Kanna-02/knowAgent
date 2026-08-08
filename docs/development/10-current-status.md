@@ -5,7 +5,7 @@
 ## 1. 快照时间
 
 ```text
-更新时间：2026-08-08（Phase 2/3 完成度审计、本地 Rerank 与运营页浏览器验收完成）
+更新时间：2026-08-08 14:25 CST（用户端问答工作区 ChatGPT 风格调整完成；Phase 2/3 完成度审计、本地 Rerank 与运营页浏览器验收已完成；本地完整运行栈已启动并核验）
 更新人/助手：Codex
 当前分支：master
 远程仓库：git@github.com:Kanna-02/knowAgent.git
@@ -18,7 +18,7 @@
 当前阶段：Phase 2 关闭门禁待真实评测数据；Phase 3 质量与运营增强 4/4 功能范围已实现，等待外部联调和质量门禁
 阶段目标：保留 Phase 2 系统隔离问答/工单闭环，同时完成混合检索调优、Rerank、用户可见降级、多轮上下文与意图识别、提示词与检索配置版本化、通知投递/重试/记录，以及文档生命周期、对话分析、高频问题、知识缺口与审计运营能力
 当前任务：取得真实 ESB 标注评测集关闭 AC-004/AC-005，并使用真实公司通知 API 联调鉴权、限流、幂等接收和回执语义以关闭 AC-014
-任务状态：Phase 2 与 Phase 3 的功能范围均已完成，但阶段验收均未关闭。本地 Rerank 权重路径解耦、真实推理和 HTTP 集成已通过；文档、分析、审计页面已完成桌面/移动真实登录验收。后端 401 passed、25 skipped（85.55%）；model-service 51 passed、2 skipped（86.76%）；前端 93/93，语句/分支/函数/行覆盖率 90.52%/82.43%/85.51%/91.82%，TypeScript、ESLint、Prettier、build 和依赖审计通过。剩余门禁均依赖外部输入：真实评测数据、真实公司通知 API 和目标 Linux 资源
+任务状态：Phase 2 与 Phase 3 的功能范围均已完成，但阶段验收均未关闭。本地 Rerank 权重路径解耦、真实推理和 HTTP 集成已通过；文档、分析、审计页面已完成桌面/移动真实登录验收。后端 401 passed、25 skipped（85.55%）；model-service 51 passed、2 skipped（86.76%）；前端 96/96，TypeScript、ESLint、Prettier、build 和依赖审计通过。剩余门禁均依赖外部输入：真实评测数据、真实公司通知 API 和目标 Linux 资源；本轮新增导入代码的浏览器文件上传与 Worker 异步处理仍待人工验收
 ```
 
 ## 3. 已完成
@@ -107,6 +107,8 @@
 81. 已新增 `KNOWAGENT_MODEL_RERANK_MODEL_PATH`，保持对外模型 ID 为 `BAAI/bge-reranker-v2-m3`，本地加载复用已有绝对路径；锁定 `transformers==4.57.6` 以兼容 `FlagEmbedding==1.4.0`。
 82. 已使用本地原生权重完成真实 Rerank 推理与进程级 `/v1/rerank` HTTP 验证：相关候选约 `4.82495`、无关候选约 `-11.01469`，HTTP 请求约 10.37 秒；本地运行门禁关闭，但质量收益仍待真实 ESB 评测集，生产配置仍待目标 Linux 资源。
 83. 已在 1440x900 与 390x844 下用真实登录/API 验收文档、分析、审计页面；修复审计长操作标签覆盖相邻列和分析页移动端横向溢出，临时管理员、Session 与测试审计记录已清理。
+84. 已补齐管理员文档导入入口：选定业务系统后可上传 PDF、DOCX、Markdown、XLSX，调用既有 multipart 入库 API，展示异步任务进度、错误和人工重试，成功后刷新文档列表；前端组件与 API multipart 回归测试已加入。
+85. 已将用户端问答页调整为 ChatGPT 风格工作区：上下文栏持续显示业务系统，会话消息采用用户/助手层级，底部输入容器支持 Enter 发送、Shift + Enter 换行和次级检索约束；原有 SSE、降级、拒答工单与会话操作保持不变。
 
 ## 4. 正在进行
 
@@ -142,6 +144,7 @@
 | `backend/migrations/versions/3bed66d88cf4_add_phase3_notification_delivery.py`、`8f2c9d4a1b67_add_notification_attempt_fencing.py` | 通知配置、投递记录、枚举、索引、外键和 attempt fencing 迁移 | 已完成；默认数据库和本地 PostgreSQL upgrade/check 通过 |
 | `frontend/src/features/admin/NotificationSettingsPanel.tsx`、`NotificationDeliveriesPage.tsx`、对应测试、API 类型/客户端、路由、导航和样式 | 管理员通知配置、记录筛选、分页和永久失败人工重试 | 已完成；全量 93/93 和通知记录 6 项组件测试通过，桌面/移动浏览器验收通过 |
 | `frontend/src/features/admin/DocumentsPage.tsx`、`AnalyticsPage.tsx`、`AuditLogsPage.tsx`、`frontend/src/styles.css` | Phase 3 第 4 项文档版本、分析仪表盘和审计日志管理页，以及移动端溢出/长标签修复 | 已完成；组件测试与 1440x900、390x844 真实登录/API 浏览器验收通过 |
+| `frontend/src/features/auth/UserHomePage.tsx`、`frontend/src/features/auth/UserHomePage.test.tsx`、`frontend/src/features/auth/UserHomePage.stream.test.tsx`、`frontend/src/styles.css` | 用户端 ChatGPT 风格问答工作区、消息层级、底部输入容器和响应式规则 | 已完成；问答/SSE 定向测试、TypeScript、ESLint、Prettier 通过 |
 | `model-service/src/knowagent_model/settings.py`、`flag_embedding.py`、`app.py`、`.env.example`、`pyproject.toml`、相关测试 | Rerank 对外模型 ID 与本地权重路径解耦，锁定兼容 Transformers，并补真实本地 HTTP 集成测试 | 已完成；真实本地推理、HTTP、model-service 全量和静态门禁通过 |
 | `frontend/src/api/client.ts`、`frontend/src/api/types.ts`、`frontend/src/app/App.tsx`、`frontend/src/features/admin/AdminShell.tsx`、`frontend/src/styles.css` | 8 个管理端点客户端/类型、3 个懒加载路由、管理导航和响应式样式 | 已完成；TypeScript、ESLint、Prettier、Vite 构建通过 |
 | `backend/src/knowagent/agent/application/answer_generation.py`、`backend/src/knowagent/agent/application/reliable_question.py`、`backend/src/knowagent/agent/domain/models.py` | 受证据约束的真实增量 claim、`QuestionStreamEvent` 领域类型与 `resolve_stream` | 已完成；真实 Qwen 增量流通过 |
@@ -235,9 +238,12 @@
 
 | 命令/方式 | 结果 | 说明 |
 | --- | --- | --- |
+| 本地完整运行栈启动与健康检查 | 通过 | `./scripts/local-env.sh serve` 完成数据库迁移并持续托管 PostgreSQL `5440`、Redis `6380`、MinIO `9200/9201`、model-service `8100`、API `8200`、Celery Worker/Beat 和 Vite `5273`；model-service live/ready、API live、前端登录页和 MinIO live 均返回 HTTP 200 |
+| 本地管理员/用户双入口测试账号 | 通过（用户明确覆盖密码策略） | 仅在 `127.0.0.1:5440` 开发库创建 ACTIVE ADMIN/USER 测试账号，密码仅保存 Argon2id 摘要且不写入仓库；真实 API 登录、角色、`PHASE3_TEST` 系统列表、管理员账号列表和登出通过，交叉入口均返回 401 |
+| 管理端文档导入组件/API 定向测试 | 通过 | `DocumentsPage` 11/11、`ApiClient` multipart 回归通过；前端全量 21 个测试文件、96/96，`tsc --noEmit`、ESLint 零 warning、Prettier、Vite build 和 `npm audit` 通过；真实浏览器文件上传和 Worker 异步处理待补 |
 | Phase 3 通知后端全量与定向测试 | 通过 | 全量 401 passed、25 skipped，覆盖率 85.55%；本轮通知配置/投递 23 项定向测试通过，配置校验 100%、投递服务 98% |
 | Phase 3 通知后端静态/安全/迁移 | 通过（全仓 Pylint 有既有告警） | 242 个 Python 文件 Black/isort 清洁，171 个源文件 mypy strict 零错误；通知修复范围 Pylint 10.00/10、全仓 9.81/10 且因既有告警命令非零、本轮无新增告警；Bandit 中高危 0；本地 PostgreSQL `alembic upgrade head`/`check` 及 `active_attempt_id` 列检查通过 |
-| Phase 3 前端 test/coverage/typecheck/lint/format/build | 通过 | 21 个测试文件、93/93；全局语句/分支/函数/行 90.52%/82.43%/85.51%/91.82%，四项 80% 门禁通过；TypeScript、ESLint、Prettier 和 Vite build 通过 |
+| Phase 3 前端 test/coverage/typecheck/lint/format/build | 通过 | 21 个测试文件、96/96；全局语句/分支/函数/行 90.52%/82.43%/85.51%/91.82%，四项 80% 门禁通过；TypeScript、ESLint、Prettier 和 Vite build 通过 |
 | 前端依赖审计 | 通过 | 锁文件内 `nanoid` 3.3.16 → 3.3.18，Vite/PostCSS 版本不变；`npm audit --audit-level=moderate` 漏洞 0 |
 | Phase 3 通知真实浏览器检查 | 通过 | 真实 PostgreSQL/API 登录会话完成关闭态空地址保存、记录空态、1440x900 和 390x844 检查；页面无横向溢出、表单/筛选/按钮无重叠，临时管理员和 Session 已清理 |
 | Phase 3 第 4 项前端 test/typecheck/lint/format/build | 通过 | 19 个测试文件、63/63 测试通过；`tsc --noEmit`、ESLint 零 warning、Prettier 检查和 Vite 生产构建成功；三个页面生成独立懒加载产物 |

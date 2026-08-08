@@ -17,6 +17,46 @@
 
 ## 功能变更记录
 
+### 2026-08-08 - 用户端问答工作区改为 ChatGPT 风格
+
+类型：变更 / 测试 / 文档
+
+相关需求：REQ-003、REQ-005、REQ-006、REQ-008；AC-004、AC-005、AC-009。
+
+相关文件：`frontend/src/features/auth/UserHomePage.tsx`、`frontend/src/features/auth/UserHomePage.test.tsx`、`frontend/src/features/auth/UserHomePage.stream.test.tsx`、`frontend/src/styles.css`、`docs/product/15-frontend-design.md`。
+
+变更说明：
+
+1. 将问答页调整为上下文工具栏、会话消息流和底部输入工作区，压缩标题说明并持续显示业务系统选择器。
+2. 用户消息与助手消息采用清晰的左右层级，流式回答、降级提醒、拒答建单和会话操作继续复用原有状态与无障碍标签。
+3. 输入区改为主问题输入加次级检索约束工具行，发送按钮使用图标，支持 Enter 发送与 Shift + Enter 换行；不新增依赖或 API。
+
+影响范围：用户端问答页面的布局、视觉层级和输入交互；不改变会话、SSE、检索、引用或工单业务契约。
+
+验证方式：`UserHomePage`/SSE 定向测试 4/4 通过；TypeScript、ESLint、Prettier 和生产构建通过。
+
+后续注意：真实登录后的桌面与移动浏览器验收应继续关注长回答、降级 Alert 和底部输入区在窄屏下的滚动行为。
+
+### 2026-08-08 - 管理端文档导入入口
+
+类型：新增 / 测试
+
+相关需求：REQ-011；AC-003、AC-007。
+
+相关文件：`frontend/src/features/admin/DocumentsPage.tsx`、`frontend/src/features/admin/DocumentsPage.test.tsx`、`frontend/src/api/client.ts`、`frontend/src/api/client.test.ts`、`frontend/src/api/types.ts`、`frontend/src/styles.css`。
+
+变更说明：
+
+1. 管理员在选定业务系统后可通过“导入文档”入口上传 PDF、DOCX、Markdown 和 XLSX 文件，可选填写知识库名称。
+2. 前端以 multipart 方式调用既有文档入库 API，自动生成幂等键，展示排队/解析/切分/完成进度，并在失败时支持人工重试。
+3. 入库成功后自动刷新当前系统文档列表；保留后端既有系统权限、CSRF、对象存储和异步 Worker 约束，不新增依赖或数据库结构。
+
+影响范围：管理员文档运营页面和前端请求封装；不改变后端上传契约、知识发布流程或检索隔离逻辑。
+
+验证方式：`DocumentsPage` 11 项组件测试、`ApiClient` multipart 回归测试通过；前端全量 21 个测试文件、96/96 通过，TypeScript、ESLint、Prettier、Vite 构建和 `npm audit --audit-level=moderate`（0 漏洞）通过。真实浏览器端文件上传和异步 Worker 运行仍待人工验收。
+
+后续注意：对象存储、Celery Worker 和 Embedding 服务必须可用，任务完成后仍需在版本抽屉中显式发布版本才会进入检索。
+
 ### 2026-08-08 - Phase 2/3 完成度审计、本地 Rerank 与运营页验收收尾
 
 类型：变更 / 修复 / 测试 / 文档
