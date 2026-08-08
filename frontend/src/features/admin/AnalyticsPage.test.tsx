@@ -153,4 +153,67 @@ describe("AnalyticsPage", () => {
     expect(getOverview).toHaveBeenCalledTimes(2);
     expect(view.container.textContent).toContain("150");
   });
+
+  it("renders zero counters and unsolved-ticket gaps", async () => {
+    vi.spyOn(apiClient, "listSystems").mockResolvedValue([system]);
+    vi.spyOn(apiClient, "getSystemOverview").mockResolvedValue({
+      ...overview,
+      question_count: 0,
+      refusal_count: 0,
+      open_ticket_count: 0,
+      resolved_ticket_count: 0,
+    });
+    vi.spyOn(apiClient, "listFrequentQuestions").mockResolvedValue({
+      items: [
+        {
+          normalized_question: "零拒答问题",
+          occurrence_count: 1,
+          refusal_count: 0,
+          ticket_count: 0,
+        },
+      ],
+      total: 1,
+    });
+    vi.spyOn(apiClient, "listKnowledgeGaps").mockResolvedValue({
+      items: [
+        {
+          normalized_question: "尚未解决的问题",
+          gap_source: "unsolved_ticket",
+          occurrence_count: 1,
+          last_seen_at: "2026-08-06T14:00:00Z",
+        },
+      ],
+      total: 1,
+    });
+
+    const view = await mountWithAuth(<AnalyticsPage />, auth, "/admin/analytics");
+    views.push(view);
+    await settleChain();
+
+    expect(view.container.textContent).toContain("零拒答问题");
+    expect(view.container.textContent).toContain("未解决工单");
+  });
+
+  it("recovers after the business-system list fails", async () => {
+    const listSystems = vi
+      .spyOn(apiClient, "listSystems")
+      .mockRejectedValueOnce(new Error("systems unavailable"))
+      .mockResolvedValueOnce([]);
+    const getOverview = vi.spyOn(apiClient, "getSystemOverview");
+    vi.spyOn(apiClient, "listFrequentQuestions");
+    vi.spyOn(apiClient, "listKnowledgeGaps");
+
+    const view = await mountWithAuth(<AnalyticsPage />, auth, "/admin/analytics");
+    views.push(view);
+    await flush();
+    expect(view.container.textContent).toContain("业务系统列表加载失败");
+
+    await click(view.container.querySelector('[aria-label="重试加载业务系统列表"]')!);
+    await flush();
+    await click(view.container.querySelector('[aria-label="刷新分析数据"]')!);
+    await flush();
+
+    expect(listSystems).toHaveBeenCalledTimes(3);
+    expect(getOverview).not.toHaveBeenCalled();
+  });
 });

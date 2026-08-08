@@ -17,6 +17,27 @@
 
 ## 功能变更记录
 
+### 2026-08-08 - 前后端覆盖率、格式与依赖门禁补强
+
+类型：测试 / 质量
+
+相关需求：REQ-003、REQ-007、REQ-010、REQ-011、REQ-012、REQ-013；AC-003、AC-006、AC-007、AC-008、AC-010、AC-011、AC-014。
+
+相关文件：`frontend/src/api/client.test.ts`、`frontend/src/features/tickets/TicketsPage.test.tsx`、`frontend/src/features/admin/AnalyticsPage.test.tsx`、`AuditLogsPage.test.tsx`、`DocumentsPage.test.tsx`、`NotificationDeliveriesPage.test.tsx`、`frontend/src/features/auth/AuthContext.test.tsx`、`frontend/package-lock.json`、`backend/tests/unit/test_notification_configuration.py`、`backend/tests/unit/test_notification_delivery.py`、`backend/migrations/versions/3f5d51a53981_create_phase1_identity_tables.py`、`baaf88cba66a_create_business_systems_and_owner_roles.py`、`docs/development/10-current-status.md`、`docs/development/17-traceability-matrix.md`、`docs/product/06-roadmap.md`。
+
+变更说明：
+
+1. 前端新增 23 项行为级测试：完整覆盖 API client 的版本化端点、请求方法、可选查询参数、CSRF 轮换和错误回退；补齐工单筛选、回复、答案候选、状态流转、角色权限及失败恢复；补齐文档、分析、审计和通知记录页面的筛选、空值、状态展示与错误重试；新增认证启动卸载竞态、非标准错误、文档空系统、分页、发布状态、文件大小与发布/退役失败覆盖。
+2. 后端新增 15 项通知安全与可靠性测试：覆盖生产 HTTPS/域名 allowlist、非法凭据 URL/片段、开发 HTTP、禁用配置、无接收人、时区校验、重复投递和意外 Provider 异常退避。
+3. 不修改业务实现、不新增直接依赖；前端 API client 覆盖率提升到 statements 99.34%、branches 98.96%、functions/lines 100%，TicketsPage 提升到 statements 90.90%、branches 81.42%、functions 83.33%、lines 92.42%，DocumentsPage 分支覆盖率提升到 80%。后端通知 endpoint 校验达到 100%，投递服务达到 98%。
+4. 使用 Black/isort 清理两份既有 Phase 1 迁移格式差异；按 PostCSS 的兼容范围仅将锁文件中的传递依赖 `nanoid` 从 3.3.16 更新到 3.3.18，Vite/PostCSS 和 `package.json` 不变。
+
+影响范围：测试、两份迁移排版、前端传递依赖锁和项目状态文档；覆盖登录后工单、认证启动和管理后台既有交互，以及通知端点安全校验和异步投递边界，不改变业务行为或数据库结构。
+
+验证方式：前端 21 个测试文件、93/93 测试通过，全局 statements/branches/functions/lines 覆盖率 90.52%/82.43%/85.51%/91.82%，四项 80% 门禁全部通过；TypeScript、ESLint、Prettier、Vite 生产构建和 `npm audit` 通过，审计漏洞 0。后端 401 passed、25 skipped，总覆盖率 85.55%；242 个 Python 文件 Black/isort 清洁，171 个源文件 mypy strict 零错误，全仓 Pylint 9.81/10（既有告警导致命令非零且本轮无新增告警），Bandit 中高危 0。
+
+后续注意：前端覆盖率、迁移格式和 `nanoid` 安全公告门禁已关闭；真实公司通知 API 联调、真实 Rerank 推理和 AC-004/AC-005 评测数据仍是独立门禁。
+
 ### 2026-08-08 - Phase 3 第 3 项：公司通知 API、失败重试和通知记录
 
 类型：新增 / 变更 / 测试

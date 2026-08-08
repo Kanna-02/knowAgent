@@ -91,6 +91,56 @@ describe("AuthProvider", () => {
     expect(context.bootstrapError).toBeNull();
   });
 
+  it("uses a stable bootstrap error for non-Error failures", async () => {
+    vi.spyOn(apiClient, "me").mockRejectedValue({ reason: "offline" });
+    let context!: AuthContextValue;
+
+    await renderProvider(<Observer capture={(value) => (context = value)} />);
+
+    expect(context.bootstrapError).toBe("认证服务暂时不可用");
+  });
+
+  it("ignores fulfilled and rejected bootstrap requests after unmount", async () => {
+    let resolveBootstrap!: (value: CurrentUser) => void;
+    let rejectBootstrap!: (reason: unknown) => void;
+    const fulfilled = new Promise<CurrentUser>((resolve) => {
+      resolveBootstrap = resolve;
+    });
+    const rejected = new Promise<CurrentUser>((_, reject) => {
+      rejectBootstrap = reject;
+    });
+    const me = vi
+      .spyOn(apiClient, "me")
+      .mockReturnValueOnce(fulfilled)
+      .mockReturnValueOnce(rejected);
+    const fulfilledCapture = vi.fn<(value: AuthContextValue) => void>();
+
+    await renderProvider(<Observer capture={fulfilledCapture} />);
+    act(() => root.render(<div>provider removed</div>));
+    await act(async () => {
+      resolveBootstrap(user);
+      await fulfilled;
+      await Promise.resolve();
+    });
+    expect(fulfilledCapture).toHaveBeenCalledTimes(1);
+
+    const rejectedCapture = vi.fn<(value: AuthContextValue) => void>();
+    await renderProvider(<Observer capture={rejectedCapture} />);
+    act(() => root.render(<div>provider removed again</div>));
+    await act(async () => {
+      rejectBootstrap(new Error("late failure"));
+      try {
+        await rejected;
+      } catch {
+        // AuthProvider consumes this rejection; awaiting here only settles the test promise.
+      }
+      await Promise.resolve();
+    });
+
+    expect(me).toHaveBeenCalledTimes(2);
+    expect(rejectedCapture).toHaveBeenCalledTimes(1);
+  });
+
   it("clears local identity even when server logout fails", async () => {
     vi.spyOn(apiClient, "me").mockResolvedValue(user);
     vi.spyOn(apiClient, "logout").mockRejectedValue(new Error("Session expired"));

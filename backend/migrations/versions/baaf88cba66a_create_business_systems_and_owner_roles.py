@@ -4,11 +4,11 @@ Revision ID: baaf88cba66a
 Revises: 3f5d51a53981
 Create Date: 2026-08-02 13:24:26.893971
 """
+
 from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision: str = "baaf88cba66a"
 down_revision: str | Sequence[str] | None = "3f5d51a53981"
@@ -87,9 +87,7 @@ def upgrade() -> None:
         ),
         sa.Column("version", sa.Integer(), nullable=False),
         sa.ForeignKeyConstraint(["account_id"], ["accounts.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(
-            ["system_id"], ["business_systems.id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["system_id"], ["business_systems.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint(
             "account_id",

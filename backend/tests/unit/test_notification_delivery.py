@@ -1,6 +1,10 @@
+# SQLAlchemy exposes sessionmaker.begin() dynamically; Pylint cannot resolve it.
+# pylint: disable=no-member
+
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
@@ -20,6 +24,7 @@ from knowagent.notifications.domain.models import (
     NotificationAuthType,
     NotificationConfiguration,
     NotificationDeliveryStatus,
+    NotificationRequest,
 )
 from knowagent.notifications.errors import TransientNotificationError
 from knowagent.notifications.infrastructure.sqlalchemy_models import NotificationDeliveryRecord
@@ -38,12 +43,18 @@ from knowagent.tickets.infrastructure.sqlalchemy_repository import SqlAlchemyTic
 NOW = datetime(2026, 8, 8, 11, 0, tzinfo=UTC)
 
 
-class FakeProvider:
+class FakeProvider:  # pylint: disable=too-few-public-methods
     def __init__(self, outcomes: list[DeliveryReceipt | Exception]) -> None:
         self.outcomes = outcomes
         self.calls: list[str] = []
 
-    async def send(self, *, configuration, request, idempotency_key):  # type: ignore[no-untyped-def]
+    async def send(
+        self,
+        *,
+        configuration: NotificationConfiguration,
+        request: NotificationRequest,
+        idempotency_key: str,
+    ) -> DeliveryReceipt:
         del configuration, request
         self.calls.append(idempotency_key)
         outcome = self.outcomes.pop(0)
@@ -334,3 +345,94 @@ def test_notification_delivery_status_enum_persists_values() -> None:
         record = session.get(NotificationDeliveryRecord, delivery_id)
         assert record is not None
         assert record.status is NotificationDeliveryStatus.PENDING
+
+
+@pytest.mark.parametrize("service", ["preparation", "delivery"])
+def test_notification_services_require_timezone_aware_times(service: str) -> None:
+    factory, _ = setup_database()
+    naive_now = NOW.replace(tzinfo=None)
+    if service == "preparation":
+        with factory.begin() as session:
+            with pytest.raises(ValueError, match="preparation time must be timezone-aware"):
+                NotificationPreparationService(
+                    repository=SqlAlchemyNotificationRepository(session)
+                ).prepare_pending(now=naive_now, limit=100)
+        return
+
+    processor = NotificationDeliveryProcessor(
+        session_factory=factory,
+        provider=FakeProvider([]),
+    )
+    with pytest.raises(ValueError, match="delivery time must be timezone-aware"):
+        asyncio.run(processor.deliver(delivery_id=uuid4(), now=naive_now))
+
+
+def test_preparation_marks_disabled_configuration_as_skipped() -> None:
+    factory, _ = setup_database()
+    with factory.begin() as session:
+        repository = SqlAlchemyNotificationRepository(session)
+        repository.save_configuration(replace(_configuration(), enabled=False))
+        assert (
+            NotificationPreparationService(repository=repository).prepare_pending(
+                now=NOW, limit=100
+            )
+            == 1
+        )
+        deliveries, total = repository.list_deliveries(
+            status=None, event_type=None, page=1, page_size=20
+        )
+
+    assert total == 1
+    assert deliveries[0].status is NotificationDeliveryStatus.SKIPPED
+    assert deliveries[0].last_error_code == "NOTIFICATION_DISABLED"
+
+
+def test_preparation_marks_missing_recipient_as_permanent_failure() -> None:
+    factory, ids = setup_database()
+    with factory.begin() as session:
+        owner = session.get(AccountRecord, ids["owner_id"])
+        assert owner is not None
+        owner.status = AccountStatus.DISABLED
+    with factory.begin() as session:
+        repository = SqlAlchemyNotificationRepository(session)
+        NotificationPreparationService(repository=repository).prepare_pending(now=NOW, limit=100)
+        deliveries, _ = repository.list_deliveries(
+            status=None, event_type=None, page=1, page_size=20
+        )
+
+    assert deliveries[0].recipient_id is None
+    assert deliveries[0].recipient_address == "unresolved"
+    assert deliveries[0].status is NotificationDeliveryStatus.PERMANENT_FAILURE
+    assert deliveries[0].last_error_code == "RECIPIENT_NOT_FOUND"
+
+
+def test_deliver_returns_existing_delivery_when_it_cannot_be_claimed_again() -> None:
+    factory, _ = setup_database()
+    delivery_id = _prepare_one(factory)
+    processor = NotificationDeliveryProcessor(
+        session_factory=factory,
+        provider=FakeProvider([DeliveryReceipt(202, "provider-1", "accepted")]),
+        clock=lambda: NOW,
+    )
+
+    delivered = asyncio.run(processor.deliver(delivery_id=delivery_id, now=NOW))
+    repeated = asyncio.run(processor.deliver(delivery_id=delivery_id, now=NOW))
+
+    assert delivered.status is NotificationDeliveryStatus.DELIVERED
+    assert repeated == delivered
+
+
+def test_unexpected_provider_failure_is_scheduled_for_retry() -> None:
+    factory, _ = setup_database()
+    delivery_id = _prepare_one(factory)
+    processor = NotificationDeliveryProcessor(
+        session_factory=factory,
+        provider=FakeProvider([RuntimeError("provider bug")]),
+        clock=lambda: NOW,
+    )
+
+    result = asyncio.run(processor.deliver(delivery_id=delivery_id, now=NOW))
+
+    assert result.status is NotificationDeliveryStatus.RETRY_SCHEDULED
+    assert result.last_error_code == "PROVIDER_INTERNAL_ERROR"
+    assert result.last_error_message == "notification provider failed unexpectedly"

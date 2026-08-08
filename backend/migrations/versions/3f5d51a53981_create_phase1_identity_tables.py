@@ -4,11 +4,11 @@ Revision ID: 3f5d51a53981
 Revises:
 Create Date: 2026-08-02 12:09:07.841517
 """
+
 from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
-
 
 revision: str = "3f5d51a53981"
 down_revision: str | Sequence[str] | None = None

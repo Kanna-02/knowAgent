@@ -2,7 +2,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError, apiClient } from "../../api/client";
 import type { AuditLogPage, AuditLogView } from "../../api/types";
-import { click, flush, mountWithAuth, setInput, type MountedView } from "../../test/renderTestApp";
+import {
+  click,
+  flush,
+  mountWithAuth,
+  mouseDown,
+  setInput,
+  type MountedView,
+} from "../../test/renderTestApp";
 import type { AuthContextValue } from "../auth/authContextValue";
 import { AuditLogsPage } from "./AuditLogsPage";
 
@@ -114,11 +121,61 @@ describe("AuditLogsPage", () => {
       '[aria-label="筛选操作类型"]',
     ) as HTMLInputElement;
     await setInput(actionInput, "document");
+    await setInput(
+      view.container.querySelector('[aria-label="筛选对象类型"]') as HTMLInputElement,
+      "document_version",
+    );
+    await mouseDown(view.container.querySelector('[aria-label="筛选结果"]')!);
+    const failureOption = [...document.body.querySelectorAll(".ant-select-item-option")].find(
+      (option) => option.textContent === "失败",
+    );
+    if (!failureOption) throw new Error("Failure result option not found");
+    await click(failureOption);
     await click(view.container.querySelector('[aria-label="应用筛选"]')!);
     await flush();
 
     expect(listAuditLogs).toHaveBeenLastCalledWith(
-      expect.objectContaining({ action: "document", page: 1 }),
+      expect.objectContaining({
+        action: "document",
+        object_type: "document_version",
+        result: "failure",
+        page: 1,
+      }),
     );
+  });
+
+  it("renders null identifiers, context details, failures, and custom results", async () => {
+    vi.spyOn(apiClient, "listAuditLogs").mockResolvedValue({
+      items: [
+        {
+          ...log,
+          id: "50000000-0000-0000-0000-000000000002",
+          actor_id: null,
+          object_type: null,
+          result: "failure",
+          request_id: null,
+          detail: null,
+          context_data: { reason: "denied" },
+        },
+        {
+          ...log,
+          id: "50000000-0000-0000-0000-000000000003",
+          result: "skipped",
+          detail: null,
+          context_data: null,
+        },
+      ],
+      page: 1,
+      page_size: 20,
+      total: 2,
+    });
+
+    const view = await mountWithAuth(<AuditLogsPage />, auth, "/admin/audit-logs");
+    views.push(view);
+    await flush();
+
+    expect(view.container.textContent).toContain("失败");
+    expect(view.container.textContent).toContain("skipped");
+    expect(view.container.textContent).toContain('{"reason":"denied"}');
   });
 });
