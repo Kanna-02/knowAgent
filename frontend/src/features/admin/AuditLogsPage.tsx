@@ -177,12 +177,18 @@ export function AuditLogsPage(): ReactNode {
             title: "操作",
             dataIndex: "action",
             width: 180,
-            render: (value: string) => <Tag>{value}</Tag>,
+            ellipsis: { showTitle: false },
+            render: (value: string) => (
+              <Tooltip title={value}>
+                <Tag className="audit-action-tag">{value}</Tag>
+              </Tooltip>
+            ),
           },
           {
             title: "对象类型",
             dataIndex: "object_type",
             width: 140,
+            ellipsis: true,
             render: (value: string | null) => value ?? "-",
           },
           {

@@ -33,6 +33,7 @@ class ModelServiceSettings:  # pylint: disable=too-many-instance-attributes
     ollama_max_concurrency: int = 1
     ollama_keep_alive: str = "24h"
     rerank_model: str = "BAAI/bge-reranker-v2-m3"
+    rerank_model_path: str | None = None
     rerank_model_version: str = "BAAI-bge-reranker-v2-m3"
     rerank_batch_size: int = 4
     rerank_max_length: int = 512
@@ -91,6 +92,8 @@ class ModelServiceSettings:  # pylint: disable=too-many-instance-attributes
             raise ValueError("Ollama batch size must not exceed request text limit")
         if self.rerank_device is not None and not self.rerank_device.strip():
             raise ValueError("rerank device must be omitted or non-blank")
+        if self.rerank_model_path is not None and not self.rerank_model_path.strip():
+            raise ValueError("rerank model path must be omitted or non-blank")
         if self.port > 65_535:
             raise ValueError("model-service port must be at most 65535")
 
@@ -123,6 +126,7 @@ class ModelServiceSettings:  # pylint: disable=too-many-instance-attributes
             rerank_model=os.getenv(
                 "KNOWAGENT_MODEL_RERANK_MODEL", "BAAI/bge-reranker-v2-m3"
             ).strip(),
+            rerank_model_path=(os.getenv("KNOWAGENT_MODEL_RERANK_MODEL_PATH", "").strip() or None),
             rerank_model_version=os.getenv(
                 "KNOWAGENT_MODEL_RERANK_MODEL_VERSION", "BAAI-bge-reranker-v2-m3"
             ).strip(),

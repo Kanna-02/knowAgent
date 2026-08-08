@@ -61,13 +61,18 @@ afterEach(async () => {
 
 describe("AuditLogsPage", () => {
   it("loads and displays audit logs with action and result columns", async () => {
-    vi.spyOn(apiClient, "listAuditLogs").mockResolvedValue(logPage);
+    vi.spyOn(apiClient, "listAuditLogs").mockResolvedValue({
+      ...logPage,
+      items: [{ ...log, action: "notification_configuration.update" }],
+    });
 
     const view = await mountWithAuth(<AuditLogsPage />, auth, "/admin/audit-logs");
     views.push(view);
     await flush();
 
-    expect(view.container.textContent).toContain("document.publish");
+    const actionTag = view.container.querySelector(".audit-action-tag");
+    expect(actionTag?.textContent).toBe("notification_configuration.update");
+    expect(actionTag?.closest("td")?.classList).toContain("ant-table-cell-ellipsis");
     expect(view.container.textContent).toContain("Published v1");
     expect(view.container.textContent).toContain("成功");
   });

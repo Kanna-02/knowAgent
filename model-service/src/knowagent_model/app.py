@@ -147,6 +147,7 @@ def create_app(
                     max_concurrency=configured_settings.rerank_max_concurrency,
                     use_fp16=configured_settings.rerank_use_fp16,
                     device=configured_settings.rerank_device,
+                    model_path=configured_settings.rerank_model_path,
                 )
             )
             yield

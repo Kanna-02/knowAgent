@@ -19,6 +19,7 @@ def test_settings_defaults_match_existing_local_bge_m3_volume() -> None:
     assert settings.ollama_timeout_seconds == 300.0
     assert settings.ollama_health_timeout_seconds == 5.0
     assert settings.rerank_model == "BAAI/bge-reranker-v2-m3"
+    assert settings.rerank_model_path is None
     assert settings.rerank_batch_size == 4
     assert settings.rerank_use_fp16 is False
 
@@ -34,6 +35,7 @@ def test_settings_loads_environment_overrides(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setenv("KNOWAGENT_MODEL_PORT", "8200")
     monkeypatch.setenv("KNOWAGENT_MODEL_OLLAMA_HEALTH_TIMEOUT_SECONDS", "2.5")
     monkeypatch.setenv("KNOWAGENT_MODEL_RERANK_MODEL", "custom-reranker")
+    monkeypatch.setenv("KNOWAGENT_MODEL_RERANK_MODEL_PATH", "/models/custom-reranker")
     monkeypatch.setenv("KNOWAGENT_MODEL_RERANK_MODEL_VERSION", "revision-1")
     monkeypatch.setenv("KNOWAGENT_MODEL_RERANK_BATCH_SIZE", "3")
     monkeypatch.setenv("KNOWAGENT_MODEL_RERANK_USE_FP16", "true")
@@ -50,6 +52,7 @@ def test_settings_loads_environment_overrides(monkeypatch: pytest.MonkeyPatch) -
     assert settings.port == 8200
     assert settings.ollama_health_timeout_seconds == 2.5
     assert settings.rerank_model == "custom-reranker"
+    assert settings.rerank_model_path == "/models/custom-reranker"
     assert settings.rerank_model_version == "revision-1"
     assert settings.rerank_batch_size == 3
     assert settings.rerank_use_fp16 is True
@@ -73,6 +76,7 @@ def test_settings_loads_environment_overrides(monkeypatch: pytest.MonkeyPatch) -
         lambda: ModelServiceSettings(port=65_536),
         lambda: ModelServiceSettings(rerank_batch_size=0),
         lambda: ModelServiceSettings(rerank_device=" "),
+        lambda: ModelServiceSettings(rerank_model_path=" "),
     ],
 )
 def test_settings_rejects_invalid_values(factory: Callable[[], ModelServiceSettings]) -> None:

@@ -1,6 +1,6 @@
 # Runtime Resource Baseline And Local Inventory
 
-本文档记录 KnowAgent 的运行资源基线，以及 2026-08-06 对当前 macOS 宿主机和 Docker Desktop 的只读盘点结果。盘点不读取密钥值，不安装依赖，不下载模型权重。
+本文档记录 KnowAgent 的运行资源基线，以及 2026-08-08 对当前 macOS 宿主机和 Docker Desktop 的盘点与本地 Rerank 验证结果。过程不读取密钥值、不下载模型权重；仅在项目 model-service 虚拟环境安装项目锁定的可选推理依赖。
 
 ## 1. 系统所需资源清单
 
@@ -36,7 +36,7 @@ Phase 3 本地默认 Rerank 限制为 `batch_size=4`、`max_length=512`、`max_c
 | --- | --- | --- |
 | Python shim | 3.11.11 | 是 |
 | backend `.venv` | Python 3.11.15，约 365 MB | 是；应用依赖已安装 |
-| model-service `.venv` | Python 3.11.15，约 157 MB | 基础服务满足；Rerank 运行时缺失 |
+| model-service `.venv` | Python 3.11.15 | 基础服务与 `FlagEmbedding==1.4.0` Rerank 运行时已安装并完成真实推理 |
 | Node.js / npm | 24.16.0 / 11.13.0 | 是 |
 | PostgreSQL | 17.10，运行于 `127.0.0.1:5440` | 是 |
 | PostgreSQL 扩展 | `vector 0.8.6`、`pg_trgm 1.6` | 是 |
@@ -49,14 +49,14 @@ Phase 3 本地默认 Rerank 限制为 `batch_size=4`、`max_length=512`、`max_c
 
 ### 2.3 Python 推理依赖
 
-检查了以下四个现有虚拟环境：
+初始盘点检查了以下四个现有虚拟环境：
 
 - `knowAgent/backend/.venv`
 - `knowAgent/model-service/.venv`
 - `Function_Calling/backend/.venv`
 - `ReActAgent/backend/.venv`
 
-四者均未安装 `FlagEmbedding`、`torch`、`transformers`、`sentence-transformers`、`onnxruntime` 或 `optimum`。2026-08-06 的 `model-service[rerank]` 安装已在依赖下载阶段终止，不能把 pip 缓存视为可用运行时；当前没有后台安装进程。
+初始盘点时四者均未安装 `FlagEmbedding`、`torch`、`transformers`、`sentence-transformers`、`onnxruntime` 或 `optimum`。2026-08-08 已仅在 `knowAgent/model-service/.venv` 安装 `model-service[rerank]`，并将 `transformers` 固定为 4.57.6；实际验证确认 Transformers 5.14.1 与 FlagEmbedding 1.4.0 不兼容。其他三个环境仍不作为 KnowAgent Rerank 运行时。
 
 全局 pip 缓存约 3.7 GB，但未确认其中存在可离线复用且版本匹配的完整 PyTorch wheel。恢复安装前应先列出锁定依赖和缓存命中情况。
 
@@ -71,9 +71,9 @@ Phase 3 本地默认 Rerank 限制为 `batch_size=4`、`max_length=512`、`max_c
 | `~/.cache/modelscope` | Rerank lock 目录 | 0 B，无模型文件 | 不可复用 |
 | `~/.ollama` | 宿主机 Ollama 缓存 | 不存在 | 使用 Docker volume，不需要重复下载 |
 
-原生模型 `config.json` 声明 `XLMRobertaForSequenceClassification`、hidden size 1024、24 层、FP32 权重元数据，与 `bge-reranker-v2-m3` 交叉编码器结构相符。这里只确认文件和元数据存在；真实加载、首请求延迟、峰值内存和输出数值尚未验证。
+原生模型 `config.json` 声明 `XLMRobertaForSequenceClassification`、hidden size 1024、24 层、FP32 权重元数据，与 `bge-reranker-v2-m3` 交叉编码器结构相符。2026-08-08 已由当前 model-service 真实加载：示例相关候选得分约 `4.82495`，无关候选约 `-11.01469`；进程级 `/v1/rerank` HTTP 请求约 10.37 秒。
 
-当前代码把 `KNOWAGENT_MODEL_RERANK_MODEL` 同时用作 API 模型标识和 `FlagReranker` 加载参数。直接改成本地绝对路径会使对外模型标识也变成路径，并与 backend 默认 `BAAI/bge-reranker-v2-m3` 契约不一致。复用本地权重前，应新增独立的本地加载路径配置，保持对外模型 ID 不变。
+当前代码已用 `KNOWAGENT_MODEL_RERANK_MODEL_PATH` 承担本地加载路径，并保持 `KNOWAGENT_MODEL_RERANK_MODEL=BAAI/bge-reranker-v2-m3` 作为对外 API 标识；路径解耦门禁已关闭。
 
 ## 4. Docker 已有资源
 
@@ -99,13 +99,12 @@ Docker 中没有 MinIO 镜像。KnowAgent 本地对象存储使用已安装的�
 
 | 优先级 | 缺口 | 处理原则 |
 | --- | --- | --- |
-| P0 | Rerank Python 运行时未安装 | 先确认本地权重路径解耦，再只安装依赖；禁止重新下载权重 |
-| P0 | 原生权重尚未由当前 model-service 真实加载 | 安装完成后用 1 条 query + 2 条 document 做离线/HTTP 冒烟并记录峰值内存与延迟 |
-| P1 | 8 GB M1 的组合内存余量未知 | 保持 `max_concurrency=1`，避免同时进行依赖安装、模型加载和大规模前端构建 |
+| 已关闭 | 本地 Rerank 运行时、路径解耦和真实加载 | 已复用现有权重完成离线与 HTTP 推理；禁止重新下载权重 |
+| P1 | 8 GB M1 的组合内存余量未形成容量基线 | 保持 `max_concurrency=1`，避免同时加载模型和执行多套全量测试；本机结果仅作功能冒烟 |
 | P1 | 目标 Linux CPU/内存/GPU 未知 | 不生成生产锁、不决定量化、不宣称本机结果代表生产 |
 | P1 | 外部 Qwen 与公司 S3 只在 `.env` 配置 | 只验证连通性和契约，不把 Key 或真实端点写入本清单 |
 
-后续顺序固定为：拆分模型 ID 与本地加载路径 -> 解析并记录依赖树/缓存命中 -> 用户确认后安装缺失运行时 -> 使用现有权重离线加载 -> 启动 model-service -> 真实 Rerank API 和检索链路验收。任何步骤都不得隐式下载模型权重。
+本地执行链已完成：模型 ID/路径解耦 -> 锁定兼容依赖 -> 复用现有权重离线加载 -> model-service HTTP 集成。后续只剩真实 ESB 数据下的 RRF/Rerank 质量对比，以及目标 Linux 的资源、依赖锁、延迟和容量验证。任何步骤都不得隐式下载模型权重。
 
 ## 6. 更新规则
 

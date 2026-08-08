@@ -26,7 +26,7 @@ class RerankRunner(Protocol):  # pylint: disable=too-few-public-methods
 
 
 @dataclass(frozen=True, slots=True)
-class FlagEmbeddingRerankConfig:
+class FlagEmbeddingRerankConfig:  # pylint: disable=too-many-instance-attributes
     model: str
     model_version: str
     batch_size: int
@@ -34,6 +34,7 @@ class FlagEmbeddingRerankConfig:
     max_concurrency: int
     use_fp16: bool
     device: str | None = None
+    model_path: str | None = None
 
     def __post_init__(self) -> None:
         if not self.model.strip() or not self.model_version.strip():
@@ -42,6 +43,8 @@ class FlagEmbeddingRerankConfig:
             raise ValueError("rerank runtime limits must be positive")
         if self.device is not None and not self.device.strip():
             raise ValueError("rerank device must be omitted or non-blank")
+        if self.model_path is not None and not self.model_path.strip():
+            raise ValueError("rerank model path must be omitted or non-blank")
 
 
 RunnerFactory = Callable[[FlagEmbeddingRerankConfig], RerankRunner]
@@ -160,7 +163,7 @@ def _create_runner(config: FlagEmbeddingRerankConfig) -> RerankRunner:
         raise _unavailable()
     devices = config.device if config.device is not None else None
     runner = runner_type(
-        config.model,
+        config.model_path or config.model,
         use_fp16=config.use_fp16,
         trust_remote_code=False,
         devices=devices,

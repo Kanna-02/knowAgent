@@ -17,6 +17,28 @@
 
 ## 功能变更记录
 
+### 2026-08-08 - Phase 2/3 完成度审计、本地 Rerank 与运营页验收收尾
+
+类型：变更 / 修复 / 测试 / 文档
+
+相关需求：REQ-004、REQ-005、REQ-009、REQ-011、REQ-012、REQ-013、REQ-014、REQ-018；AC-003、AC-004、AC-005、AC-008、AC-010、AC-011、AC-014。
+
+相关文件：`model-service/src/knowagent_model/settings.py`、`flag_embedding.py`、`app.py`、`model-service/.env.example`、`model-service/pyproject.toml`、相关单元/集成测试、`backend/tests/integration/test_agent_api.py`、`test_phase3_live_integration.py`、`frontend/src/features/admin/AuditLogsPage.tsx`、对应测试、`frontend/src/styles.css`、Phase 2/3 状态/路线图/验收/评测/追溯/运维文档。
+
+变更说明：
+
+1. 新增 `KNOWAGENT_MODEL_RERANK_MODEL_PATH`，将对外模型 ID 与本地权重路径解耦；FlagEmbedding 优先从本地路径加载，同时保持 HTTP 契约仍使用 `BAAI/bge-reranker-v2-m3`。
+2. 固定 `transformers==4.57.6`，避免 Transformers 5.14.1 与 `FlagEmbedding==1.4.0` 的运行时不兼容；新增真实本地权重 HTTP 集成测试。
+3. 修复 Agent API 集成替身与当前 `retrieval_profile_name` 契约漂移，以及 Phase 3 live 测试的流式用户消息/终态消息持久化顺序。
+4. 修复审计操作长标签覆盖相邻列、分析页移动端表格列撑开整页的问题，并补长操作标签组件回归。
+5. 明确 Phase 2、Phase 3 均为“功能范围完成、阶段验收未关闭”：Phase 2 等待真实 ESB 标注集和完整业务页数据；Phase 3 等待真实公司通知 API、真实 ESB Rerank 质量收益和目标 Linux 资源。Stub 通知与合成问题不计入正式验收。
+
+影响范围：model-service Rerank 本地加载与依赖兼容、集成测试契约、管理后台审计/分析响应式布局，以及 Phase 2/3 项目状态和运维说明；不改变数据库结构，不伪造外部验收结果。
+
+验证方式：Phase 2 真实服务集成 23 passed、6 warnings（177.84 秒）；Phase 3 PostgreSQL 1 passed，通知 API + 本地 FastAPI Stub 4 passed；本地 Rerank HTTP 集成 1 passed（17.67 秒），相关/无关候选得分约 4.82495/-11.01469，进程级 HTTP 约 10.37 秒。后端全量 401 passed、25 skipped，覆盖率 85.55%；model-service 全量 51 passed、2 skipped，覆盖率 86.76%。前端在当前高负载下默认 5 秒超时运行两次均为 80/93，通过仅放宽测试超时到 20 秒的同一套断言后 93/93，覆盖率 90.52%/82.43%/85.51%/91.82%；TypeScript、ESLint、Prettier、Vite build 和 `npm audit` 通过，漏洞 0。Backend 242 个 Python 文件 Black/isort 清洁、171 个源文件 mypy strict 零错误、Bandit 中高危 0；model-service 本次变更文件 Black 清洁、8 个源文件 mypy strict 零错误、相关 Pylint 10.00/10、Bandit 中高危 0，全目录 Black 仍受未改动 `ollama.py` 既有格式差异影响。文档、分析、审计页面在 1440x900 与 390x844 真实登录/API 会话下通过浏览器验收。
+
+后续注意：没有真实 ESB 标注集、真实公司通知测试端点和目标 Linux 资源前，不得把 Phase 2 或 Phase 3 标记为已完成；默认前端 5 秒超时在当前机器负载下仍有稳定性风险。
+
 ### 2026-08-08 - 前后端覆盖率、格式与依赖门禁补强
 
 类型：测试 / 质量

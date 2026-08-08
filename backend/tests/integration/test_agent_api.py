@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -276,7 +276,13 @@ def _patch_question_service(resolution: QuestionResolution) -> object:
         async def resolve(self, **kwargs: object) -> QuestionResolution:
             return resolution
 
-    def _patched(_request: object, _database: object) -> object:
+    def _patched(
+        _request: object,
+        _database: object,
+        *,
+        retrieval_profile_name: str | None = None,
+    ) -> object:
+        del retrieval_profile_name
         return _FakeService()
 
     agent_router._build_question_service = _patched  # type: ignore[assignment]
@@ -295,7 +301,10 @@ def _patch_stream_service(answer: VerifiedAnswer) -> object:
     original = agent_router._build_question_service
 
     class _FakeStreamService:
-        async def resolve_stream(self, **kwargs: object):
+        retrieval_profile_name = "default"
+        retrieval_profile_version = "profile-v1"
+
+        async def resolve_stream(self, **kwargs: object) -> AsyncIterator[QuestionStreamEvent]:
             run_id = kwargs["run_id"]
             assert isinstance(run_id, UUID)
             yield QuestionStreamEvent(
@@ -314,7 +323,13 @@ def _patch_stream_service(answer: VerifiedAnswer) -> object:
                 run_id=run_id,
             )
 
-    def _patched(_request: object, _database: object) -> object:
+    def _patched(
+        _request: object,
+        _database: object,
+        *,
+        retrieval_profile_name: str | None = None,
+    ) -> object:
+        del retrieval_profile_name
         return _FakeStreamService()
 
     agent_router._build_question_service = _patched  # type: ignore[assignment]

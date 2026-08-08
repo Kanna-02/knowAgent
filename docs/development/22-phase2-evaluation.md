@@ -58,3 +58,9 @@ PYTHONPATH=src .venv/bin/knowagent-evaluate-phase2 /absolute/path/to/phase2-obse
 记录评测日期、知识发布版本、Embedding 模型/version、LLM 模型、Prompt version、输入集版本/校验值和 CLI JSON 报告。原始内部问题、答案和工单 ID 默认不提交 Git；可将脱敏后的汇总报告追加到 `docs/development/21-phase2-integration-acceptance.md`。
 
 Phase 2 只有在该门禁真实通过并补齐问答/工单页面人工验收记录后，才能在路线图中标记为已完成。
+
+## 5. 当前执行状态
+
+截至 2026-08-08，评测 CLI、输入校验、阈值计算和报告格式均已完成，但仓库及本地受控目录中没有可用于关闭门禁的至少 50 条真实标注 ESB 可回答问题，也没有足量的真实无知识问题 observation。因而本轮没有执行正式质量评测，不存在可报告的答案正确率、引用支持率或拒答召回率。
+
+本地 Stub、合成问题、模型自动生成问题和模型自评结果只能用于代码或契约测试，不计入 AC-004/AC-005。数据到位后应按第 3 节执行一次真实运行，并将脱敏汇总追加到 `docs/development/21-phase2-integration-acceptance.md`；在此之前 Phase 2 必须保持“功能范围完成、阶段验收未关闭”。

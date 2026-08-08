@@ -11,7 +11,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, select, text, update
 from sqlalchemy.orm import Session, sessionmaker
 
-from knowagent.agent.api.router import _persist_stream_terminal_turn
+from knowagent.agent.api.router import (
+    _persist_stream_terminal_turn,
+    _persist_stream_user_turn,
+)
 from knowagent.agent.domain.conversation import IntentKind, QueryRewriteResult
 from knowagent.agent.domain.models import (
     EvidenceDecision,
@@ -168,13 +171,21 @@ def test_phase3_versions_conversations_and_terminal_persistence_on_postgresql(
             original_query="那怎么发布？",
             prompt_version=PROMPT_VERSION,
         )
-        _persist_stream_terminal_turn(
+        now = datetime.now(UTC)
+        _persist_stream_user_turn(
             database=database,
             system_id=system_id,
             account_id=account_id,
             conversation_id=conversation_id,
             question="那怎么发布？",
             rewrite=rewrite,
+            now=now,
+        )
+        _persist_stream_terminal_turn(
+            database=database,
+            system_id=system_id,
+            account_id=account_id,
+            conversation_id=conversation_id,
             event=QuestionStreamEvent(
                 kind=QuestionStreamEventKind.ANSWER_COMPLETED,
                 payload=VerifiedAnswer(
@@ -186,7 +197,7 @@ def test_phase3_versions_conversations_and_terminal_persistence_on_postgresql(
                 ),
                 run_id=uuid4(),
             ),
-            now=datetime.now(UTC),
+            now=now,
         )
         run_id = uuid4()
         SqlAlchemyTicketRepository(database).add_decision(

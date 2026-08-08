@@ -846,6 +846,10 @@ p {
   gap: var(--space-6);
 }
 
+.analytics-table-column {
+  min-width: 0;
+}
+
 .analytics-section-title {
   font-size: var(--font-h3-size);
   font-weight: var(--font-heading-weight);
@@ -855,6 +859,14 @@ p {
 .audit-id {
   font-size: var(--font-small-size);
   color: var(--color-text-secondary);
+}
+
+.audit-action-tag {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
 }
 
 .audit-detail-content {
