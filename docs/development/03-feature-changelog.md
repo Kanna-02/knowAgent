@@ -17,6 +17,34 @@
 
 ## 功能变更记录
 
+### 2026-08-08 - Phase 3 第 3 项：公司通知 API、失败重试和通知记录
+
+类型：新增 / 变更 / 测试
+
+相关需求：REQ-010；AC-008、AC-014。
+
+相关文件：`backend/src/knowagent/notifications/`、`backend/src/knowagent/platform/outbox.py`、`backend/src/knowagent/tickets/infrastructure/sqlalchemy_repository.py`、`backend/src/knowagent/worker/`、`backend/src/knowagent/platform/settings.py`、`backend/migrations/versions/3bed66d88cf4_add_phase3_notification_delivery.py`、`backend/migrations/versions/8f2c9d4a1b67_add_notification_attempt_fencing.py`、`backend/tests/unit/test_notifications.py`、`backend/tests/unit/test_notification_delivery.py`、`backend/tests/integration/test_notifications_api.py`、`backend/tests/integration/test_notification_provider_stub.py`、`frontend/src/features/admin/NotificationSettingsPanel.tsx`、`frontend/src/features/admin/NotificationDeliveriesPage.tsx`、对应测试文件、`frontend/src/api/client.ts`、`frontend/src/api/types.ts`、`frontend/src/app/App.tsx`、`frontend/src/features/admin/AdminShell.tsx`、`frontend/src/styles.css`、`scripts/local-env.sh` 及相关产品/工程/运维文档。
+
+变更说明：
+
+1. 按 TD-013 落地可配置 HTTP JSON Provider：管理员可配置启用状态、通知地址、鉴权方式、密钥环境变量引用、成功状态码、超时、重试参数和两类 JSON 模板；数据库不保存密钥值，关闭通知时允许地址为空。
+2. 工单创建和负责人/管理员回复分别在业务事务内写入 `ticket_created`、`ticket_replied` Outbox；通知 Worker 使用独立 `notification` 队列消费，408/425/429/5xx、网络错误和超时按配置退避重试，永久失败可由管理员人工重试并保留累计尝试次数，Beat 每 15 秒恢复待处理任务。
+3. 新增通知配置、通知记录分页筛选和人工重试管理 API，以及“问答配置 → 通知接口”和 `/admin/notifications` 两个后台入口；配置页覆盖 loading/error/success、关闭态和启用态校验，记录页只对永久失败展示确认重试操作。
+4. 新增 MockTransport 单元测试和本地 FastAPI Stub 集成测试，在没有真实公司通知接口时验证请求模板、鉴权引用、幂等键、状态映射、自动/人工重试和管理权限契约；Worker 启动脚本同时订阅 `ingestion,notification`。
+
+review 修复（1 阻塞 + 1 建议）：
+
+1. 为每次通知领取增加 `active_attempt_id` fencing，只允许待处理、已入队或到期重试状态领取；重复 Worker 不能并发领取 `DELIVERING`，过期 attempt 的迟到成功/失败结果不能覆盖新 attempt 的终态。
+2. 投递成功时间、失败时间和指数退避改为 Provider 调用完成后取时；通知停滞恢复阈值默认提高到 180 秒并强制大于最大 120 秒请求超时，避免正常长请求尚未结束即并发恢复。
+
+质量补充 4 个回归用例，覆盖重复领取、迟到失败覆盖、新退避起点和恢复阈值下限。
+
+影响范围：工单事务写入、通知异步任务、管理员配置与记录页面、数据库迁移、本地开发和部署配置。未新增依赖，未保存真实密钥，也未假定尚未提供的公司鉴权或回执协议。
+
+验证方式：后端全量 386 passed、25 skipped，覆盖率 85.11%；通知与 Worker 相关 32 项定向测试通过；228 个 Python 文件 Black/isort 清洁，171 个源文件 mypy strict 零错误，通知修复范围 Pylint 10.00/10、全仓 Pylint 9.81/10（既有告警导致命令非零），Bandit 中高危 0；本地 PostgreSQL `alembic upgrade head`、`alembic check` 和 `active_attempt_id` 实际列检查通过。前端 70/70 测试通过，TypeScript、ESLint、Prettier、Vite build 通过；覆盖率语句/分支/函数/行为沿用本功能本轮已有运行结果 78.29%/64.46%/72.89%/80.76%，全局 80% 门禁未通过；`npm audit` 报 `nanoid <3.3.17` 1 个 high，未绕过依赖升级兼容性门禁。真实 PostgreSQL/API 登录会话下完成通知配置保存、通知记录空态、1440x900 和 390x844 响应式检查，页面无横向溢出或控件重叠。
+
+后续注意：Phase 3 的 4/4 功能范围已实现，但 REQ-010 仍保持 `implementing`。真实公司通知 API 的鉴权、限流、幂等接收和回执语义尚未提供，必须在 staging 用真实端点完成 AC-014 后才能关闭；前端全局覆盖率和 `nanoid` 安全公告也仍是独立质量门禁。
+
 ### 2026-08-07 - 追溯状态修正：Phase 3 第 2 项已实现，标记为完成
 
 类型：文档 / 追溯修正

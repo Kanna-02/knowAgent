@@ -1,4 +1,12 @@
-import { Activity, FileText, ScrollText, ServerCog, Settings2, UsersRound } from "lucide-react";
+import {
+  Activity,
+  BellRing,
+  FileText,
+  ScrollText,
+  ServerCog,
+  Settings2,
+  UsersRound,
+} from "lucide-react";
 import type { ReactNode } from "react";
 
 import { WorkspaceShell } from "../../shared/WorkspaceShell";
@@ -39,6 +47,11 @@ export function AdminShell(): ReactNode {
           path: "/admin/audit-logs",
           label: "审计日志",
           icon: <ScrollText size={18} />,
+        },
+        {
+          path: "/admin/notifications",
+          label: "通知记录",
+          icon: <BellRing size={18} />,
         },
       ]}
     />

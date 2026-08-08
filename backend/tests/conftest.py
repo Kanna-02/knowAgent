@@ -11,6 +11,10 @@ from knowagent.agent.infrastructure import sqlalchemy_models as _agent_models  #
 from knowagent.documents.infrastructure import sqlalchemy_models as _document_models  # noqa: F401
 from knowagent.identity.infrastructure.sqlalchemy_models import Base  # noqa: F401
 from knowagent.knowledge.infrastructure import sqlalchemy_models as _knowledge_models  # noqa: F401
+from knowagent.notifications.infrastructure import (  # noqa: F401
+    sqlalchemy_models as _notification_models,
+)
+from knowagent.platform import outbox as _platform_outbox  # noqa: F401
 from knowagent.systems.infrastructure import sqlalchemy_models as _systems_models  # noqa: F401
 from knowagent.tickets.infrastructure import sqlalchemy_models as _ticket_models  # noqa: F401
 

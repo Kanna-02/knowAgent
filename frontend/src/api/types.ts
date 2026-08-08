@@ -121,6 +121,68 @@ export interface AuditLogPage {
   total: number;
 }
 
+export type NotificationAuthType = "NONE" | "BEARER" | "HEADER";
+export type NotificationEventType = "ticket_created" | "ticket_replied";
+export type NotificationDeliveryStatus =
+  | "PENDING"
+  | "QUEUED"
+  | "DELIVERING"
+  | "RETRY_SCHEDULED"
+  | "DELIVERED"
+  | "PERMANENT_FAILURE"
+  | "SKIPPED";
+
+export interface NotificationConfigurationView {
+  id: string;
+  enabled: boolean;
+  endpoint_url: string;
+  auth_type: NotificationAuthType;
+  auth_header_name: string | null;
+  secret_reference: string | null;
+  ticket_created_template: string;
+  ticket_replied_template: string;
+  success_status_codes: number[];
+  timeout_seconds: number;
+  max_attempts: number;
+  retry_base_seconds: number;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type NotificationConfigurationUpdate = Omit<
+  NotificationConfigurationView,
+  "id" | "updated_by" | "created_at" | "updated_at"
+>;
+
+export interface NotificationDeliveryView {
+  id: string;
+  outbox_id: string;
+  event_type: NotificationEventType;
+  recipient_id: string | null;
+  recipient_address: string;
+  status: NotificationDeliveryStatus;
+  idempotency_key: string;
+  attempt_count: number;
+  cycle_attempt: number;
+  next_attempt_at: string | null;
+  last_status_code: number | null;
+  last_error_code: string | null;
+  last_error_message: string | null;
+  provider_message_id: string | null;
+  response_summary: string | null;
+  delivered_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NotificationDeliveryPage {
+  items: NotificationDeliveryView[];
+  page: number;
+  page_size: number;
+  total: number;
+}
+
 export interface SystemRoleView {
   system_id: string;
   role: SystemRole;

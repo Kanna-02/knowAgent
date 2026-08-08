@@ -22,6 +22,7 @@ import { apiClient } from "../../api/client";
 import type { PromptDefinitionView, PromptScenario, RetrievalProfileView } from "../../api/types";
 import { FeedbackState } from "../../shared/FeedbackState";
 import { toUiError, type UiError } from "../../shared/uiError";
+import { NotificationSettingsPanel } from "./NotificationSettingsPanel";
 
 interface PromptFormValues {
   scenario: PromptScenario;
@@ -279,7 +280,7 @@ export function ConfigurationPage(): ReactNode {
       <div className="page-heading-row">
         <div>
           <h1>问答配置</h1>
-          <p>提示词与检索配置版本</p>
+          <p>提示词、检索版本与通知接口</p>
         </div>
         <Settings2 size={22} aria-hidden="true" />
       </div>
@@ -319,6 +320,11 @@ export function ConfigurationPage(): ReactNode {
                 {profilePanel}
               </>
             ),
+          },
+          {
+            key: "notifications",
+            label: "通知接口",
+            children: <NotificationSettingsPanel />,
           },
         ]}
       />

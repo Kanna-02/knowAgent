@@ -506,6 +506,24 @@ p {
   width: 100%;
 }
 
+.notification-configuration-form {
+  border: 1px solid var(--color-border);
+  border-top: 0;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  padding: var(--space-5);
+  background: var(--color-surface);
+}
+
+.notification-form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0 var(--space-4);
+}
+
+.notification-form-grid .ant-input-number {
+  width: 100%;
+}
+
 .system-selection-state {
   display: grid;
   min-height: 280px;
@@ -800,6 +818,10 @@ p {
   }
 
   .configuration-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .notification-form-grid {
     grid-template-columns: 1fr;
   }
 }

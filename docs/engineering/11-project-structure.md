@@ -89,7 +89,7 @@ conversations/tickets/documents <- analytics
 | `retrieval` | 查询改写、关键词/向量混合召回、Rerank、证据候选组织 | `BasicRetrievalService` 已实现加权 RRF、Rerank 与两级显式降级；`EvidenceOrganizer` 已实现 | `knowledge`, `conversations` |
 | `agent` | LangGraph 问答流程、意图分类、证据决策、降级分流、回答与引用校验 | `GroundedAnswerService`、`DeterministicEvidencePolicy`、`ReliableQuestionService`、`AnswerSnapshotService` 已实现；`QuestionWorkflow` 待补 | `retrieval`, `conversations`, Provider ports |
 | `tickets` | 自动建单、分派、回复、追加、关闭/重开、候选知识审核回流 | 自动建单、工单状态机、审核后向量发布已实现；API 编排待补 | `systems`, `conversations`, `knowledge` |
-| `notifications` | Outbox 消费、模板、公司通知 API、重试和人工重试 | `NotificationDispatcher` | `tickets`, `platform` |
+| `notifications` | Outbox 消费、受控 JSON 模板、可配置公司通知 HTTP Provider、重试和人工重试 | `NotificationPreparationService`、`NotificationDeliveryProcessor`、`NotificationProvider` | `tickets`, `platform` |
 | `analytics` | 高频问题、知识缺口、使用统计、离线评测和版本对比 | 查询服务与聚合任务 | `conversations`, `tickets`, `documents` |
 | `audit` | 认证、权限、知识和工单关键操作审计 | `AuditSink`、审计查询 | `common`, `platform` |
 | `model-service` | Embedding/Rerank 推理适配、批处理、模型元数据和健康检查 | `/v1/embeddings` 与 `/v1/rerank` 已实现；Rerank 使用可选 `FlagEmbedding + PyTorch` 运行时 | Embedding 依赖 Ollama HTTP；Rerank 模型独立延迟加载，不依赖业务模块 |
@@ -215,6 +215,8 @@ class SourceLocator(BaseModel):
 | `POST /knowledge-candidates/{candidate_id}/review` | `CandidateReviewRequest` | `CandidateView` | 负责人不得审核自己提交的高风险变更；策略可配置 |
 | `GET /admin/analytics/questions` | 系统/时间/粒度 | `QuestionAnalyticsView` | 负责人限所属系统，管理员全局 |
 | `GET /admin/audit-logs` | 分页/操作者/动作/对象/时间 | `Page[AuditLogView]` | 平台管理员 |
+| `GET /admin/notification-configuration` | 无 | `NotificationConfigurationView` | 平台管理员；不返回密钥明文 |
+| `PUT /admin/notification-configuration` | 启用状态、端点、鉴权引用、JSON 模板、成功码、超时与重试参数 | `NotificationConfigurationView` | 平台管理员 + CSRF；生产 HTTPS/Host 白名单 |
 | `GET /admin/notification-deliveries` | 分页/状态 | `Page[NotificationView]` | 平台管理员 |
 | `POST /admin/notification-deliveries/{id}/retry` | 无 | `NotificationView` | 永久失败需人工重试 |
 | `GET /admin/retrieval-profiles` | 分页/系统/状态 | `Page[RetrievalProfileView]` | 平台管理员 |
@@ -341,8 +343,9 @@ Provider 可由内部 HTTP、自建运行时或后续公司 API 实现；领域�
 | 工单 | `tickets` | `system_id`、提问人、来源运行、负责人、状态、优先级、去重指纹；来源运行唯一防重复建单 |
 | 工单 | `ticket_replies` | 工单、作者、正文、可见性、序号 |
 | 工单 | `knowledge_candidates` | 工单、标准问题、答案、审核状态、提交人、审核人、审核意见、发布 source id |
-| 通知 | `outbox_events` | 聚合类型/id、事件类型、payload、状态、attempt、下次重试、幂等键唯一 |
-| 通知 | `notification_deliveries` | outbox、接收人、模板、Provider 请求/回执摘要、状态、失败分类 |
+| 通知 | `outbox_events` | 聚合类型/id、事件类型、payload、处理状态、处理时间、幂等键唯一 |
+| 通知 | `notification_configurations` | 单例名称、启用状态、端点、鉴权方式/Header/密钥引用、两类受控 JSON 模板、成功码、超时、重试参数、乐观锁版本 |
+| 通知 | `notification_deliveries` | outbox、事件/接收人、全局/当前周期尝试次数、下次重试、幂等键、Provider 状态/消息 ID/脱敏回执摘要、失败分类、乐观锁版本 |
 | 配置 | `prompt_versions` | 场景、版本、模板、变量 schema、状态、checksum；已使用版本不可修改 |
 | 配置 | `retrieval_profiles` | 系统/全局、top-k、权重、阈值、模型版本、状态；版本化发布 |
 | 分析 | `message_feedback` | 消息、用户、评价与可选原因；`message_id + user_id` 唯一 |
@@ -395,7 +398,7 @@ DRAFT -> SUBMITTED -> APPROVED -> PUBLISHING -> PUBLISHED
 
 ### 7.2 问答、引用和拒答
 
-当前实现边界：`retrieval` 已提供 PostgreSQL 关键词/向量查询、`DOCUMENT/TICKET` 统一来源检索、数据库层系统/发布状态过滤、可配置加权 RRF、有限候选 Rerank 和可观测两级降级；`agent` 已提供版本化 Prompt、Qwen 兼容流、声明级引用校验、问答 API/SSE 以及按 `run_id + system_id` 持久化的答案/引用快照；`tickets` 已提供拒答建单、完整状态机、API 和审核后 Embedding 成功才原子发布的知识回流。多轮 `QuestionWorkflow`、通知和运营分析仍待后续 Phase 3 项实现。
+当前实现边界：`retrieval` 已提供 PostgreSQL 关键词/向量查询、`DOCUMENT/TICKET` 统一来源检索、数据库层系统/发布状态过滤、可配置加权 RRF、有限候选 Rerank 和可观测两级降级；`agent` 已提供版本化 Prompt、Qwen 兼容流、声明级引用校验、问答 API/SSE 以及按 `run_id + system_id` 持久化的答案/引用快照；`tickets` 已提供拒答建单、完整状态机、API 和审核后 Embedding 成功才原子发布的知识回流；`notifications` 已提供工单事务 Outbox、管理员配置、HTTP JSON Provider、独立 Celery 队列、指数退避、停滞恢复、投递查询和永久失败人工重试。真实公司通知协议仍通过稳定 Provider 端口隔离，待外部契约联调。
 
 1. 创建会话时固定 `system_id`；每次提问再次校验用户对该系统的访问权限。
 2. 事务持久化问题消息、`question_run` 和任务派发事实，提交后投递 Celery `qa` 队列并立即返回 run id。

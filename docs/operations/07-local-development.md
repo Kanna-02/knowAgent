@@ -69,6 +69,9 @@ Phase 2 关键变量：
 | `KNOWAGENT_EVIDENCE_MIN_FUSED_SCORE` / `KNOWAGENT_EVIDENCE_MIN_SCORE_GAP` | 否 | 最低融合分数和头部候选最小差值；必须为非负数 |
 | `KNOWAGENT_EVIDENCE_DEGRADED_SCORE_MULTIPLIER` | 否 | 向量等检索通道降级时的阈值倍率，必须不小于 1 |
 | `KNOWAGENT_TICKET_DEDUPLICATION_WINDOW_HOURS` | 否 | 同系统规范化问题的自动工单合并时间窗，默认 24 小时 |
+| `KNOWAGENT_NOTIFICATION_ALLOWED_HOSTS` | 生产通知必需 | 逗号分隔的通知端点 Host 白名单；生产环境为空时拒绝投递 |
+| `KNOWAGENT_NOTIFICATION_DISPATCH_STALE_SECONDS` | 否 | 已入队/投递中记录的恢复阈值，默认 180 秒且必须大于最大 120 秒请求超时 |
+| `KNOWAGENT_NOTIFICATION_RECOVERY_BATCH_SIZE` | 否 | 每轮准备 Outbox 和恢复到期投递的上限，默认 100 |
 | `KNOWAGENT_LLM_API_BASE` / `LLM_API_BASE` | 生成链路必需 | Qwen OpenAI 兼容 `/v1` Base URL |
 | `KNOWAGENT_LLM_API_KEY` / `LLM_API_KEY` | 生成链路必需 | 只放本地 `.env` 或密钥设施；不能使用 `sk-` 占位值 |
 | `KNOWAGENT_LLM_MODEL` / `LLM_MODEL` | 生成链路必需 | 本地 Phase 2 临时测试目标为 `qwen3.5-27b`；示例默认值不代表验收模型 |
@@ -79,6 +82,8 @@ Phase 2 关键变量：
 文档解析和切分参数统一使用 `KNOWAGENT_DOCUMENT_*` 环境变量。默认值已列在 `backend/.env.example`，包括上传字节数、Office 展开大小/压缩比/归档条目数、PDF 页数与块数、Word/Markdown 块数、Excel 工作表/行/列/单元格上限，以及 chunk token 预算和块重叠数。所有上限必须为正整数，只有 `KNOWAGENT_DOCUMENT_CHUNK_OVERLAP_BLOCKS` 可以为 `0`；无效值会在配置加载时失败，不应在生产环境静默回退。
 
 parser 是同步的 CPU/内存密集端口，只能由独立文档 worker 调用，不得直接放入 FastAPI `async` 请求链。`KNOWAGENT_INGESTION_*` 配置任务最大尝试次数、租约、退避、派发超时、恢复批大小和 Celery 软/硬超时；硬超时必须大于软超时，租约必须大于硬超时。Worker 每次写状态都校验 owner、attempt 和租约有效期，过期执行只记录告警，不覆盖已被重新领取的任务。
+
+通知地址、鉴权方式、鉴权 Header、密钥引用名、JSON 模板、成功状态码、超时和重试参数由管理员后台保存。密钥值不进入数据库，应把配置中的引用名（例如 `KNOWAGENT_NOTIFICATION_TOKEN`）作为 Worker 环境变量注入。生产环境仅允许 HTTPS 且 Host 必须位于 `KNOWAGENT_NOTIFICATION_ALLOWED_HOSTS`；真实公司协议未提供前，可保持通知关闭。
 
 应用数据库迁移并启动 API：
 
@@ -106,7 +111,7 @@ SELECT extname, extversion FROM pg_extension WHERE extname IN ('vector', 'pg_trg
 ```powershell
 cd backend
 .\.venv\Scripts\Activate.ps1
-celery -A knowagent.worker.celery_app:celery_app worker --loglevel=INFO --queues=ingestion
+celery -A knowagent.worker.celery_app:celery_app worker --loglevel=INFO --queues=ingestion,notification
 ```
 
 ```powershell
@@ -115,7 +120,7 @@ cd backend
 celery -A knowagent.worker.celery_app:celery_app beat --loglevel=INFO
 ```
 
-Celery 消息只携带 `job_id`；业务状态以 PostgreSQL 为准。Beat 定期恢复未派发任务、到期重试和租约过期任务，不能用 Celery result backend 判断入库是否完成。
+Celery 消息只携带 `job_id` 或 `delivery_id`；业务状态以 PostgreSQL 为准。Beat 定期恢复未派发入库任务、到期通知重试和停滞投递，不能用 Celery result backend 判断处理是否完成。通知 Worker 使用独立 `notification` 队列，外部通知故障不会阻塞文档入库队列。
 
 ## 3. Embedding / Rerank 模型服务
 
@@ -228,6 +233,8 @@ npm run dev -- --host 127.0.0.1 --port 5173
 - 用户问答首页与系统选择：`http://127.0.0.1:5273/app`
 - 管理员登录：`http://127.0.0.1:5273/admin/login`
 - 业务系统管理：`http://127.0.0.1:5273/admin/systems`
+- 通知配置：`http://127.0.0.1:5273/admin/configuration` 的“通知接口”标签
+- 通知记录：`http://127.0.0.1:5273/admin/notifications`
 
 统一入口通过环境变量将 Vite `/api` 代理到 `http://127.0.0.1:8200`；手工启动未设置该变量时仍使用默认 `http://127.0.0.1:8000`。
 
@@ -252,6 +259,14 @@ Phase 2 核心服务验收同样固定复用 `knowagent_integration` 和 Redis D
 ```
 
 运行器只在固定数据库首次缺失时创建一次；成功后精确清理本轮记录，失败时保留现场，不按运行新建/删除数据库。`--with-llm` 使用 `backend/.env` 的 Qwen base URL、model 和 API key。
+
+通知 Provider 在没有真实公司 API 时使用进程内 MockTransport 与本地 FastAPI Stub 验证，不需要外网：
+
+```bash
+cd backend
+.venv/bin/pytest --no-cov tests/unit/test_notifications.py tests/unit/test_notification_delivery.py
+.venv/bin/pytest --no-cov tests/integration/test_notifications_api.py tests/integration/test_notification_provider_stub.py
+```
 
 AC-004/AC-005 质量门禁使用人工复核后的 UTF-8 JSONL observation 文件。输入字段、标注规则、示例和报告留存方式见 `docs/development/22-phase2-evaluation.md`：
 

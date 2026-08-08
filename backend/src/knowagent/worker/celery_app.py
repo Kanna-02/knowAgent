@@ -23,12 +23,18 @@ def build_celery_app(settings: Settings) -> Celery:
         task_routes={
             "knowagent.ingestion.process": {"queue": "ingestion"},
             "knowagent.ingestion.recover": {"queue": "ingestion"},
+            "knowagent.notification.deliver": {"queue": "notification"},
+            "knowagent.notification.recover": {"queue": "notification"},
         },
         beat_schedule={
             "recover-ingestion-jobs": {
                 "task": "knowagent.ingestion.recover",
                 "schedule": 30.0,
-            }
+            },
+            "recover-notification-deliveries": {
+                "task": "knowagent.notification.recover",
+                "schedule": 15.0,
+            },
         },
     )
     return application

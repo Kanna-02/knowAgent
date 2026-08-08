@@ -28,6 +28,11 @@ const AuditLogsPage = lazy(() =>
     default: component,
   })),
 );
+const NotificationDeliveriesPage = lazy(() =>
+  import("../features/admin/NotificationDeliveriesPage").then(
+    ({ NotificationDeliveriesPage: component }) => ({ default: component }),
+  ),
+);
 const ConfigurationPage = lazy(() =>
   import("../features/admin/ConfigurationPage").then(({ ConfigurationPage: component }) => ({
     default: component,
@@ -110,6 +115,7 @@ export function App(): ReactNode {
                     <Route path="documents" element={<DocumentsPage />} />
                     <Route path="analytics" element={<AnalyticsPage />} />
                     <Route path="audit-logs" element={<AuditLogsPage />} />
+                    <Route path="notifications" element={<NotificationDeliveriesPage />} />
                   </Route>
                   <Route
                     path="/forbidden"

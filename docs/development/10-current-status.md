@@ -5,7 +5,7 @@
 ## 1. 快照时间
 
 ```text
-更新时间：2026-08-07（Phase 3 第 4 项文档版本、分析仪表盘和审计日志管理页完成）
+更新时间：2026-08-08（Phase 3 第 3 项公司通知 API、失败重试和通知记录完成）
 更新人/助手：Codex
 当前分支：master
 远程仓库：git@github.com:Kanna-02/knowAgent.git
@@ -15,10 +15,10 @@
 ## 2. 当前阶段
 
 ```text
-当前阶段：Phase 2 关闭门禁待真实评测数据；Phase 3 质量与运营增强进行中（3/4）
-阶段目标：保留 Phase 2 系统隔离问答/工单闭环，同时完成混合检索调优、Rerank、用户可见降级、多轮上下文与意图识别、提示词与检索配置版本化，以及文档生命周期、对话分析、高频问题、知识缺口与审计运营能力
-当前任务：Phase 3 第 1、2、4 项已完成；下一步实现第 3 项公司通知 API、失败重试和通知记录，并补本地缺失运行时（boto3/pymupdf）以恢复全部已有集成测试
-任务状态：Phase 3 3/4 功能范围完成。第 4 项后端 8 端点 + 26 项单测、前端文档版本/分析仪表盘/审计日志 3 个管理页 + 11 项组件测试均已落地；前端完整测试 63/63、TypeScript、ESLint、Prettier 和生产构建通过。覆盖率运行全部测试通过，但全局语句/分支/函数/行覆盖率 78.29%/65.90%/72.93%/80.83% 未满足 80% 门禁；真实登录会话浏览器验收待补。Phase 2 仍因 AC-004/AC-005 真实质量数据未关闭
+当前阶段：Phase 2 关闭门禁待真实评测数据；Phase 3 质量与运营增强 4/4 功能范围已实现，等待外部联调和质量门禁
+阶段目标：保留 Phase 2 系统隔离问答/工单闭环，同时完成混合检索调优、Rerank、用户可见降级、多轮上下文与意图识别、提示词与检索配置版本化、通知投递/重试/记录，以及文档生命周期、对话分析、高频问题、知识缺口与审计运营能力
+当前任务：使用真实公司通知 API 联调鉴权、限流、幂等接收和回执语义以关闭 AC-014；并行补真实评测数据、Rerank 运行时和前端覆盖率门禁
+任务状态：Phase 3 4/4 功能范围已实现。第 3 项已落地事务 Outbox、可配置 HTTP JSON Provider、独立 notification 队列、自动/人工重试、attempt fencing、管理 API/页面和 MockTransport/FastAPI Stub 契约；后端 386 passed、25 skipped（85.11%），前端 70/70、TypeScript、ESLint、Prettier 和 build 通过，桌面/移动真实登录会话浏览器验收通过。REQ-010 仍为 implementing，等待真实公司 API 联调；前端全局语句/分支/函数覆盖率低于 80%，`nanoid` 仍有 1 个 high。Phase 2 仍因 AC-004/AC-005 真实质量数据未关闭
 ```
 
 ## 3. 已完成
@@ -96,21 +96,26 @@
 70. 已完成本机和 Docker 资源盘点：`bge-m3` 已在 Docker volume，原生/ONNX Rerank 权重已在 `knowledge-rag/deploy/models/`；四个 Python 环境均缺 Rerank 运行时，TEI 镜像/容器不存在。盘点写入 `docs/operations/09-runtime-resource-inventory.md`，未继续下载权重。
 71. 已实现 Phase 3 第 4 项后端：文档/版本列表与发布/退役、系统概览/高频问题/知识缺口、全局审计日志分页过滤共 8 个端点，新增 26 项单测；发布/退役复用 `KnowledgePublicationService`，访问控制复用 `require_system_access`、`AdminContext` 与 `MANAGEMENT_ROLES`。
 72. 已实现 Phase 3 第 4 项前端：`DocumentsPage`、`AnalyticsPage`、`AuditLogsPage` 以路由级懒加载接入管理后台，覆盖系统选择、分页/过滤、版本抽屉、发布/退役确认、问题统计、高频问题、知识缺口和审计详情。
-73. 已新增 11 项组件测试并完成前端全量验证：63/63 测试、TypeScript、ESLint、Prettier 和 Vite 生产构建通过；全局覆盖率门禁仍受 API client 与 TicketsPage 既有缺口影响，依赖审计仍有 React Router RSC 模式 2 个 high。
+73. 已新增 11 项组件测试并完成当时的前端全量验证：63/63 测试、TypeScript、ESLint、Prettier 和 Vite 生产构建通过；全局覆盖率门禁仍受 API client 与 TicketsPage 既有缺口影响。该次 React Router 审计结果已由本轮 `nanoid` 审计结果取代，最新风险见第 8、9 节。
+74. 已实现 `notifications` 模块与事务 Outbox：工单创建产生 `ticket_created`，负责人/管理员回复产生 `ticket_replied`；通知配置只保存密钥环境变量引用，不保存密钥值。
+75. 已实现独立 `notification` Celery 队列、15 秒恢复扫描、408/425/429/5xx/网络/超时自动退避、永久失败人工重试和累计尝试记录；本地 Worker 同时订阅 `ingestion,notification`。
+76. 已实现通知配置、通知记录分页筛选和人工重试管理 API，以及通知接口配置标签和 `/admin/notifications` 页面；关闭通知时地址可空，启用时前后端共同校验合法地址。
+77. 已使用 MockTransport、本地 FastAPI Stub、自动化测试和真实 PostgreSQL/API 登录会话完成无真实公司端点条件下的契约与响应式验收；临时视觉管理员及其 Redis Session 已清理。
+78. 已完成通知投递 review 修复：每次领取使用 `active_attempt_id` fencing，重复 Worker 与过期 attempt 不能覆盖当前状态；成功/失败时间和退避从 Provider 完成时计算，停滞恢复阈值保证大于最大请求超时，并新增 4 个回归用例。
 
 ## 4. 正在进行
 
 1. Phase 2 功能、自动化和真实服务集成已完成；正在等待真实标注评测集执行 AC-004/AC-005。实际本地账号已补齐并完成 Phase 3 向量降级拒答浏览器链路，完整带引用回答/工单管理人工验收仍需已发布知识和对应角色数据。
 2. Phase 1 功能范围 6/6 已实现，并于 2026-08-04 在固定 PostgreSQL/Redis/MinIO integration 资源上完成四格式完整持久化与隔离验收，现已正式关闭。
 3. 本地 PostgreSQL 17、pgvector、pg_trgm、Redis、MinIO、Ollama Embedding 和 Qwen `qwen3.5-27b` 已完成 Phase 2 API/SSE/Worker 组合联调。
-4. Phase 3 为 3/4：第 1、2、4 项代码和自动化已完成；第 4 项三个管理页待真实登录会话浏览器验收。第 3 项公司通知 API、失败重试和通知记录尚未实现；Rerank 真实推理与目标 Linux 资源信息仍是独立生产门禁。
+4. Phase 3 为 4/4 功能范围已实现：通知 API、失败重试、记录和后台配置已完成自动化及真实登录会话浏览器验收；真实公司通知端点联调、Rerank 真实推理、前端覆盖率和目标 Linux 资源信息仍是独立关闭门禁。
 
 ## 5. 未完成 / 下一步
 
 1. 用户提供至少 50 条真实标注 ESB 可回答问题及无知识问题集，按 `docs/development/22-phase2-evaluation.md` 执行质量门禁并把脱敏汇总写入验收报告。
 2. 拆分 Rerank 对外模型 ID 与本地加载路径，复用 `knowledge-rag` 已有权重；确认依赖树和缓存命中后再安装运行时，不重新下载模型。随后使用至少一条已发布知识补跑真实 Rerank 回答路径，并用 ESB 评测集对比基础 RRF 与 Rerank 质量。
 3. 使用测试负责人/系统负责人账号补工单详情、回复、状态流转、答案提交和审核来源展示；当前普通用户账号仅覆盖问答与拒答入口。
-4. 实现 Phase 3 第 3 项公司通知 API、失败重试和通知记录；取得目标 Linux CPU/内存/GPU 信息后，再确定 PyTorch 原生、量化或 ONNX 替代方案并生成生产传递依赖锁。
+4. 获取真实公司通知 API 契约与测试地址，在 staging 验证鉴权、限流、幂等接收、回执和失败重试；取得目标 Linux CPU/内存/GPU 信息后，再确定 PyTorch 原生、量化或 ONNX 替代方案并生成生产传递依赖锁。
 
 ## 6. 阻塞点
 
@@ -120,12 +125,15 @@
 | 本地开发库缺业务知识和负责人数据 | 已完成普通用户登录、向量降级拒答与建单；无法形成真实 Rerank 回答、工单处理/审核完整页面记录 | 用户/测试负责人 | `visual.tester` + `PHASE3_TEST` 已补；待已发布知识与负责人账号 |
 | Rerank 运行时未安装，模型 ID 与本地路径尚未解耦 | 已有权重不能在保持外部模型契约不变的前提下直接加载 | 开发 | 权重已盘点；禁止重复下载，待新增独立加载路径配置 |
 | 模型服务器 CPU/内存/GPU 信息未知 | 影响生产 Embedding/Rerank 运行时和量化；本地 Ollama 适配不受阻 | 运维/用户 | 待提供 |
-| 公司通知协议及真实对象存储端点契约待验证 | 影响后续通知 provider 和 S3 兼容性证明 | 用户/第三方 | 待提供/验证 |
+| 公司通知协议和测试端点尚未提供 | 无法验证真实鉴权、限流、幂等接收和回执，REQ-010/AC-014 不能关闭 | 用户/第三方 | 可配置 Provider、MockTransport 和本地 Stub 已通过；待提供真实契约与地址 |
 
 ## 7. 最近改动文件
 
 | 文件 | 改动说明 | 状态 |
 | --- | --- | --- |
+| `backend/src/knowagent/notifications/`、`backend/src/knowagent/platform/outbox.py`、`backend/src/knowagent/tickets/infrastructure/sqlalchemy_repository.py`、`backend/src/knowagent/worker/` | 通知配置、事务 Outbox、HTTP Provider、独立队列、自动/人工重试、attempt fencing 和投递记录 | 已完成；后端全量、定向测试、mypy、格式、Pylint、Bandit 和迁移检查通过 |
+| `backend/migrations/versions/3bed66d88cf4_add_phase3_notification_delivery.py`、`8f2c9d4a1b67_add_notification_attempt_fencing.py` | 通知配置、投递记录、枚举、索引、外键和 attempt fencing 迁移 | 已完成；默认数据库和本地 PostgreSQL upgrade/check 通过 |
+| `frontend/src/features/admin/NotificationSettingsPanel.tsx`、`NotificationDeliveriesPage.tsx`、对应测试、API 类型/客户端、路由、导航和样式 | 管理员通知配置、记录筛选、分页和永久失败人工重试 | 已完成；70/70 测试和桌面/移动浏览器验收通过 |
 | `frontend/src/features/admin/DocumentsPage.tsx`、`AnalyticsPage.tsx`、`AuditLogsPage.tsx` | Phase 3 第 4 项文档版本、分析仪表盘和审计日志管理页 | 已完成；11 项组件测试通过，真实登录会话浏览器验收待补 |
 | `frontend/src/api/client.ts`、`frontend/src/api/types.ts`、`frontend/src/app/App.tsx`、`frontend/src/features/admin/AdminShell.tsx`、`frontend/src/styles.css` | 8 个管理端点客户端/类型、3 个懒加载路由、管理导航和响应式样式 | 已完成；TypeScript、ESLint、Prettier、Vite 构建通过 |
 | `backend/src/knowagent/agent/application/answer_generation.py`、`backend/src/knowagent/agent/application/reliable_question.py`、`backend/src/knowagent/agent/domain/models.py` | 受证据约束的真实增量 claim、`QuestionStreamEvent` 领域类型与 `resolve_stream` | 已完成；真实 Qwen 增量流通过 |
@@ -218,8 +226,13 @@
 
 | 命令/方式 | 结果 | 说明 |
 | --- | --- | --- |
+| Phase 3 通知后端全量与定向测试 | 通过 | 全量 386 passed、25 skipped，覆盖率 85.11%；通知与 Worker 相关 32 项定向测试通过 |
+| Phase 3 通知后端静态/安全/迁移 | 通过（全仓 Pylint 有既有告警） | 228 个 Python 文件 Black/isort 清洁，171 个源文件 mypy strict 零错误；通知修复范围 Pylint 10.00/10、全仓 9.81/10 且因既有告警命令非零；Bandit 中高危 0；本地 PostgreSQL `alembic upgrade head`/`check` 及 `active_attempt_id` 列检查通过 |
+| Phase 3 通知前端 test/typecheck/lint/format/build | 通过 | 70/70 测试通过；TypeScript、ESLint、Prettier 和 Vite build 通过；通知配置面板 statements 95.34%、branches 75% |
+| Phase 3 通知前端覆盖率/依赖审计 | 未通过门禁 | 全局语句/分支/函数/行 78.29%/64.46%/72.89%/80.76%，低于整体 80%；`npm audit` 报 `nanoid <3.3.17` 1 个 high，依赖升级需独立兼容性门禁，未执行 |
+| Phase 3 通知真实浏览器检查 | 通过 | 真实 PostgreSQL/API 登录会话完成关闭态空地址保存、记录空态、1440x900 和 390x844 检查；页面无横向溢出、表单/筛选/按钮无重叠，临时管理员和 Session 已清理 |
 | Phase 3 第 4 项前端 test/typecheck/lint/format/build | 通过 | 19 个测试文件、63/63 测试通过；`tsc --noEmit`、ESLint 零 warning、Prettier 检查和 Vite 生产构建成功；三个页面生成独立懒加载产物 |
-| Phase 3 第 4 项前端覆盖率/依赖审计 | 未通过门禁 | 覆盖率运行 63/63 测试通过，语句/分支/函数/行 78.29%/65.90%/72.93%/80.83%，低于全局 80%；`npm audit` 报 React Router RSC 模式 2 个 high，force fix 会产生 breaking downgrade，未执行 |
+| Phase 3 第 4 项前端覆盖率/依赖审计 | 历史结果 | 该次覆盖率运行 63/63 测试通过，语句/分支/函数/行 78.29%/65.90%/72.93%/80.83%，低于全局 80%；当时的 React Router 审计结果已由本轮 `nanoid` 审计结果取代 |
 | `rg` 认证关键词交叉检查 | 通过 | 双登录、账号来源、首次改密、Argon2id、Redis Session 和 TD-006 均已贯穿相关文档 |
 | `rg` 冲突与旧状态检查 | 通过 | 未发现用户免登录、TD-006 待决定或产品文档待用户确认的遗留表述 |
 | `rg` TD-007 交叉检查 | 通过 | 技术清单、决策正文、REQ-004/REQ-005 追溯关系和当前状态一致 |
@@ -287,7 +300,7 @@
 2. 默认密码批量导入仍有共享密码泄露风险；实现已强制摘要、首次改密、限流、会话撤销和审计，凭据分发流程仍需组织侧控制。
 3. 核心、解析器和质量工具直接版本已固定；Python 传递依赖锁仍需在目标 Linux/Python 3.11 环境生成。
 4. 本地 Ollama bge-m3 及 digest 强校验已在 Phase 2 live 验收中通过；目标 Linux 运行时、量化与完整安装尚未验证，本轮未重跑前端构建。
-5. `npm audit --audit-level=moderate` 仍报告 React Router RSC 模式 CSRF 公告产生 2 个 high；自动修复会强制降级 `react-router-dom` 到 7.11.0，未在缺少 breaking change 评估时执行。
+5. `npm audit` 当前报告 `nanoid <3.3.17` 1 个 high；依赖升级必须在独立分支完成 changelog 核对和全量兼容性验证，本次未越过升级门禁。
 6. 四类解析器的 S3/PostgreSQL/Worker 完整组合已在本地 MinIO 验收通过；公司对象存储 TLS/内部 CA、服务端 5xx/限流和目标 Linux 厂商差异仍待 staging 验证。扫描 PDF 仅返回 `OCR_REQUIRED`，首版不执行 OCR。
 7. 本轮使用现有 Python 3.11.11 环境并在 `/tmp` 补充四个锁定依赖；FastAPI、Redis client、pytest/pytest-cov 小版本低于项目锁定版本，结果不替代目标 Linux 按完整锁定依赖安装的发布证明。
 8. Phase 2 迁移已在本地 PostgreSQL 17.10 升级到 `c1738febb896`，JSONB、向量列与复合外键成功落库；迁移锁时长、已有生产量级回填和查询计划仍待类生产数据验证。
@@ -296,14 +309,14 @@
 11. 真实 PostgreSQL/Redis/Qwen SSE 与 Worker 端到端已经通过；前端 jsdom 仍以 `FakeEventSource` 做回答和 Rerank 降级组件回归。真实浏览器已覆盖登录后的向量降级拒答与建单，带引用回答、Rerank 成功/失败和工单管理仍待真实业务数据。
 12. AC-004/AC-005 评测 CLI 已就绪，但仓库没有至少 50 条真实标注 ESB 可回答问题和真实无知识问题集；任何通过数字在数据到位前都不成立。
 
-13. Phase 3 第 4 项三个管理页尚未在真实 PostgreSQL/API 登录会话中完成桌面与移动浏览器验收；组件行为、错误恢复和生产构建已有自动化保护。
+13. 通知功能已用 MockTransport 和本地 FastAPI Stub 验证契约，但真实公司 API 尚未提供；鉴权、限流、幂等接收、回执和 staging 故障重试仍需真实联调，REQ-010/AC-014 暂不关闭。
 
 ## 10. 继续开发建议
 
 新对话或新开发者接手时，建议下一步：
 
 1. 先阅读 `docs/development/21-phase2-integration-acceptance.md`、`22-phase2-evaluation.md` 及 `agent`/`tickets` 模块，避免重复已经通过的 SSE/Worker 真实集成工作。
-2. 下一步实现 Phase 3 第 3 项公司通知 API、失败重试和通知记录；并行按 `docs/operations/09-runtime-resource-inventory.md` 拆分本地模型加载路径并取得真实评测集，分别完成真实 Rerank 推理与 `knowagent-evaluate-phase2` 质量门禁。
+2. 下一步取得真实公司通知 API 契约和测试地址，完成 AC-014 staging 联调；并行按 `docs/operations/09-runtime-resource-inventory.md` 拆分本地模型加载路径并取得真实评测集，分别完成真实 Rerank 推理与 `knowagent-evaluate-phase2` 质量门禁。
 
 ## 11. 接手时必须先读
 

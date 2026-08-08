@@ -34,7 +34,7 @@ npm run typecheck
 npm run build
 ```
 
-发布前还必须确认：目标 Python 3.11 依赖锁可安装、PostgreSQL 备份可恢复、Redis/S3 配置有效、`vector`/`pg_trgm` 扩展可加载、Embedding 与 Qwen Provider 健康、迁移已在 staging 演练，且没有把未通过的检查记为成功。
+发布前还必须确认：目标 Python 3.11 依赖锁可安装、PostgreSQL 备份可恢复、Redis/S3 配置有效、`vector`/`pg_trgm` 扩展可加载、Embedding 与 Qwen Provider 健康、通知 Host 白名单及密钥引用已注入通知 Worker、迁移已在 staging 演练，且没有把未通过的检查记为成功。
 
 ## 3. 数据库迁移
 
@@ -60,6 +60,8 @@ alembic check
 
 扩展不可用时迁移必须失败，不能跳过向量列后继续发布。当前不创建 HNSW；待 Embedding 模型维度锁定后用单独的向后兼容迁移增加。扩展由 DBA 预装时，应先用只读查询确认 `pg_extension`，再使用权限收紧的应用迁移账号。
 
+迁移 `3bed66d88cf4` 创建事务 `outbox_events`、单例 `notification_configurations` 和 `notification_deliveries`，包含幂等键、状态/到期时间索引、乐观锁版本、账号引用和 Outbox 级联约束。升级前备份目标 Schema；应用回滚默认保留这些表和投递历史，不自动执行会删表的 downgrade。
+
 ## 4. 发布与验证
 
 1. 解压构建产物到新的 `/opt/knowagent/releases/<release-id>`。
@@ -69,6 +71,7 @@ alembic check
 5. 从 Ollama `/api/tags` 核对部署 manifest 的精确 tag/digest，确认 model-service 的版本标签以相同 digest 前缀结尾；运行真实 Ollama integration marker，验证 `/health/ready` 和 `/v1/embeddings` 的模型/版本/维度/归一化契约。再验证 Qwen `/chat/completions` 可流式返回结构化 JSON；日志只允许状态、耗时和错误类别，不得包含 API Key、输入文本、内部 URL、Provider 响应正文或其他敏感内容。
 6. 在两个业务系统分别发布同名知识，完成索引并验证关键词/向量通道均只返回所选系统的 `PUBLISHED` 文档 chunk。
 7. 验证 Embedding 故障时降级为关键词，LLM 故障时返回系统错误而不创建知识不足工单。
+8. 以管理员保存关闭态通知配置，再在 staging 配置 HTTPS Stub、Host 白名单和独立密钥引用；创建工单应通知系统负责人，负责人回复应通知提问人，408/425/429/5xx 应进入自动重试，永久失败应可在通知记录页人工重试。真实公司端点上线前还必须验证鉴权、限流、幂等键和回执字段。
 
 ## 5. 回滚
 
@@ -85,4 +88,5 @@ alembic downgrade d1a97d2e451b
 - 尚未在目标 Linux/Python 3.11 环境执行安装和发布。
 - 尚未在真实 PostgreSQL 验证迁移锁时长、查询计划和复合外键行为。
 - Ollama 本地适配已实现；尚未在目标 Linux 模型运行时、可加载 pgvector 的 PostgreSQL 和 Qwen API 上完成 Phase 2 核心链路。
+- 通知 Provider 已通过 MockTransport 和本地 FastAPI Stub；真实公司通知 API 的鉴权、限流、幂等与回执协议尚未提供，不能视为生产集成通过。
 - systemd unit、Nginx 配置、备份恢复演练和监控告警在 Phase 4 补齐。

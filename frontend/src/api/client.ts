@@ -16,6 +16,12 @@ import type {
   CurrentUser,
   FrequentQuestionPage,
   KnowledgeGapPage,
+  NotificationConfigurationUpdate,
+  NotificationConfigurationView,
+  NotificationDeliveryPage,
+  NotificationDeliveryStatus,
+  NotificationDeliveryView,
+  NotificationEventType,
   PublishVersionResponse,
   RetireVersionResponse,
   PromptDefinitionPage,
@@ -455,6 +461,43 @@ export class ApiClient {
     if (filters.started_at) query.set("started_at", filters.started_at);
     if (filters.ended_at) query.set("ended_at", filters.ended_at);
     return this.request<AuditLogPage>(`/admin/audit-logs?${query.toString()}`);
+  }
+
+  async getNotificationConfiguration(): Promise<NotificationConfigurationView> {
+    return this.request<NotificationConfigurationView>("/admin/notification-configuration");
+  }
+
+  async updateNotificationConfiguration(
+    payload: NotificationConfigurationUpdate,
+  ): Promise<NotificationConfigurationView> {
+    return this.request<NotificationConfigurationView>("/admin/notification-configuration", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async listNotificationDeliveries(filters: {
+    page: number;
+    pageSize: number;
+    status?: NotificationDeliveryStatus;
+    eventType?: NotificationEventType;
+  }): Promise<NotificationDeliveryPage> {
+    const query = new URLSearchParams({
+      page: String(filters.page),
+      page_size: String(filters.pageSize),
+    });
+    if (filters.status) query.set("status", filters.status);
+    if (filters.eventType) query.set("event_type", filters.eventType);
+    return this.request<NotificationDeliveryPage>(
+      `/admin/notification-deliveries?${query.toString()}`,
+    );
+  }
+
+  async retryNotificationDelivery(deliveryId: string): Promise<NotificationDeliveryView> {
+    return this.request<NotificationDeliveryView>(
+      `/admin/notification-deliveries/${deliveryId}/retry`,
+      { method: "POST" },
+    );
   }
 
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {

@@ -22,3 +22,16 @@ class CeleryIngestionDispatcher:  # pylint: disable=too-few-public-methods
     @property
     def broker_url(self) -> str:
         return str(self._application.conf.broker_url)
+
+
+class CeleryNotificationDispatcher:  # pylint: disable=too-few-public-methods
+    def __init__(self, application: Celery = celery_app) -> None:
+        self._application = application
+
+    def enqueue(self, delivery_id: UUID) -> str:
+        result = self._application.send_task(
+            "knowagent.notification.deliver",
+            args=[str(delivery_id)],
+            queue="notification",
+        )
+        return str(result.id)

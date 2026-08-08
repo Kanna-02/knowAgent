@@ -344,6 +344,36 @@ class TicketSettings:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class NotificationRuntimeSettings:
+    allowed_hosts: tuple[str, ...] = ()
+    dispatch_stale_seconds: int = 180
+    recovery_batch_size: int = 100
+
+    def __post_init__(self) -> None:
+        if self.dispatch_stale_seconds <= 120:
+            raise ValueError("notification dispatch stale threshold must exceed 120 seconds")
+        if self.recovery_batch_size <= 0:
+            raise ValueError("notification recovery batch size must be positive")
+        if any(not host.strip() or ":" in host or "/" in host for host in self.allowed_hosts):
+            raise ValueError("notification allowed hosts must contain host names only")
+
+    @classmethod
+    def from_environment(cls) -> NotificationRuntimeSettings:
+        hosts = tuple(
+            host.strip().lower()
+            for host in os.getenv("KNOWAGENT_NOTIFICATION_ALLOWED_HOSTS", "").split(",")
+            if host.strip()
+        )
+        return cls(
+            allowed_hosts=hosts,
+            dispatch_stale_seconds=int(
+                os.getenv("KNOWAGENT_NOTIFICATION_DISPATCH_STALE_SECONDS", "180")
+            ),
+            recovery_batch_size=int(os.getenv("KNOWAGENT_NOTIFICATION_RECOVERY_BATCH_SIZE", "100")),
+        )
+
+
 def _preferred_environment(primary: str, compatible: str) -> str:
     return os.getenv(primary, os.getenv(compatible, "")).strip()
 
@@ -368,6 +398,7 @@ class Settings:  # pylint: disable=too-many-instance-attributes
     retrieval: RetrievalSettings = field(default_factory=RetrievalSettings)
     evidence_policy: EvidencePolicySettings = field(default_factory=EvidencePolicySettings)
     tickets: TicketSettings = field(default_factory=TicketSettings)
+    notifications: NotificationRuntimeSettings = field(default_factory=NotificationRuntimeSettings)
 
     @classmethod
     def from_environment(cls) -> Settings:
@@ -394,4 +425,5 @@ class Settings:  # pylint: disable=too-many-instance-attributes
             retrieval=RetrievalSettings.from_environment(),
             evidence_policy=EvidencePolicySettings.from_environment(),
             tickets=TicketSettings.from_environment(),
+            notifications=NotificationRuntimeSettings.from_environment(),
         )

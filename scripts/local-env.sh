@@ -366,7 +366,7 @@ start_all() {
   start_process celery-worker "${ROOT_DIR}/backend" \
     "${ROOT_DIR}/backend/.venv/bin/celery" \
     -A knowagent.worker.celery_app:celery_app worker \
-    --loglevel=INFO --queues=ingestion --hostname=knowagent-ingestion@%h
+    --loglevel=INFO --queues=ingestion,notification --hostname=knowagent-worker@%h
 
   start_process celery-beat "${ROOT_DIR}/backend" \
     "${ROOT_DIR}/backend/.venv/bin/celery" \

@@ -18,9 +18,15 @@ from knowagent.agent.domain.models import (
 )
 from knowagent.agent.infrastructure.sqlalchemy_models import EvidenceDecisionRecord
 from knowagent.common.errors import NotFoundError
+from knowagent.identity.domain.models import AccountRole
+from knowagent.identity.infrastructure.sqlalchemy_models import AccountRecord
+from knowagent.platform.outbox import SqlAlchemyOutboxWriter
+from knowagent.systems.domain.models import SystemRole
+from knowagent.systems.infrastructure.sqlalchemy_models import AccountSystemRoleRecord
 from knowagent.tickets.domain.models import (
     CandidateStatus,
     KnowledgeCandidate,
+    ReplyAuthorRole,
     Ticket,
     TicketOccurrence,
     TicketReply,
@@ -42,6 +48,7 @@ from knowagent.tickets.infrastructure.sqlalchemy_models import (
 class SqlAlchemyTicketRepository:  # pylint: disable=too-many-public-methods
     def __init__(self, session: Session) -> None:
         self._session = session
+        self._outbox = SqlAlchemyOutboxWriter(session)
 
     def get_decision(self, *, run_id: UUID) -> EvidenceDecision | None:
         record = self._session.scalar(
@@ -147,6 +154,21 @@ class SqlAlchemyTicketRepository:  # pylint: disable=too-many-public-methods
             )
         )
         self._session.flush()
+        self._outbox.publish(
+            aggregate_type="ticket",
+            aggregate_id=ticket.id,
+            event_type="ticket_created",
+            payload={
+                "ticket_id": str(ticket.id),
+                "system_id": str(ticket.system_id),
+                "requester_id": str(ticket.requester_id),
+                "title": ticket.title,
+                "question": ticket.question,
+                "created_at": ticket.created_at.isoformat(),
+            },
+            idempotency_key=f"ticket:{ticket.id}:created",
+            occurred_at=ticket.created_at,
+        )
         return ticket
 
     def increment_ticket_occurrence(self, *, ticket_id: UUID, now: datetime) -> Ticket:
@@ -255,7 +277,50 @@ class SqlAlchemyTicketRepository:  # pylint: disable=too-many-public-methods
             )
         )
         self._session.flush()
+        if self._reply_notifies_requester(reply):
+            ticket_record = self._session.get(TicketRecord, reply.ticket_id)
+            if ticket_record is None:
+                raise NotFoundError("TICKET_NOT_FOUND", "工单不存在")
+            self._outbox.publish(
+                aggregate_type="ticket",
+                aggregate_id=reply.ticket_id,
+                event_type="ticket_replied",
+                payload={
+                    "ticket_id": str(reply.ticket_id),
+                    "system_id": str(reply.system_id),
+                    "requester_id": str(ticket_record.requester_id),
+                    "author_id": str(reply.author_id),
+                    "reply_id": str(reply.id),
+                    "reply_body": reply.body,
+                    "title": ticket_record.title,
+                    "question": ticket_record.question,
+                    "created_at": reply.created_at.isoformat(),
+                },
+                idempotency_key=f"ticket:{reply.ticket_id}:reply:{reply.id}",
+                occurred_at=reply.created_at,
+            )
         return reply
+
+    def _reply_notifies_requester(self, reply: TicketReply) -> bool:
+        if reply.author_role is ReplyAuthorRole.REQUESTER:
+            return False
+        if reply.author_role is ReplyAuthorRole.ASSIGNEE:
+            return True
+        account_role = self._session.scalar(
+            select(AccountRecord.role).where(AccountRecord.id == reply.author_id)
+        )
+        if account_role is AccountRole.ADMIN:
+            return True
+        if account_role is not AccountRole.SYSTEM_OWNER:
+            return False
+        assignment_id = self._session.scalar(
+            select(AccountSystemRoleRecord.id).where(
+                AccountSystemRoleRecord.account_id == reply.author_id,
+                AccountSystemRoleRecord.system_id == reply.system_id,
+                AccountSystemRoleRecord.role == SystemRole.SYSTEM_OWNER,
+            )
+        )
+        return assignment_id is not None
 
     def list_replies(self, *, ticket_id: UUID) -> tuple[TicketReply, ...]:
         records = self._session.scalars(

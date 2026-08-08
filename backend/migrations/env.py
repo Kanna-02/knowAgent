@@ -9,11 +9,21 @@ from knowagent.agent.infrastructure import sqlalchemy_models as agent_models
 from knowagent.documents.infrastructure import sqlalchemy_models as document_models
 from knowagent.identity.infrastructure.sqlalchemy_models import Base
 from knowagent.knowledge.infrastructure import sqlalchemy_models as knowledge_models
+from knowagent.notifications.infrastructure import sqlalchemy_models as notification_models
+from knowagent.platform import outbox as platform_outbox
 from knowagent.platform.settings import Settings
 from knowagent.systems.infrastructure import sqlalchemy_models as systems_models
 from knowagent.tickets.infrastructure import sqlalchemy_models as ticket_models
 
-del agent_models, document_models, knowledge_models, systems_models, ticket_models
+del (
+    agent_models,
+    document_models,
+    knowledge_models,
+    notification_models,
+    platform_outbox,
+    systems_models,
+    ticket_models,
+)
 
 config = context.config
 if config.config_file_name is not None:
