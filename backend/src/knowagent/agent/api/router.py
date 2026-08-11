@@ -313,6 +313,17 @@ async def _stream_resolution(  # pylint: disable=too-many-arguments
         )
     except KnowAgentError as error:
         yield _format_sse(StreamErrorEvent(run_id=run_id, code=error.code, message=error.message))
+    except Exception:  # pylint: disable=broad-exception-caught
+        # A generator exception otherwise closes the SSE connection without a
+        # terminal event, leaving clients stuck in the retrieval phase forever.
+        LOGGER.exception("Unexpected question stream failure", extra={"run_id": str(run_id)})
+        yield _format_sse(
+            StreamErrorEvent(
+                run_id=run_id,
+                code="QUESTION_STREAM_FAILED",
+                message="问答服务暂时不可用，请稍后重试",
+            )
+        )
 
 
 def _render_event(
@@ -827,6 +838,7 @@ def _get_or_build_agent_components(request: Request) -> _AgentComponents:
         base_url=retrieval_settings.rerank_base_url,
         model=retrieval_settings.rerank_model,
         timeout_seconds=retrieval_settings.rerank_timeout_seconds,
+        failure_cooldown_seconds=retrieval_settings.rerank_failure_cooldown_seconds,
     )
     policy = DeterministicEvidencePolicy(
         policy_version=evidence_policy_settings.policy_version,

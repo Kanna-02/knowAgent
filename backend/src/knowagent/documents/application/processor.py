@@ -127,11 +127,27 @@ class IngestionProcessor:  # pylint: disable=too-few-public-methods
             )
             final_version_status = DocumentVersionStatus.CHUNKED
             if self._chunk_ingestion is not None:
+
+                def on_embedding_progress(completed: int, total: int) -> None:
+                    if total <= 0:
+                        return
+                    progress = 70 + min(25, max(1, completed * 25 // total))
+                    self._coordinator.advance(
+                        job_id,
+                        owner=worker_id,
+                        attempt=attempt,
+                        stage=IngestionStage.CHUNKING,
+                        progress=progress,
+                        version_status=DocumentVersionStatus.CHUNKING,
+                        now=self._clock(),
+                    )
+
                 self._chunk_ingestion.ingest_chunks(
                     system_id=parsing.version.system_id,
                     document_version_id=parsing.version.id,
                     manifest_key=manifest_key,
                     now=self._clock(),
+                    on_progress=on_embedding_progress,
                 )
                 final_version_status = DocumentVersionStatus.READY_DRAFT
             completed = self._coordinator.complete(

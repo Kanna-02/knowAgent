@@ -15,7 +15,7 @@ import {
 } from "antd";
 import type { TablePaginationConfig } from "antd/es/table";
 import type { UploadFile } from "antd/es/upload/interface";
-import { Archive, ChevronRight, FileText, RefreshCw, Rocket, UploadCloud } from "lucide-react";
+import { Archive, ChevronRight, Eye, FileText, RefreshCw, Rocket, UploadCloud } from "lucide-react";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -44,12 +44,53 @@ const ingestionStatusLabels: Record<IngestionJobView["status"], string> = {
   FAILED: "失败",
 };
 
+function ingestionStatusLabel(job: IngestionJobView): string {
+  if (
+    (job.status === "RUNNING" || job.status === "QUEUED") &&
+    job.lease_expires_at !== null &&
+    new Date(job.lease_expires_at).getTime() < Date.now()
+  ) {
+    return "处理超时，等待重试";
+  }
+  return ingestionStatusLabels[job.status];
+}
+
 const ingestionStageLabels: Record<IngestionJobView["stage"], string> = {
   STORED: "文件已保存",
   PARSING: "解析文档",
   CHUNKING: "切分知识片段",
   COMPLETED: "索引完成",
 };
+
+const INGESTION_JOB_STORAGE_PREFIX = "knowagent:ingestion-job:";
+
+function ingestionJobStorageKey(systemId: string): string {
+  return `${INGESTION_JOB_STORAGE_PREFIX}${systemId}`;
+}
+
+function readStoredIngestionJobId(systemId: string): string | null {
+  try {
+    return window.sessionStorage.getItem(ingestionJobStorageKey(systemId));
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredIngestionJobId(systemId: string, jobId: string): void {
+  try {
+    window.sessionStorage.setItem(ingestionJobStorageKey(systemId), jobId);
+  } catch {
+    // Storage can be unavailable in privacy-restricted browsers; polling still works in-page.
+  }
+}
+
+function clearStoredIngestionJobId(systemId: string): void {
+  try {
+    window.sessionStorage.removeItem(ingestionJobStorageKey(systemId));
+  } catch {
+    // Ignore storage errors; the server remains the source of truth.
+  }
+}
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -98,6 +139,7 @@ export function DocumentsPage(): ReactNode {
   const systemsRequestId = useRef(0);
   const docsRequestId = useRef(0);
   const versionsRequestId = useRef(0);
+  const ingestionRequestId = useRef(0);
   const selectedSystemIdRef = useRef<string | null>(null);
 
   const loadSystems = useCallback(async (): Promise<void> => {
@@ -189,6 +231,43 @@ export function DocumentsPage(): ReactNode {
     };
   }, [selectedSystemId, loadDocuments]);
 
+  useEffect(() => {
+    const requestId = ++ingestionRequestId.current;
+    const timeoutId = window.setTimeout(() => {
+      if (!selectedSystemId) {
+        setUploadJob(null);
+        return;
+      }
+      const storedJobId = readStoredIngestionJobId(selectedSystemId);
+      if (!storedJobId) {
+        setUploadJob(null);
+        setUploadError(null);
+        return;
+      }
+      setUploadJob(null);
+      setUploadError(null);
+      void apiClient
+        .getIngestionJob(storedJobId)
+        .then((job) => {
+          if (requestId !== ingestionRequestId.current || job.system_id !== selectedSystemId)
+            return;
+          setUploadJob(job);
+        })
+        .catch((error: unknown) => {
+          if (requestId !== ingestionRequestId.current) return;
+          if ((error as { status?: number }).status === 404) {
+            clearStoredIngestionJobId(selectedSystemId);
+            return;
+          }
+          setUploadError(toUiError(error, "入库任务状态获取失败"));
+        });
+    }, 0);
+    return () => {
+      window.clearTimeout(timeoutId);
+      ingestionRequestId.current += 1;
+    };
+  }, [selectedSystemId]);
+
   const openVersions = (doc: DocumentView): void => {
     setSelectedDocument(doc);
     setVersionsDrawerOpen(true);
@@ -228,7 +307,6 @@ export function DocumentsPage(): ReactNode {
   const openUpload = (): void => {
     setUploadFileList([]);
     setUploadName("");
-    setUploadJob(null);
     setUploadError(null);
     setUploadOpen(true);
   };
@@ -236,6 +314,10 @@ export function DocumentsPage(): ReactNode {
   const closeUpload = (): void => {
     if (uploading) return;
     setUploadOpen(false);
+  };
+
+  const showUploadProgress = (): void => {
+    setUploadOpen(true);
   };
 
   const submitUpload = async (): Promise<void> => {
@@ -250,6 +332,7 @@ export function DocumentsPage(): ReactNode {
       const job = await apiClient.uploadDocument(selectedSystemId, file, {
         documentName: uploadName,
       });
+      writeStoredIngestionJobId(selectedSystemId, job.job_id);
       setUploadJob(job);
       void message.success("文档已提交入库");
       await loadDocuments(selectedSystemId, 1, docsPageSize);
@@ -279,11 +362,26 @@ export function DocumentsPage(): ReactNode {
     const timerId = window.setTimeout(() => {
       void apiClient
         .getIngestionJob(uploadJob.job_id)
-        .then(setUploadJob)
-        .catch((error: unknown) => setUploadError(toUiError(error, "入库任务状态获取失败")));
+        .then((job) => {
+          if (selectedSystemId && job.system_id === selectedSystemId) {
+            writeStoredIngestionJobId(selectedSystemId, job.job_id);
+            setUploadError(null);
+            setUploadJob(job);
+          }
+        })
+        .catch((error: unknown) => {
+          if ((error as { status?: number }).status === 404 && selectedSystemId) {
+            clearStoredIngestionJobId(selectedSystemId);
+            setUploadJob(null);
+            return;
+          }
+          setUploadError(toUiError(error, "入库任务状态获取失败"));
+          // Keep polling after a transient status request failure.
+          setUploadJob((current) => (current ? { ...current } : current));
+        });
     }, 2000);
     return () => window.clearTimeout(timerId);
-  }, [uploadJob]);
+  }, [selectedSystemId, uploadJob]);
 
   return (
     <section className="page-section">
@@ -329,6 +427,31 @@ export function DocumentsPage(): ReactNode {
           />
         </Tooltip>
       </div>
+      {uploadJob ? (
+        <div className="document-ingestion-status" aria-live="polite">
+          <div className="document-ingestion-status-copy">
+            <span className="toolbar-summary">最近导入</span>
+            <strong>{uploadJob.document_name}</strong>
+            <span className="drawer-context">
+              {ingestionStageLabels[uploadJob.stage]} · {ingestionStatusLabel(uploadJob)}
+            </span>
+          </div>
+          <Progress
+            percent={uploadJob.progress}
+            size="small"
+            format={(percent) => `${percent ?? 0}%`}
+            {...(uploadJob.status === "FAILED" ? { status: "exception" as const } : {})}
+          />
+          <Tooltip title="查看导入进度">
+            <Button
+              type="text"
+              icon={<Eye size={16} />}
+              aria-label="查看导入进度"
+              onClick={showUploadProgress}
+            />
+          </Tooltip>
+        </div>
+      ) : null}
       {systemsError ? (
         <FeedbackState
           status="error"
@@ -549,7 +672,12 @@ export function DocumentsPage(): ReactNode {
         okButtonProps={{
           "aria-label": "开始导入",
           loading: uploading,
-          disabled: uploadFileList.length === 0 || !selectedSystemId || uploadJob !== null,
+          disabled:
+            uploadFileList.length === 0 ||
+            !selectedSystemId ||
+            (uploadJob !== null &&
+              uploadJob.status !== "SUCCEEDED" &&
+              uploadJob.status !== "FAILED"),
         }}
         onOk={() => void submitUpload()}
       >
@@ -589,7 +717,7 @@ export function DocumentsPage(): ReactNode {
               <div className="document-upload-job-header">
                 <strong>{uploadJob.document_name}</strong>
                 <Tag color={uploadJob.status === "FAILED" ? "error" : "processing"}>
-                  {ingestionStatusLabels[uploadJob.status]}
+                  {ingestionStatusLabel(uploadJob)}
                 </Tag>
               </div>
               <Progress

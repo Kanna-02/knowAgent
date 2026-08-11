@@ -105,10 +105,11 @@ export class ApiClient {
     return this.request<AccountPage>(`/admin/accounts?${query.toString()}`);
   }
 
-  async createAdmin(payload: {
+  async createAccount(payload: {
     username: string;
     display_name: string;
     temporary_password: string;
+    role: AccountRole;
   }): Promise<AccountView> {
     return this.request<AccountView>("/admin/accounts", {
       method: "POST",
@@ -120,6 +121,13 @@ export class ApiClient {
     return this.request<AccountView>(`/admin/accounts/${accountId}/status`, {
       method: "PATCH",
       body: JSON.stringify({ status }),
+    });
+  }
+
+  async setAccountRole(accountId: string, role: AccountRole): Promise<AccountView> {
+    return this.request<AccountView>(`/admin/accounts/${accountId}/role`, {
+      method: "PATCH",
+      body: JSON.stringify({ role }),
     });
   }
 

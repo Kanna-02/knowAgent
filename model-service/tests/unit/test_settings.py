@@ -14,10 +14,11 @@ def test_settings_defaults_match_existing_local_bge_m3_volume() -> None:
     assert settings.embedding_model_version == "ollama-bge-m3-79076464"
     assert settings.ollama_model_digest == "79076464"
     assert settings.embedding_dimension == 1024
-    assert settings.ollama_batch_size == 1
+    assert settings.ollama_batch_size == 4
     assert settings.ollama_max_concurrency == 1
-    assert settings.ollama_timeout_seconds == 300.0
+    assert settings.ollama_timeout_seconds == 240.0
     assert settings.ollama_health_timeout_seconds == 5.0
+    assert settings.ollama_keep_alive == "10m"
     assert settings.rerank_model == "BAAI/bge-reranker-v2-m3"
     assert settings.rerank_model_path is None
     assert settings.rerank_batch_size == 4

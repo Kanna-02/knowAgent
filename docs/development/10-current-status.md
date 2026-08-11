@@ -5,7 +5,7 @@
 ## 1. 快照时间
 
 ```text
-更新时间：2026-08-08 14:25 CST（用户端问答工作区 ChatGPT 风格调整完成；Phase 2/3 完成度审计、本地 Rerank 与运营页浏览器验收已完成；本地完整运行栈已启动并核验）
+更新时间：2026-08-11 08:12 CST（文档 Embedding/Ollama 深度现场诊断完成）
 更新人/助手：Codex
 当前分支：master
 远程仓库：git@github.com:Kanna-02/knowAgent.git
@@ -18,7 +18,7 @@
 当前阶段：Phase 2 关闭门禁待真实评测数据；Phase 3 质量与运营增强 4/4 功能范围已实现，等待外部联调和质量门禁
 阶段目标：保留 Phase 2 系统隔离问答/工单闭环，同时完成混合检索调优、Rerank、用户可见降级、多轮上下文与意图识别、提示词与检索配置版本化、通知投递/重试/记录，以及文档生命周期、对话分析、高频问题、知识缺口与审计运营能力
 当前任务：取得真实 ESB 标注评测集关闭 AC-004/AC-005，并使用真实公司通知 API 联调鉴权、限流、幂等接收和回执语义以关闭 AC-014
-任务状态：Phase 2 与 Phase 3 的功能范围均已完成，但阶段验收均未关闭。本地 Rerank 权重路径解耦、真实推理和 HTTP 集成已通过；文档、分析、审计页面已完成桌面/移动真实登录验收。后端 401 passed、25 skipped（85.55%）；model-service 51 passed、2 skipped（86.76%）；前端 96/96，TypeScript、ESLint、Prettier、build 和依赖审计通过。剩余门禁均依赖外部输入：真实评测数据、真实公司通知 API 和目标 Linux 资源；本轮新增导入代码的浏览器文件上传与 Worker 异步处理仍待人工验收
+任务状态：本轮五项可用性与性能问题已修复，并完成 P0/P1 相关全量验证。后端 `411 passed, 25 skipped`（覆盖率 88.66%）、model-service `52 passed, 2 skipped`（覆盖率 88.69%）、前端 `22 个测试文件 / 102 passed`；类型检查、Lint、构建、依赖审计和 Python 安全扫描通过。Phase 2 与 Phase 3 的功能范围均已完成但阶段验收仍未关闭，剩余门禁依赖真实评测数据、真实公司通知 API 和目标 Linux 资源。
 ```
 
 ## 3. 已完成
@@ -109,6 +109,14 @@
 83. 已在 1440x900 与 390x844 下用真实登录/API 验收文档、分析、审计页面；修复审计长操作标签覆盖相邻列和分析页移动端横向溢出，临时管理员、Session 与测试审计记录已清理。
 84. 已补齐管理员文档导入入口：选定业务系统后可上传 PDF、DOCX、Markdown、XLSX，调用既有 multipart 入库 API，展示异步任务进度、错误和人工重试，成功后刷新文档列表；前端组件与 API multipart 回归测试已加入。
 85. 已将用户端问答页调整为 ChatGPT 风格工作区：上下文栏持续显示业务系统，会话消息采用用户/助手层级，底部输入容器支持 Enter 发送、Shift + Enter 换行和次级检索约束；原有 SSE、降级、拒答工单与会话操作保持不变。
+86. 已将后台账号创建扩展到 `USER`、`SYSTEM_OWNER`、`ADMIN` 三种角色，并将临时密码/首次改密策略统一为至少 8 个字符且包含字母和数字；安全哈希、首次改密、限流和会话撤销不变。
+87. 已修复系统负责人无候选时缺少诊断的问题：负责人抽屉显示需先新增系统负责人账号，并提供到“用户与角色”的操作入口。
+88. 已修复文档上传弹窗关闭后进度不可见的问题：最近导入任务在列表工具区持续显示阶段、状态和百分比，并可重新打开详情。
+89. 已为 Rerank 失败增加默认 60 秒进程内冷却，并将 SSE answer delta 按 50 ms 合并渲染；默认候选规模本地 CPU 推理约 33.36 秒，首个超时任务继续运行的风险已写入运维文档。
+90. 已将问答页升级为桌面会话历史栏 + 当前会话双栏，移动端历史横向滚动；1280x720/390x844 无整页横向溢出，移动选择器高度由异常约 187px 修复为 36px。
+91. 已修复文档 Embedding 串行超时：Ollama 批大小默认 4、服务端总超时 240 秒并支持客户端断开取消；知识索引改为批次级落库并从未生成向量的片段恢复，后端批大小调整为 4、请求超时为 300 秒，任务进度在 70% 到 95% 间按批次真实推进。
+92. 已完成真实导入失败现场诊断：`fd0a49be-b621-409c-9e23-0a00dfd5531b` 为 `FAILED/CHUNKING/70%`、3/3 次尝试，109 个 chunk 全部落库但向量为 0；后端 16 条请求被 model-service 拆为 4 条串行 Ollama 请求，真实 4 条长 chunk 约 68.43 秒，单个后端请求理论上约 274 秒，超过 model-service 240 秒总超时。
+93. 已完成 Ollama 取消与 CPU 现场复验：Docker `rag-ollama` 的 2 CPU 限额在推理期间瞬时约 200%，客户端 5 秒断开后约 5.18 秒收到 `context canceled` 且 CPU 数秒内回到 0%；`keep_alive=24h` 只造成约 1.4 GiB 模型常驻内存，不代表持续计算。测试后已终止精确 runner PID，服务保持 ready。
 
 ## 4. 正在进行
 
@@ -137,6 +145,8 @@
 
 | 文件 | 改动说明 | 状态 |
 | --- | --- | --- |
+| `backend/src/knowagent/identity/`、`retrieval/infrastructure/http_rerank.py`、`platform/settings.py`、`frontend/src/features/admin/{AccountsPage,DocumentsPage,SystemsPage}.tsx`、`frontend/src/features/auth/{UserHomePage,streamTextBatcher}.ts(x)`、`frontend/src/styles.css` | 三角色新增、密码策略、负责人空态、持久导入进度、Rerank 冷却、SSE 批处理和问答双栏/移动响应式修复 | 已完成；后端 411/25、model-service 52/2、前端 102/102，全量覆盖率与生产构建通过 |
+| `backend/src/knowagent/identity/`、`backend/src/knowagent/api/app.py`、`backend/src/knowagent/agent/application/{answer_generation,reliable_question}.py`、`frontend/src/features/admin/AccountsPage.tsx`、`frontend/src/api/client.ts` | 账号角色修改、422 结构化错误、空证据声明拒答修复 | 已完成；后端身份 20 项、问答 28 项、前端账号/API 11 项定向测试通过，Python/TypeScript 类型检查通过 |
 | `frontend/src/api/client.test.ts`、`frontend/src/features/tickets/TicketsPage.test.tsx`、`frontend/src/features/auth/AuthContext.test.tsx`、5 个管理页测试 | API 契约、工单工作流、认证竞态、筛选/空值/状态展示与错误恢复覆盖率补强 | 已完成；93/93，四维全局覆盖率均超过 80% |
 | `frontend/package-lock.json`、两份 Phase 1 身份/系统迁移 | `nanoid` 传递依赖安全补丁与既有 Black/isort 格式清理 | 已完成；`nanoid@3.3.18`、npm 漏洞 0，迁移逻辑与 Schema 不变 |
 | `backend/tests/unit/test_notification_configuration.py`、`test_notification_delivery.py` | 通知 URL 安全、接收人、时区、重复投递和 Provider 异常边界 | 已完成；23 项定向测试、mypy strict、Pylint 10.00/10、Black/isort 通过 |
@@ -238,6 +248,7 @@
 
 | 命令/方式 | 结果 | 说明 |
 | --- | --- | --- |
+| 2026-08-10 P0/P1 修复全量验证 | 通过（保留既有前端 act/Ant Design deprecation warnings） | 后端 411 passed、25 skipped、覆盖率 88.66%；model-service 52 passed、2 skipped、覆盖率 88.69%；前端 22 个测试文件 102 passed，TypeScript、ESLint、生产构建和 npm audit 通过；修改文件 mypy/Black/isort/Bandit 与 git diff --check 通过；真实 Ollama Embedding smoke test 返回 1024 维向量 |
 | 本地完整运行栈启动与健康检查 | 通过 | `./scripts/local-env.sh serve` 完成数据库迁移并持续托管 PostgreSQL `5440`、Redis `6380`、MinIO `9200/9201`、model-service `8100`、API `8200`、Celery Worker/Beat 和 Vite `5273`；model-service live/ready、API live、前端登录页和 MinIO live 均返回 HTTP 200 |
 | 本地管理员/用户双入口测试账号 | 通过（用户明确覆盖密码策略） | 仅在 `127.0.0.1:5440` 开发库创建 ACTIVE ADMIN/USER 测试账号，密码仅保存 Argon2id 摘要且不写入仓库；真实 API 登录、角色、`PHASE3_TEST` 系统列表、管理员账号列表和登出通过，交叉入口均返回 401 |
 | 管理端文档导入组件/API 定向测试 | 通过 | `DocumentsPage` 11/11、`ApiClient` multipart 回归通过；前端全量 21 个测试文件、96/96，`tsc --noEmit`、ESLint 零 warning、Prettier、Vite build 和 `npm audit` 通过；真实浏览器文件上传和 Worker 异步处理待补 |
@@ -324,6 +335,9 @@
 11. AC-004/AC-005 评测 CLI 已就绪，但仓库没有至少 50 条真实标注 ESB 可回答问题和真实无知识问题集；任何通过数字在数据到位前都不成立。
 
 12. 通知功能已用 MockTransport 和本地 FastAPI Stub 验证契约，但真实公司 API 尚未提供；鉴权、限流、幂等接收、回执和 staging 故障重试仍需真实联调，REQ-010/AC-014 暂不关闭。
+13. 本地默认候选规模 Rerank 约 33.36 秒，超过后端 5 秒超时；失败冷却避免后续连续请求，但不能取消模型服务中已经开始的首个 CPU 推理，且多 API Worker 的冷却状态不共享。低资源开发机仍应接受首次短时高负载或暂时关闭本地 Rerank。
+14. 2026-08-10 已修复三个用户反馈缺陷：导入任务按系统持久化最近 job ID 并在回到页面后恢复轮询；长文件名在上传列表、任务标题和抽屉标题中截断；问答 SSE 增加服务端异常终态和前端 60 秒超时，知识库外问题不会永久停留在检索中。前端定向 16 项与后端流 API 9 项定向测试通过；真实浏览器和全仓回归待补。
+15. 本机低资源容量仍未关闭：文档平均 223 token、P90 495、最大 512；109 chunk 预计需约 28 个 4-chunk Ollama 请求，整体约 30 分钟量级。后端批次已降到 4，可避免单请求超过 240 秒并支持断点续跑，但不能显著降低总 CPU 推理时间；需通过分片任务/更快或量化模型/原生加速，或重新评估 Celery hard limit 与最大尝试预算。
 
 ## 10. 继续开发建议
 

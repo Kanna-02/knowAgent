@@ -59,10 +59,11 @@ Phase 2 关键变量：
 | `KNOWAGENT_DATABASE_URL` | 是 | 必须指向安装 `vector`/`pg_trgm` 的 PostgreSQL；SQLite 仅用于单测和迁移语法检查 |
 | `KNOWAGENT_EMBEDDING_API_BASE` | 向量链路必需 | 默认 `http://127.0.0.1:8100/v1` |
 | `KNOWAGENT_EMBEDDING_MODEL` | 向量链路必需 | 默认 `bge-m3`；响应模型名必须一致 |
-| `KNOWAGENT_EMBEDDING_TIMEOUT_SECONDS` | 否 | 默认 15 秒 |
-| `KNOWAGENT_EMBEDDING_BATCH_SIZE` | 否 | 索引批大小，默认 32 |
+| `KNOWAGENT_EMBEDDING_TIMEOUT_SECONDS` | 否 | 默认 300 秒；覆盖本机 CPU 推理的长尾延迟 |
+| `KNOWAGENT_EMBEDDING_BATCH_SIZE` | 否 | 索引批大小，默认 4；每批完成后写入 Embedding 并推进任务进度 |
 | `KNOWAGENT_RERANK_API_BASE` / `KNOWAGENT_RERANK_MODEL` | Rerank 链路必需 | 默认模型服务 `/v1` 地址与 `BAAI/bge-reranker-v2-m3`；不可用时显式回退加权 RRF |
 | `KNOWAGENT_RERANK_TIMEOUT_SECONDS` | 否 | 后端调用 Rerank 超时，默认 5 秒 |
+| `KNOWAGENT_RERANK_FAILURE_COOLDOWN_SECONDS` | 否 | Rerank 请求失败后的进程内冷却时间，默认 60 秒；冷却期直接使用基础融合排序，避免低资源机器连续触发重推理 |
 | `KNOWAGENT_RETRIEVAL_*` | 否 | 关键词/向量/result top-k、RRF、通道权重、Rerank 候选/结果 top-k；权重必须为有限正数 |
 | `KNOWAGENT_EVIDENCE_MAX_*` | 否 | 证据条数和字符预算 |
 | `KNOWAGENT_EVIDENCE_POLICY_VERSION` | 否 | 证据判定策略版本，默认 `evidence-v1` |
@@ -156,7 +157,9 @@ python -m pip install -e ".[dev,rerank]"
 
 Windows 使用 `py -3.11 -m venv .venv`、`.\.venv\Scripts\Activate.ps1` 和 `$env:` 形式加载变量。适配层默认监听 `127.0.0.1:8100`，Ollama 地址为 `127.0.0.1:11434`。验证：
 
-`.env` 中的 `KNOWAGENT_MODEL_OLLAMA_MODEL_DIGEST` 必须是 Ollama `/api/tags` 返回 digest 的 8-64 位十六进制前缀，`KNOWAGENT_MODEL_EMBEDDING_VERSION` 必须以同一前缀结尾。服务会在 readiness 和每次推理前核对实际模型；tag 或 digest 不匹配时返回未就绪，不生成或误标向量。`KNOWAGENT_MODEL_OLLAMA_HEALTH_TIMEOUT_SECONDS` 仅控制 `/api/tags` 检查，默认 5 秒，不受 300 秒推理超时影响。
+`.env` 中的 `KNOWAGENT_MODEL_OLLAMA_MODEL_DIGEST` 必须是 Ollama `/api/tags` 返回 digest 的 8-64 位十六进制前缀，`KNOWAGENT_MODEL_EMBEDDING_VERSION` 必须以同一前缀结尾。服务会在 readiness 和每次推理前核对实际模型；tag 或 digest 不匹配时返回未就绪，不生成或误标向量。`KNOWAGENT_MODEL_OLLAMA_HEALTH_TIMEOUT_SECONDS` 仅控制 `/api/tags` 检查，默认 5 秒，不受 240 秒推理超时影响。
+
+Embedding 默认以每次 4 个文本调用 Ollama，适配层总超时为 240 秒；后端每 4 个片段提交一批，客户端请求超时为 300 秒，并在每批成功后写入向量和推进入库进度。客户端超时或断开时，适配层会取消正在执行的 Ollama 请求，避免失效任务继续占用 CPU。低内存机器应先保持并发为 1，再逐步压测批大小。
 
 ```bash
 curl http://127.0.0.1:8100/health/ready
@@ -179,9 +182,9 @@ export KNOWAGENT_TEST_RERANK_MODEL_PATH=/absolute/path/to/knowledge-rag/deploy/m
 PYTHONPATH=src .venv/bin/pytest --no-cov tests/integration/test_live_rerank.py -m integration -v
 ```
 
-2026-08-08 本机 M1/8 GB 串行验证为 1 passed（17.67 秒）；进程级 `curl /v1/rerank` 约 10.37 秒。该结果只证明本地权重、运行时和 HTTP 契约可用，不代表目标 Linux 延迟、容量或真实 ESB 质量收益。
+2026-08-08 本机 M1/8 GB 串行验证为 1 passed（17.67 秒）；2 个候选的进程级 `curl /v1/rerank` 约 10.37 秒。2026-08-09 使用问答默认候选规模复测约 33.36 秒，超过后端默认 5 秒超时；超时后模型服务中的 CPU 推理仍可能继续，因此首个失败请求仍可能短时占用约 2.1 GB 模型和大量 CPU。后端会在失败后进入默认 60 秒冷却，避免后续问答重复触发重推理并继续明确显示“检索已降级”。该结果只证明本地权重、运行时和 HTTP 契约可用，不代表目标 Linux 延迟、容量或真实 ESB 质量收益。
 
-响应应包含 `model=bge-m3`、配置的 `model_version`、`dimension=1024`、`normalized=true` 和一个向量。旧 Ollama 在 Apple Silicon 纯 CPU 上可能单条也需数十秒；本地测试应将 backend 的 `KNOWAGENT_EMBEDDING_TIMEOUT_SECONDS` 临时设为 `300`，不要把此值直接作为生产延迟目标。
+响应应包含 `model=bge-m3`、配置的 `model_version`、`dimension=1024`、`normalized=true` 和一个向量。旧 Ollama 在 Apple Silicon 纯 CPU 上可能单条也需数十秒；本地默认后端超时为 `300` 秒，适配层总超时为 `240` 秒，不要把这些值直接作为生产延迟目标。
 
 对真实 Ollama 执行可重复的 Provider 集成测试：
 

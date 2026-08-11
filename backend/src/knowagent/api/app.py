@@ -5,6 +5,7 @@ from collections.abc import Awaitable, Callable
 from uuid import uuid4
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 from redis import Redis
@@ -80,6 +81,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             details=error.details,
         )
         return JSONResponse(status_code=error.status_code, content=payload.model_dump(mode="json"))
+
+    @application.exception_handler(RequestValidationError)
+    async def handle_request_validation_error(
+        request: Request, error: RequestValidationError
+    ) -> JSONResponse:
+        del error
+        payload = ApiErrorView(
+            code="REQUEST_INVALID",
+            message="请求参数不正确，请检查后重试",
+            request_id=request.state.request_id,
+        )
+        return JSONResponse(status_code=422, content=payload.model_dump(mode="json"))
 
     @application.get("/health/live")
     def live() -> dict[str, str]:

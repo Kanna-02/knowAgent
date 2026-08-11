@@ -135,7 +135,12 @@ class AnswerGenerator:  # pylint: disable=too-few-public-methods
     def _parse_draft(content: str) -> _AnswerDraft:
         try:
             payload = json.loads(content)
-            return _AnswerDraft.model_validate(payload)
+            if isinstance(payload, dict) and payload.get("claims") == []:
+                raise ValidationError(
+                    "ANSWER_NO_SUPPORTED_CLAIMS", "证据不足，无法生成有依据的回答"
+                )
+            draft = _AnswerDraft.model_validate(payload)
+            return draft
         except (json.JSONDecodeError, PydanticValidationError) as error:
             raise ValidationError("ANSWER_FORMAT_INVALID", "回答格式无效，无法验证引用") from error
 

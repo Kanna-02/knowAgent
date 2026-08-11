@@ -67,6 +67,7 @@ class CoordinatorFake:
         self.bundle = bundle
         self.dispatchable: list[UUID] = []
         self.dispatched: list[tuple[UUID, str]] = []
+        self.progress_updates: list[int] = []
 
     def claim(
         self, job_id: UUID, *, owner: str, now: datetime, lease_seconds: int
@@ -97,6 +98,7 @@ class CoordinatorFake:
             job=self.bundle.job.advance(stage, progress=progress, now=now),
             version=replace(self.bundle.version, status=version_status, updated_at=now),
         )
+        self.progress_updates.append(progress)
         return self.bundle
 
     def complete(
@@ -224,7 +226,12 @@ class DispatcherFake:
 
 
 class SuccessfulChunkIngestion:
-    def ingest_chunks(self, **_: object) -> tuple[UUID, int]:
+    def ingest_chunks(self, **kwargs: object) -> tuple[UUID, int]:
+        callback = kwargs.get("on_progress")
+        assert callable(callback)
+        callback(1, 4)
+        callback(2, 4)
+        callback(4, 4)
         return uuid4(), 1
 
 
@@ -279,6 +286,7 @@ def test_processor_completes_ready_draft_after_embedding_indexing() -> None:
     assert result is not None
     assert result.job.status is IngestionStatus.SUCCEEDED
     assert result.version.status is DocumentVersionStatus.READY_DRAFT
+    assert coordinator.progress_updates == [20, 70, 76, 82, 95]
 
 
 def test_processor_retries_when_embedding_indexing_is_unavailable() -> None:

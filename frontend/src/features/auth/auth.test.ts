@@ -19,16 +19,12 @@ describe("resolvePostLoginPath", () => {
 });
 
 describe("passwordViolations", () => {
-  it("accepts a password with all required character classes", () => {
-    expect(passwordViolations("Replacement2@")).toEqual([]);
+  it("accepts an eight character password containing letters and numbers", () => {
+    expect(passwordViolations("welcome1")).toEqual([]);
   });
 
   it("reports every missing rule", () => {
-    expect(passwordViolations("short")).toEqual([
-      "至少 12 个字符",
-      "包含大写字母",
-      "包含数字",
-      "包含特殊字符",
-    ]);
+    expect(passwordViolations("short")).toEqual(["至少 8 个字符", "包含数字"]);
+    expect(passwordViolations("12345678")).toEqual(["包含字母"]);
   });
 });

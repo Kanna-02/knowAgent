@@ -17,6 +17,47 @@
 
 ## 功能变更记录
 
+### 2026-08-10 - 账号角色修改与问答拒答错误修复
+
+类型：修复 / 变更 / 测试
+
+相关需求：REQ-001、REQ-005、REQ-006；AC-001、AC-004、AC-005。
+
+相关文件：`backend/src/knowagent/identity/`、`backend/src/knowagent/api/app.py`、`backend/src/knowagent/agent/application/{answer_generation,reliable_question}.py`、相关后端测试、`frontend/src/api/client.ts`、`frontend/src/features/admin/AccountsPage.tsx`、相关前端测试。
+
+变更说明：
+
+1. 新增管理员角色变更 API 和页面弹窗，角色变更会递增会话版本、撤销旧会话、记录旧/新角色审计，并阻止移除最后一个有效管理员。
+2. 将 FastAPI 请求校验失败统一为 `REQUEST_INVALID`，避免前端把旧 schema/非法参数的 422 显示为无诊断信息的通用错误。
+3. 模型按提示返回空 `claims` 时进入证据不足的可靠拒答路径，不再错误显示“模型服务暂时不可用”；真实上游 HTTP、超时和解析故障仍保留 Provider 不可用错误。
+
+影响范围：管理员账号角色管理、请求错误反馈、证据不足问答和拒答工单流程；不改变数据库 Schema。
+
+验证方式：后端身份定向 20 passed，问答生成/可靠问答 28 passed；前端账号/API 定向 11 passed；identity/agent/api mypy strict 通过，前端 TypeScript 通过；真实 DashScope 流式响应复现空声明并验证为 `ANSWER_NO_SUPPORTED_CLAIMS`。
+
+### 2026-08-09 - 账号、文档进度、Rerank 性能与问答工作区修复
+
+类型：修复 / 变更 / 测试 / 文档
+
+相关需求：REQ-001、REQ-002、REQ-003、REQ-005、REQ-009、REQ-011；AC-001、AC-002、AC-004、AC-008、AC-009。
+
+相关文件：`backend/src/knowagent/identity/`、`backend/src/knowagent/retrieval/infrastructure/http_rerank.py`、`backend/src/knowagent/platform/settings.py`、`backend/src/knowagent/agent/api/router.py`、`backend/.env.example`、相关后端测试、`frontend/src/features/admin/AccountsPage.tsx`、`DocumentsPage.tsx`、`SystemsPage.tsx`、`frontend/src/features/auth/UserHomePage.tsx`、`authPolicy.ts`、`streamTextBatcher.ts`、`frontend/src/api/client.ts`、`frontend/src/styles.css`、相关前端测试及产品/工程/运维文档。
+
+变更说明：
+
+1. 管理端“用户与角色”支持逐个新增普通用户、系统负责人和平台管理员；创建请求模型改为通用账号语义。系统负责人候选为空时给出原因和跳转到用户管理的操作，解决负责人配置无候选问题。
+2. 临时密码与首次改密策略统一放宽为至少 8 个字符且同时包含字母和数字；Argon2id、首次强制改密、限流与会话撤销保持不变。
+3. 文档入库任务在上传弹窗关闭后继续于列表工具区显示名称、阶段、状态和百分比，并可重新打开进度详情。
+4. 确认本地默认候选规模 Rerank 约 33.36 秒，明显超过后端 5 秒超时且服务端 CPU 推理会继续；新增默认 60 秒失败冷却，避免后续问答重复触发重推理，同时保留真实的“检索已降级”提示。
+5. SSE 增量文本按 50 ms 合并刷新，降低每 token 重绘；问答页重构为历史会话栏 + 当前会话主面板，增加用户/助手头像、稳定标题和移动端横向历史列表。
+6. 浏览器验收发现移动端系统选择容器继承 `flex-basis: 360px`，将选择器拉伸到约 187px 高；移动断点改为 `flex: none` 后恢复 36px 控件高度。
+
+影响范围：账号创建和密码策略、系统负责人配置、文档异步进度、Rerank 故障恢复、SSE 渲染性能及用户端问答布局；不改变数据库 Schema、Session 安全边界或检索降级语义。
+
+验证方式：后端 405 passed、25 skipped，总覆盖率 85.57%；171 个源文件 mypy strict 零错误，229 个 Python 文件 Black 清洁，isort 完成，Bandit 中高危 0；全仓 Pylint 保持既有 9.81/10，本次新增告警已消除。前端 22 个测试文件、99/99 通过，语句/分支/函数/行覆盖率 89.52%/81.79%/84.06%/90.85%；TypeScript、ESLint、Prettier、Vite 生产构建和 `npm audit --audit-level=moderate` 通过，漏洞 0。隔离 Mock API 下在 1280x720、390x844 完成系统选择、会话切换、错误态、输入区和溢出检查，默认浏览器视口已恢复，临时 Mock/Vite/页面已清理。
+
+后续注意：失败冷却只阻止后续请求，不能取消模型服务已经开始的首个 CPU 推理；多 API Worker 进程各自维护冷却状态。目标 Linux 资源与真实 ESB 评测集到位后仍需决定原生 PyTorch、量化、ONNX 或独立推理服务方案。
+
 ### 2026-08-08 - 用户端问答工作区改为 ChatGPT 风格
 
 类型：变更 / 测试 / 文档
@@ -763,3 +804,33 @@ review 修复（5 阻塞 + 4 建议 + 2 提醒）：
 验证方式：后端 115 项测试全部通过，总覆盖率 91.07%；review 相关 42 项定向测试通过；本次 30 个相关源文件 `mypy --strict` 零错误，Pylint 10.00/10，全仓 Bandit 中高危 0；本次 28 个未提交 Python 文件 Black/isort 检查通过，`git diff --check` 通过；隔离 SQLite 空库 `alembic upgrade head` 与 `alembic check` 通过且 ORM/迁移无新增差异。全仓 mypy 仍为 identity/systems 既有 6 文件 26 个错误，未计为本功能通过。
 
 后续注意：本轮为纯后端能力，无页面手动测试；未连接公司真实 PostgreSQL、Redis、S3 兼容端点或 ESB 文件，尚未验证签名/TLS/multipart/权限和重启恢复的真实基础设施契约；测试运行于 Python 3.12.13，目标 Python 3.11/Linux 仍需集成验证。Phase 1 下一项为文档版本、发布状态和基于 `system_id` 强过滤的知识隔离基础模型。
+
+### 2026-08-10 - 修复导入进度恢复、长文件名布局和问答流卡住
+
+类型：缺陷修复
+
+相关需求：REQ-005、REQ-006、REQ-011；AC-003、AC-004、AC-005。
+
+变更说明：
+
+1. 按业务系统将最近导入任务 ID 保存到 `sessionStorage`，页面重新挂载后恢复任务详情并继续轮询；租约过期时显示“处理超时，等待重试”，临时状态查询失败会继续重试。
+2. 上传列表、导入任务标题和版本抽屉标题增加 flex 最小宽度与省略号约束，超长文件名不再撑出弹窗。
+3. SSE 问答流捕获未预期服务端异常并发送终态错误事件；前端对无终态连接增加 60 秒超时和明确错误状态，避免知识库外问题永久停在“正在检索证据...”。
+
+验证方式：前端定向 16 项测试通过，TypeScript 检查通过；后端 `test_agent_stream_api.py` 9 项通过（使用 `--no-cov`，单测子集覆盖率不满足全仓 80% 门槛）；后端 router `mypy --strict` 通过；Prettier 已格式化改动文件。
+
+后续注意：真实浏览器页面和真实 PostgreSQL/Redis/模型服务仍需按文末手测步骤复验；本轮未运行全仓回归覆盖率。
+
+### 2026-08-10 - 修复文档 Embedding 串行超时与导入进度失真
+
+类型：缺陷修复
+
+相关需求：REQ-004、REQ-011；AC-003、AC-009。
+
+变更说明：
+
+1. model-service 默认将 Ollama Embedding 批大小从 1 调整为 4，并设置 240 秒服务端总超时；请求断开或超时会取消下游推理任务，避免后端请求失败后 Ollama 继续运行。
+2. 知识索引改为每个批次完成后立即持久化，重试时只处理尚未生成向量的片段，不再重复整篇文档计算。
+3. 后端 Embedding 批大小调整为 4；每批成功后将任务进度从 70% 推进至 95%，完成后再进入 100%，页面可看到真实索引进度。
+
+验证方式：后端全量 `411 passed, 25 skipped`，覆盖率 88.66%；model-service 全量 `52 passed, 2 skipped`，覆盖率 88.69%；前端全量 `22 个测试文件 / 102 passed`，TypeScript、ESLint、生产构建和 `npm audit --audit-level=moderate` 通过；后端与 model-service 修改文件 `mypy --strict`、Black/isort、Bandit 和 `git diff --check` 通过；真实 Ollama `POST /v1/embeddings` smoke test 返回 1024 维向量。

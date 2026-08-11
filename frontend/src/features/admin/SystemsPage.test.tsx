@@ -92,6 +92,20 @@ afterEach(async () => {
 });
 
 describe("SystemsPage", () => {
+  it("explains how to add a selectable system owner when no candidates exist", async () => {
+    vi.spyOn(apiClient, "listAdminSystems").mockResolvedValue(systemPage);
+    vi.spyOn(apiClient, "listAccounts").mockResolvedValue({ ...ownerPage, items: [], total: 0 });
+    const view = await mountWithAuth(<SystemsPage />, auth, "/admin/systems");
+    views.push(view);
+    await flush();
+
+    await click(view.container.querySelector('[aria-label="配置系统负责人"]')!);
+    await flush();
+
+    expect(document.body.textContent).toContain("暂无可选的系统负责人账号");
+    expect(document.querySelector('a[href="/admin/accounts"]')).not.toBeNull();
+  });
+
   it("creates, disables, and configures owners", async () => {
     vi.spyOn(apiClient, "listAdminSystems").mockResolvedValue(systemPage);
     vi.spyOn(apiClient, "listAccounts").mockResolvedValue(ownerPage);

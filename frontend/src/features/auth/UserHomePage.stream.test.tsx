@@ -244,4 +244,56 @@ describe("UserHomePage SSE stream", () => {
     expect(view.container.textContent).toContain("工单");
     expect(view.container.textContent).toContain("仅使用关键词检索");
   });
+
+  it("leaves retrieval state when the SSE connection closes without a terminal event", async () => {
+    vi.spyOn(apiClient, "listSystems").mockResolvedValue([system]);
+    vi.spyOn(apiClient, "listConversations").mockResolvedValue({
+      items: [],
+      page: 1,
+      page_size: 100,
+      total: 0,
+    });
+    vi.spyOn(apiClient, "createConversation").mockResolvedValue(conversation);
+    (globalThis as { EventSource: unknown }).EventSource = FakeEventSource;
+    window.EventSource = FakeEventSource as unknown as typeof EventSource;
+    vi.spyOn(apiClient, "startQuestionStream").mockResolvedValue({
+      token: "stream-token",
+      account_id: auth.user!.id,
+      run_id: "30000000-0000-0000-0000-000000000001",
+      system_id: SYSTEM_ID,
+      question: "问题",
+      required_terms: [],
+      conversation_id: CONVERSATION_ID,
+      retrieval_profile: null,
+      expires_at: "2026-08-02T12:00:00Z",
+    });
+
+    view = await mountWithAuth(<UserHomePage />, auth, "/app");
+    await flush();
+    await selectSystem(view.container);
+    setTextareaValue(
+      view.container.querySelector('textarea[aria-label="问题输入"]') as HTMLTextAreaElement,
+      "问题",
+    );
+    await flush();
+    await click(view.container.querySelector('[aria-label="提交问题"]') as Element);
+    await flush();
+
+    const source = FakeEventSource.last!;
+    source.emit({
+      type: "retrieval_started",
+      run_id: "x",
+      system_id: SYSTEM_ID,
+      question: "问题",
+      rewritten_query: null,
+      intent: null,
+      rewrite_prompt_version: null,
+    });
+    await flush();
+    source.onerror?.();
+    await flush();
+
+    expect(view.container.textContent).toContain("问答失败");
+    expect(view.container.textContent).not.toContain("正在检索证据...");
+  });
 });

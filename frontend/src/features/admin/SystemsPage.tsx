@@ -419,6 +419,22 @@ export function SystemsPage(): ReactNode {
             }
           />
         ) : null}
+        {!ownersLoading &&
+        !ownerError &&
+        ownerAccounts.length === 0 &&
+        (ownerSystem?.owners.length ?? 0) === 0 ? (
+          <Alert
+            type="info"
+            showIcon
+            message="暂无可选的系统负责人账号"
+            description="请先在用户与角色中新增系统负责人。"
+            action={
+              <Button type="link" href="/admin/accounts">
+                新增负责人
+              </Button>
+            }
+          />
+        ) : null}
         <Select<string[]>
           mode="multiple"
           value={ownerIds}

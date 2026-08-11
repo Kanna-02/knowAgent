@@ -327,6 +327,65 @@ def test_admin_can_create_list_and_disable_account_but_not_last_admin(client: Te
     assert last_admin.json()["code"] == "LAST_ADMIN"
 
 
+def test_admin_can_create_a_system_owner_with_the_simplified_password_policy(
+    client: TestClient,
+) -> None:
+    session = _login(client, "admin", "admin")
+    created = client.post(
+        "/api/v1/admin/accounts",
+        headers={"X-CSRF-Token": str(session["csrf_token"])},
+        json={
+            "username": "new.owner",
+            "display_name": "New Owner",
+            "temporary_password": "welcome1",
+            "role": "SYSTEM_OWNER",
+        },
+    )
+
+    assert created.status_code == 201
+    assert created.json()["role"] == "SYSTEM_OWNER"
+    assert created.json()["source"] == "ADMIN_CREATED"
+    assert created.json()["must_change_password"] is True
+
+
+def test_admin_can_change_account_role_and_last_admin_is_protected(client: TestClient) -> None:
+    session = _login(client, "admin", "admin")
+    csrf = str(session["csrf_token"])
+    created = client.post(
+        "/api/v1/admin/accounts",
+        headers={"X-CSRF-Token": csrf},
+        json={
+            "username": "role.change",
+            "display_name": "Role Change",
+            "temporary_password": "welcome1",
+            "role": "USER",
+        },
+    )
+    account_id = created.json()["id"]
+    changed = client.patch(
+        f"/api/v1/admin/accounts/{account_id}/role",
+        headers={"X-CSRF-Token": csrf},
+        json={"role": "SYSTEM_OWNER"},
+    )
+
+    assert created.status_code == 201
+    assert changed.status_code == 200
+    assert changed.json()["role"] == "SYSTEM_OWNER"
+
+    admin_id = next(
+        item["id"]
+        for item in client.get("/api/v1/admin/accounts", params={"role": "ADMIN"}).json()["items"]
+        if item["username"] == "admin"
+    )
+    blocked = client.patch(
+        f"/api/v1/admin/accounts/{admin_id}/role",
+        headers={"X-CSRF-Token": csrf},
+        json={"role": "USER"},
+    )
+    assert blocked.status_code == 409
+    assert blocked.json()["code"] == "LAST_ADMIN"
+
+
 def test_user_cannot_call_admin_api_and_sso_boundary_is_explicit(client: TestClient) -> None:
     _login(client, "user", "owner")
     forbidden = client.get("/api/v1/admin/accounts")

@@ -28,11 +28,14 @@ NOW = datetime(2026, 8, 3, 9, 0, tzinfo=UTC)
 
 
 class StubEmbeddings:
-    def __init__(self, *, wrong_count: bool = False) -> None:
+    def __init__(self, *, wrong_count: bool = False, fail_on_call: int | None = None) -> None:
         self.wrong_count = wrong_count
+        self.fail_on_call = fail_on_call
         self.batches: list[tuple[str, ...]] = []
 
     async def embed(self, *, texts: tuple[str, ...]) -> EmbeddingBatch:
+        if self.fail_on_call == len(self.batches) + 1:
+            raise ProviderUnavailableError("embedding")
         self.batches.append(texts)
         vectors = tuple((float(index + 1), 0.0, 0.0) for index, _ in enumerate(texts))
         if self.wrong_count:
@@ -172,6 +175,31 @@ async def test_index_source_rejects_invalid_provider_count_without_partial_write
             source_id=source_id,
         )
     assert all(chunk.embedding is None for chunk in chunks)
+
+
+@pytest.mark.anyio
+async def test_index_source_persists_batches_and_resumes_after_provider_failure() -> None:
+    factory = make_factory()
+    system_id = uuid4()
+    source_id = seed_chunks(factory, system_id=system_id)
+    embeddings = StubEmbeddings(fail_on_call=2)
+    service = KnowledgeIndexService(factory, embeddings=embeddings, batch_size=2)
+
+    with pytest.raises(ProviderUnavailableError):
+        await service.index_source(system_id=system_id, source_id=source_id, now=NOW)
+
+    with factory() as session:
+        chunks = SqlAlchemyKnowledgeRepository(session).list_source_chunks(
+            system_id=system_id,
+            source_id=source_id,
+        )
+    assert [chunk.embedding is not None for chunk in chunks] == [True, True, False]
+
+    embeddings.fail_on_call = None
+    summary = await service.index_source(system_id=system_id, source_id=source_id, now=NOW)
+
+    assert summary.chunk_count == 3
+    assert embeddings.batches == [("第一段", "第二段"), ("第三段",)]
 
 
 @pytest.mark.anyio

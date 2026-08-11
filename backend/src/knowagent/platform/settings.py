@@ -214,11 +214,12 @@ class LlmSettings:
 class RetrievalSettings:  # pylint: disable=too-many-instance-attributes
     embedding_base_url: str = "http://127.0.0.1:8100/v1"
     embedding_model: str = "bge-m3"
-    embedding_timeout_seconds: int = 15
-    embedding_batch_size: int = 32
+    embedding_timeout_seconds: int = 300
+    embedding_batch_size: int = 4
     rerank_base_url: str = "http://127.0.0.1:8100/v1"
     rerank_model: str = "BAAI/bge-reranker-v2-m3"
     rerank_timeout_seconds: int = 5
+    rerank_failure_cooldown_seconds: int = 60
     keyword_top_k: int = 20
     vector_top_k: int = 20
     result_top_k: int = 10
@@ -235,6 +236,7 @@ class RetrievalSettings:  # pylint: disable=too-many-instance-attributes
             self.embedding_timeout_seconds,
             self.embedding_batch_size,
             self.rerank_timeout_seconds,
+            self.rerank_failure_cooldown_seconds,
             self.keyword_top_k,
             self.vector_top_k,
             self.result_top_k,
@@ -271,13 +273,16 @@ class RetrievalSettings:  # pylint: disable=too-many-instance-attributes
                 "KNOWAGENT_EMBEDDING_API_BASE", "http://127.0.0.1:8100/v1"
             ).strip(),
             embedding_model=os.getenv("KNOWAGENT_EMBEDDING_MODEL", "bge-m3").strip(),
-            embedding_timeout_seconds=int(os.getenv("KNOWAGENT_EMBEDDING_TIMEOUT_SECONDS", "15")),
-            embedding_batch_size=int(os.getenv("KNOWAGENT_EMBEDDING_BATCH_SIZE", "32")),
+            embedding_timeout_seconds=int(os.getenv("KNOWAGENT_EMBEDDING_TIMEOUT_SECONDS", "300")),
+            embedding_batch_size=int(os.getenv("KNOWAGENT_EMBEDDING_BATCH_SIZE", "4")),
             rerank_base_url=os.getenv(
                 "KNOWAGENT_RERANK_API_BASE", "http://127.0.0.1:8100/v1"
             ).strip(),
             rerank_model=os.getenv("KNOWAGENT_RERANK_MODEL", "BAAI/bge-reranker-v2-m3").strip(),
             rerank_timeout_seconds=int(os.getenv("KNOWAGENT_RERANK_TIMEOUT_SECONDS", "5")),
+            rerank_failure_cooldown_seconds=int(
+                os.getenv("KNOWAGENT_RERANK_FAILURE_COOLDOWN_SECONDS", "60")
+            ),
             keyword_top_k=int(os.getenv("KNOWAGENT_RETRIEVAL_KEYWORD_TOP_K", "20")),
             vector_top_k=int(os.getenv("KNOWAGENT_RETRIEVAL_VECTOR_TOP_K", "20")),
             result_top_k=int(os.getenv("KNOWAGENT_RETRIEVAL_RESULT_TOP_K", "10")),

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime
 from typing import BinaryIO, Protocol
 from uuid import UUID
@@ -136,4 +137,5 @@ class ChunkIngestionHook(Protocol):  # pylint: disable=too-few-public-methods
         document_version_id: UUID,
         manifest_key: str,
         now: datetime,
+        on_progress: Callable[[int, int], None] | None = None,
     ) -> tuple[UUID, int]: ...

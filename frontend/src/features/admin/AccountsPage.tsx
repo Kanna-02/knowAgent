@@ -4,6 +4,7 @@ import {
   Drawer,
   Form,
   Input,
+  Modal,
   Popconfirm,
   Select,
   Space,
@@ -12,7 +13,7 @@ import {
   Tooltip,
 } from "antd";
 import type { TablePaginationConfig } from "antd/es/table";
-import { Plus, Power, RefreshCw, ShieldCheck, UserRoundPlus } from "lucide-react";
+import { Plus, Power, RefreshCw, UserRoundCog, UserRoundPlus } from "lucide-react";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -22,10 +23,11 @@ import { FeedbackState } from "../../shared/FeedbackState";
 import { toUiError, type UiError } from "../../shared/uiError";
 import { passwordViolations } from "../auth/authPolicy";
 
-interface AdminFormValues {
+interface AccountFormValues {
   username: string;
   displayName: string;
   temporaryPassword: string;
+  role: AccountRole;
 }
 
 const roleLabels: Record<AccountRole, string> = {
@@ -42,7 +44,7 @@ const sourceLabels = {
 
 export function AccountsPage(): ReactNode {
   const { message } = App.useApp();
-  const [form] = Form.useForm<AdminFormValues>();
+  const [form] = Form.useForm<AccountFormValues>();
   const [items, setItems] = useState<AccountView[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -53,6 +55,9 @@ export function AccountsPage(): ReactNode {
   const [loadError, setLoadError] = useState<UiError | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [roleAccount, setRoleAccount] = useState<AccountView | null>(null);
+  const [roleSaving, setRoleSaving] = useState(false);
+  const [nextRole, setNextRole] = useState<AccountRole>("USER");
   const loadRequestId = useRef(0);
 
   const load = useCallback(async (): Promise<void> => {
@@ -87,20 +92,21 @@ export function AccountsPage(): ReactNode {
     };
   }, [load]);
 
-  const createAdmin = async (values: AdminFormValues): Promise<void> => {
+  const createAccount = async (values: AccountFormValues): Promise<void> => {
     setSaving(true);
     try {
-      await apiClient.createAdmin({
+      await apiClient.createAccount({
         username: values.username,
         display_name: values.displayName,
         temporary_password: values.temporaryPassword,
+        role: values.role,
       });
-      void message.success("管理员已新增");
+      void message.success("账号已新增");
       setDrawerOpen(false);
       form.resetFields();
       await load();
     } catch (error: unknown) {
-      void message.error(toUiError(error, "新增管理员失败").message);
+      void message.error(toUiError(error, "新增账号失败").message);
     } finally {
       setSaving(false);
     }
@@ -117,6 +123,21 @@ export function AccountsPage(): ReactNode {
     }
   };
 
+  const changeRole = async (): Promise<void> => {
+    if (!roleAccount) return;
+    setRoleSaving(true);
+    try {
+      await apiClient.setAccountRole(roleAccount.id, nextRole);
+      void message.success("角色已更新，原有会话已失效");
+      setRoleAccount(null);
+      await load();
+    } catch (error: unknown) {
+      void message.error(toUiError(error, "角色更新失败").message);
+    } finally {
+      setRoleSaving(false);
+    }
+  };
+
   return (
     <section className="page-section">
       <div className="page-heading-row">
@@ -129,7 +150,7 @@ export function AccountsPage(): ReactNode {
           icon={<UserRoundPlus size={17} />}
           onClick={() => setDrawerOpen(true)}
         >
-          新增管理员
+          新增用户
         </Button>
       </div>
       <div className="table-toolbar">
@@ -237,22 +258,35 @@ export function AccountsPage(): ReactNode {
           {
             title: "操作",
             key: "actions",
-            width: 96,
+            width: 144,
             fixed: "right",
             render: (_, account) => (
-              <Popconfirm
-                title={account.status === "ACTIVE" ? "禁用此账号？" : "启用此账号？"}
-                description={
-                  account.status === "ACTIVE" ? "该账号的现有会话会立即失效。" : undefined
-                }
-                okText="确认"
-                cancelText="取消"
-                onConfirm={() => void changeStatus(account)}
-              >
-                <Tooltip title={account.status === "ACTIVE" ? "禁用" : "启用"}>
-                  <Button type="text" icon={<Power size={16} />} aria-label="切换账号状态" />
+              <Space size={2}>
+                <Tooltip title="修改角色">
+                  <Button
+                    type="text"
+                    icon={<UserRoundCog size={16} />}
+                    aria-label="修改账号角色"
+                    onClick={() => {
+                      setRoleAccount(account);
+                      setNextRole(account.role);
+                    }}
+                  />
                 </Tooltip>
-              </Popconfirm>
+                <Popconfirm
+                  title={account.status === "ACTIVE" ? "禁用此账号？" : "启用此账号？"}
+                  description={
+                    account.status === "ACTIVE" ? "该账号的现有会话会立即失效。" : undefined
+                  }
+                  okText="确认"
+                  cancelText="取消"
+                  onConfirm={() => void changeStatus(account)}
+                >
+                  <Tooltip title={account.status === "ACTIVE" ? "禁用" : "启用"}>
+                    <Button type="text" icon={<Power size={16} />} aria-label="切换账号状态" />
+                  </Tooltip>
+                </Popconfirm>
+              </Space>
             ),
           },
         ]}
@@ -260,7 +294,7 @@ export function AccountsPage(): ReactNode {
       <Drawer
         title={
           <span className="drawer-title">
-            <ShieldCheck size={18} /> 新增管理员
+            <UserRoundPlus size={18} /> 新增用户
           </span>
         }
         size={440}
@@ -278,11 +312,12 @@ export function AccountsPage(): ReactNode {
           </Button>
         }
       >
-        <Form<AdminFormValues>
+        <Form<AccountFormValues>
           form={form}
           layout="vertical"
           requiredMark={false}
-          onFinish={(values) => void createAdmin(values)}
+          initialValues={{ role: "USER" }}
+          onFinish={(values) => void createAccount(values)}
         >
           <Form.Item
             name="username"
@@ -301,6 +336,15 @@ export function AccountsPage(): ReactNode {
           >
             <Input autoComplete="off" />
           </Form.Item>
+          <Form.Item name="role" label="角色" rules={[{ required: true, message: "请选择角色" }]}>
+            <Select<AccountRole>
+              options={Object.entries(roleLabels).map(([value, label]) => ({
+                value: value as AccountRole,
+                label,
+              }))}
+              aria-label="新账号角色"
+            />
+          </Form.Item>
           <Form.Item
             name="temporaryPassword"
             label="临时密码"
@@ -317,10 +361,34 @@ export function AccountsPage(): ReactNode {
               },
             ]}
           >
-            <Input.Password autoComplete="new-password" />
+            <Input.Password autoComplete="new-password" placeholder="至少 8 位，包含字母和数字" />
           </Form.Item>
         </Form>
       </Drawer>
+      <Modal
+        title="修改账号角色"
+        open={roleAccount !== null}
+        okText="保存"
+        cancelText="取消"
+        confirmLoading={roleSaving}
+        onCancel={() => setRoleAccount(null)}
+        onOk={() => void changeRole()}
+        destroyOnHidden
+      >
+        <p className="modal-supporting-text">
+          {roleAccount?.display_name}（{roleAccount?.username}）
+        </p>
+        <Select<AccountRole>
+          value={nextRole}
+          options={Object.entries(roleLabels).map(([value, label]) => ({
+            value: value as AccountRole,
+            label,
+          }))}
+          onChange={setNextRole}
+          style={{ width: "100%" }}
+          aria-label="账号角色"
+        />
+      </Modal>
     </section>
   );
 }

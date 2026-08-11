@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated, NoReturn, cast
@@ -9,7 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from knowagent_model.embedding import EmbeddingService, EmbeddingServiceError
+from knowagent_model.embedding import EmbeddingBatch, EmbeddingService, EmbeddingServiceError
 from knowagent_model.flag_embedding import (
     FlagEmbeddingRerankConfig,
     FlagEmbeddingRerankService,
@@ -17,6 +18,40 @@ from knowagent_model.flag_embedding import (
 from knowagent_model.ollama import OllamaEmbeddingConfig, OllamaEmbeddingService
 from knowagent_model.rerank import RerankService, RerankServiceError
 from knowagent_model.settings import ModelServiceSettings
+
+
+async def _wait_for_disconnect(request: Request) -> None:
+    while not await request.is_disconnected():
+        await asyncio.sleep(0.1)
+
+
+async def _embed_until_disconnect(
+    *,
+    request: Request,
+    service: EmbeddingService,
+    model: str,
+    texts: tuple[str, ...],
+) -> EmbeddingBatch:
+    embedding_task = asyncio.create_task(service.embed(model=model, texts=texts))
+    disconnect_task = asyncio.create_task(_wait_for_disconnect(request))
+    try:
+        done, _ = await asyncio.wait(
+            {embedding_task, disconnect_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if embedding_task in done:
+            return await embedding_task
+        embedding_task.cancel()
+        await asyncio.gather(embedding_task, return_exceptions=True)
+        raise EmbeddingServiceError(
+            code="CLIENT_DISCONNECTED",
+            message="Embedding request was cancelled",
+            status_code=499,
+        )
+    finally:
+        disconnect_task.cancel()
+        if not embedding_task.done():
+            embedding_task.cancel()
 
 
 class EmbeddingRequest(BaseModel):
@@ -200,7 +235,7 @@ def create_app(
     )
 
     @application.post("/v1/embeddings", response_model=EmbeddingResponse)
-    async def create_embeddings(payload: EmbeddingRequest) -> EmbeddingResponse:
+    async def create_embeddings(request: Request, payload: EmbeddingRequest) -> EmbeddingResponse:
         if len(payload.texts) > configured_settings.max_request_texts:
             raise EmbeddingServiceError(
                 code="EMBEDDING_BATCH_TOO_LARGE",
@@ -219,7 +254,20 @@ def create_app(
                 message="Embedding request exceeds the total character limit",
                 status_code=422,
             )
-        result = await get_service().embed(model=payload.model, texts=tuple(payload.texts))
+        try:
+            async with asyncio.timeout(configured_settings.ollama_timeout_seconds):
+                result = await _embed_until_disconnect(
+                    request=request,
+                    service=get_service(),
+                    model=payload.model,
+                    texts=tuple(payload.texts),
+                )
+        except TimeoutError as error:
+            raise EmbeddingServiceError(
+                code="OLLAMA_TIMEOUT",
+                message="Ollama embedding request timed out",
+                status_code=503,
+            ) from error
         return EmbeddingResponse(
             model=result.model,
             model_version=result.model_version,

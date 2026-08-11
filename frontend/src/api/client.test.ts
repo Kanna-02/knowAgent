@@ -79,7 +79,8 @@ describe("ApiClient", () => {
       .mockResolvedValueOnce(jsonResponse(accountPage))
       .mockResolvedValueOnce(jsonResponse(accountPage))
       .mockResolvedValueOnce(jsonResponse(account, 201))
-      .mockResolvedValueOnce(jsonResponse(account));
+      .mockResolvedValueOnce(jsonResponse(account))
+      .mockResolvedValueOnce(jsonResponse({ ...account, role: "SYSTEM_OWNER" }));
     const client = new ApiClient();
 
     await client.me();
@@ -91,17 +92,29 @@ describe("ApiClient", () => {
       status: "ACTIVE",
       search: "second admin",
     });
-    await client.createAdmin({
-      username: "second.admin",
-      display_name: "Second Admin",
-      temporary_password: "Temporary22@",
+    await client.createAccount({
+      username: "second.owner",
+      display_name: "Second Owner",
+      temporary_password: "welcome1",
+      role: "SYSTEM_OWNER",
     });
     await client.setAccountStatus(account.id, "DISABLED");
+    await client.setAccountRole(account.id, "SYSTEM_OWNER");
 
     expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/v1/admin/accounts?page=1&page_size=20");
     expect(fetchMock.mock.calls[2]?.[0]).toContain("role=ADMIN&status=ACTIVE&search=second+admin");
     expect(fetchMock.mock.calls[3]?.[1]?.method).toBe("POST");
+    expect(fetchMock.mock.calls[3]?.[1]?.body).toBe(
+      JSON.stringify({
+        username: "second.owner",
+        display_name: "Second Owner",
+        temporary_password: "welcome1",
+        role: "SYSTEM_OWNER",
+      }),
+    );
     expect(fetchMock.mock.calls[4]?.[1]?.method).toBe("PATCH");
+    expect(fetchMock.mock.calls[5]?.[0]).toBe(`/api/v1/admin/accounts/${account.id}/role`);
+    expect(fetchMock.mock.calls[5]?.[1]?.body).toBe(JSON.stringify({ role: "SYSTEM_OWNER" }));
   });
 
   it("builds business-system queries and mutations", async () => {

@@ -7,11 +7,9 @@ export function resolvePostLoginPath(role: AccountRole, mustChangePassword: bool
 
 export function passwordViolations(password: string): string[] {
   const checks: Array<[boolean, string]> = [
-    [password.length >= 12, "至少 12 个字符"],
-    [/[a-z]/.test(password), "包含小写字母"],
-    [/[A-Z]/.test(password), "包含大写字母"],
+    [password.length >= 8, "至少 8 个字符"],
+    [/[A-Za-z]/.test(password), "包含字母"],
     [/\d/.test(password), "包含数字"],
-    [/[^A-Za-z0-9]/.test(password), "包含特殊字符"],
   ];
   return checks.filter(([valid]) => !valid).map(([, message]) => message);
 }

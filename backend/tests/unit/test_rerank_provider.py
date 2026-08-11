@@ -95,3 +95,28 @@ async def test_rerank_validates_request_before_network_call() -> None:
         )
         with pytest.raises(ValidationError, match="重排"):
             await provider.rerank(query="  ", documents=("文档",), top_k=1)
+
+
+@pytest.mark.anyio
+async def test_rerank_skips_repeated_requests_during_failure_cooldown() -> None:
+    requests = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal requests
+        del request
+        requests += 1
+        return httpx.Response(503)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = HttpRerankProvider(
+            base_url="http://model-service:8100/v1",
+            model="BAAI/bge-reranker-v2-m3",
+            timeout_seconds=5,
+            failure_cooldown_seconds=60,
+            client=client,
+        )
+        for _ in range(2):
+            with pytest.raises(ProviderUnavailableError):
+                await provider.rerank(query="如何部署？", documents=("文档",), top_k=1)
+
+    assert requests == 1

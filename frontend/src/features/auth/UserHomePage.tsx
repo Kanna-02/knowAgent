@@ -1,5 +1,15 @@
 import { Alert, Button, Input, Popconfirm, Select, Space, Tag, Tooltip, Typography } from "antd";
-import { Loader2, MessageSquareText, Plus, RefreshCw, Send, Trash2 } from "lucide-react";
+import {
+  Bot,
+  History,
+  Loader2,
+  MessageSquareText,
+  Plus,
+  RefreshCw,
+  Send,
+  Trash2,
+  UserRound,
+} from "lucide-react";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -13,7 +23,7 @@ import type {
 } from "../../api/types";
 import { FeedbackState } from "../../shared/FeedbackState";
 import { toUiError, type UiError } from "../../shared/uiError";
-import { useAuth } from "./authContextValue";
+import { createStreamTextBatcher, type StreamTextBatcher } from "./streamTextBatcher";
 
 interface StreamState {
   phase: "idle" | "preparing" | "streaming" | "completed" | "refused" | "error";
@@ -39,10 +49,10 @@ const INITIAL_STREAM: StreamState = {
   rewritePromptVersion: null,
 };
 
+const STREAM_TEXT_FLUSH_INTERVAL_MS = 50;
+const STREAM_TIMEOUT_MS = 60_000;
+
 export function UserHomePage(): ReactNode {
-  const { user } = useAuth();
-  const roleLabel =
-    user?.role === "SYSTEM_OWNER" ? "系统负责人" : user?.role === "ADMIN" ? "管理员" : "普通用户";
   const [systems, setSystems] = useState<BusinessSystemView[]>([]);
   const [selectedSystemId, setSelectedSystemId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -60,12 +70,30 @@ export function UserHomePage(): ReactNode {
   const conversationRequestSequence = useRef(0);
   const terminalRunsRef = useRef(new Set<string>());
   const eventSourceRef = useRef<EventSource | null>(null);
+  const streamTimeoutRef = useRef<number | null>(null);
   const streamRef = useRef<StreamState>(INITIAL_STREAM);
+  const streamTextBatcherRef = useRef<StreamTextBatcher | null>(null);
   const selectedSystem = systems.find((item) => item.id === selectedSystemId) ?? null;
 
   useEffect(() => {
     streamRef.current = stream;
   }, [stream]);
+
+  useEffect(() => {
+    streamTextBatcherRef.current = createStreamTextBatcher((delta) => {
+      const next = {
+        ...streamRef.current,
+        phase: "streaming" as const,
+        streamedText: streamRef.current.streamedText + delta,
+      };
+      streamRef.current = next;
+      setStream(next);
+    }, STREAM_TEXT_FLUSH_INTERVAL_MS);
+    return () => {
+      streamTextBatcherRef.current?.cancel();
+      streamTextBatcherRef.current = null;
+    };
+  }, []);
 
   const loadSystems = useCallback(async (): Promise<void> => {
     const requestId = ++requestSequence.current;
@@ -102,6 +130,11 @@ export function UserHomePage(): ReactNode {
   }, []);
 
   const closeStream = useCallback((): void => {
+    streamTextBatcherRef.current?.cancel();
+    if (streamTimeoutRef.current !== null) {
+      window.clearTimeout(streamTimeoutRef.current);
+      streamTimeoutRef.current = null;
+    }
     eventSourceRef.current?.close();
     eventSourceRef.current = null;
   }, []);
@@ -179,6 +212,7 @@ export function UserHomePage(): ReactNode {
     let next = current;
     switch (parsed.type) {
       case "retrieval_started":
+        streamTextBatcherRef.current?.cancel();
         next = {
           ...current,
           phase: "streaming",
@@ -194,13 +228,14 @@ export function UserHomePage(): ReactNode {
       case "decision":
         break;
       case "answer_delta":
-        next = {
-          ...current,
-          phase: "streaming",
-          streamedText: current.streamedText + parsed.delta,
-        };
-        break;
+        streamTextBatcherRef.current?.append(parsed.delta);
+        return;
       case "answer_completed":
+        streamTextBatcherRef.current?.cancel();
+        if (streamTimeoutRef.current !== null) {
+          window.clearTimeout(streamTimeoutRef.current);
+          streamTimeoutRef.current = null;
+        }
         if (!terminalRunsRef.current.has(parsed.run_id)) {
           terminalRunsRef.current.add(parsed.run_id);
           setConversationMessages((messages) => [
@@ -226,6 +261,11 @@ export function UserHomePage(): ReactNode {
         };
         break;
       case "refused":
+        streamTextBatcherRef.current?.cancel();
+        if (streamTimeoutRef.current !== null) {
+          window.clearTimeout(streamTimeoutRef.current);
+          streamTimeoutRef.current = null;
+        }
         if (!terminalRunsRef.current.has(parsed.run_id)) {
           terminalRunsRef.current.add(parsed.run_id);
           setConversationMessages((messages) => [
@@ -242,6 +282,11 @@ export function UserHomePage(): ReactNode {
         };
         break;
       case "error":
+        streamTextBatcherRef.current?.cancel();
+        if (streamTimeoutRef.current !== null) {
+          window.clearTimeout(streamTimeoutRef.current);
+          streamTimeoutRef.current = null;
+        }
         next = { ...current, phase: "error", errorMessage: parsed.message };
         break;
     }
@@ -322,6 +367,14 @@ export function UserHomePage(): ReactNode {
       source.onmessage = handleEvent;
       source.onerror = () => {
         if (eventSourceRef.current === source) {
+          streamRef.current = {
+            ...streamRef.current,
+            phase:
+              streamRef.current.phase === "completed" || streamRef.current.phase === "refused"
+                ? streamRef.current.phase
+                : "error",
+            errorMessage: streamRef.current.errorMessage ?? "问答流连接已断开，请稍后重试",
+          };
           setStream((prev) =>
             prev.phase === "completed" || prev.phase === "refused"
               ? prev
@@ -334,6 +387,17 @@ export function UserHomePage(): ReactNode {
         }
         closeStream();
       };
+      streamTimeoutRef.current = window.setTimeout(() => {
+        if (eventSourceRef.current !== source) return;
+        const timedOut: StreamState = {
+          ...streamRef.current,
+          phase: "error",
+          errorMessage: "问答处理超时，请稍后重试",
+        };
+        streamRef.current = timedOut;
+        setStream(timedOut);
+        closeStream();
+      }, STREAM_TIMEOUT_MS);
       setQuestion("");
     } catch (requestError: unknown) {
       setStream({
@@ -358,10 +422,9 @@ export function UserHomePage(): ReactNode {
         <div className="question-toolbar-heading">
           <div className="question-toolbar-kicker">
             <MessageSquareText size={16} aria-hidden="true" />
-            <span>知识问答</span>
+            <span>KnowAgent</span>
           </div>
-          <h1>问答</h1>
-          <p>{roleLabel} · 回答将基于已发布知识并附带引用</p>
+          <h1>知识问答</h1>
         </div>
         <div className="question-toolbar-system">
           <span className="question-toolbar-label">业务系统</span>
@@ -397,28 +460,60 @@ export function UserHomePage(): ReactNode {
         />
       ) : (
         <div className="question-session">
-          <div className="conversation-toolbar">
-            <div className="conversation-toolbar-title">
-              <span className="conversation-toolbar-label">当前对话</span>
-              <Select<string>
-                value={selectedConversationId}
-                loading={conversationLoading}
-                className="conversation-selector"
-                placeholder="新会话"
-                aria-label="选择会话"
-                options={conversations.map((item) => ({ value: item.id, label: item.title }))}
-                onChange={selectConversation}
-              />
-            </div>
-            <Space size="small" className="conversation-toolbar-actions">
+          <aside className="conversation-rail" aria-label="会话列表">
+            <div className="conversation-rail-header">
+              <div>
+                <span className="conversation-toolbar-label">
+                  <History size={14} aria-hidden="true" /> 会话
+                </span>
+                <strong>{conversations.length} 个历史会话</strong>
+              </div>
               <Tooltip title="新建会话">
                 <Button
+                  type="text"
                   icon={<Plus size={16} />}
                   aria-label="新建会话"
                   disabled={submitting}
                   onClick={startNewConversation}
                 />
               </Tooltip>
+            </div>
+            <div className="conversation-list" role="listbox" aria-label="历史会话">
+              {conversations.length === 0 ? (
+                <span className="conversation-list-empty">暂无历史会话</span>
+              ) : (
+                conversations.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    role="option"
+                    aria-selected={item.id === selectedConversationId}
+                    className={item.id === selectedConversationId ? "is-active" : undefined}
+                    onClick={() => selectConversation(item.id)}
+                  >
+                    <MessageSquareText size={15} aria-hidden="true" />
+                    <span>{item.title}</span>
+                  </button>
+                ))
+              )}
+            </div>
+          </aside>
+          <main className="conversation-panel">
+            <div className="conversation-panel-header">
+              <div className="conversation-panel-heading">
+                <span className="assistant-mark">
+                  <Bot size={17} aria-hidden="true" />
+                </span>
+                <div>
+                  <strong>
+                    {conversations.find((item) => item.id === selectedConversationId)?.title ??
+                      "新会话"}
+                  </strong>
+                  <span>
+                    {selectedSystem.name} · {selectedSystem.code}
+                  </span>
+                </div>
+              </div>
               {selectedConversationId ? (
                 <Popconfirm
                   title="删除当前会话？"
@@ -430,6 +525,7 @@ export function UserHomePage(): ReactNode {
                 >
                   <Tooltip title="删除会话">
                     <Button
+                      type="text"
                       danger
                       icon={<Trash2 size={16} />}
                       aria-label="删除会话"
@@ -438,86 +534,86 @@ export function UserHomePage(): ReactNode {
                   </Tooltip>
                 </Popconfirm>
               ) : null}
-            </Space>
-          </div>
-          {conversationError ? (
-            <FeedbackState
-              status="error"
-              title="会话加载失败"
-              error={conversationError}
-              retryLabel="重试加载会话"
-              retrying={conversationLoading}
-              onRetry={() => void loadConversations(selectedSystem.id)}
-            />
-          ) : (
-            <ConversationThread
-              messages={conversationMessages}
-              loading={conversationLoading}
-              systemName={selectedSystem.name}
-              hideLatestAssistant={stream.phase === "completed"}
-            />
-          )}
-          {stream.phase !== "idle" ? <QuestionStreamView state={stream} /> : null}
-          <div className="question-composer">
-            <div className="composer-input-shell">
-              <Input.TextArea
-                value={question}
-                onChange={(event) => setQuestion(event.target.value)}
-                placeholder="向知识库提问"
-                maxLength={2000}
-                autoSize={{ minRows: 2, maxRows: 6 }}
-                aria-label="问题输入"
-                onPressEnter={(event) => {
-                  if (!event.shiftKey) {
-                    event.preventDefault();
-                    void submitQuestion();
-                  }
-                }}
+            </div>
+            {conversationError ? (
+              <FeedbackState
+                status="error"
+                title="会话加载失败"
+                error={conversationError}
+                retryLabel="重试加载会话"
+                retrying={conversationLoading}
+                onRetry={() => void loadConversations(selectedSystem.id)}
               />
-              <div className="composer-action-row">
-                <span className="composer-context">
-                  当前系统：<strong>{selectedSystem.name}</strong>
-                </span>
-                <Button
-                  type="primary"
-                  shape="circle"
-                  icon={
-                    submitting || stream.phase === "streaming" || stream.phase === "preparing" ? (
-                      <Loader2 size={16} className="spin" />
-                    ) : (
-                      <Send size={16} />
-                    )
-                  }
-                  aria-label="提交问题"
-                  loading={submitting}
-                  disabled={!question.trim()}
-                  onClick={() => void submitQuestion()}
+            ) : (
+              <ConversationThread
+                messages={conversationMessages}
+                loading={conversationLoading}
+                systemName={selectedSystem.name}
+                hideLatestAssistant={stream.phase === "completed"}
+              />
+            )}
+            {stream.phase !== "idle" ? <QuestionStreamView state={stream} /> : null}
+            <div className="question-composer">
+              <div className="composer-input-shell">
+                <Input.TextArea
+                  value={question}
+                  onChange={(event) => setQuestion(event.target.value)}
+                  placeholder="向知识库提问"
+                  maxLength={2000}
+                  autoSize={{ minRows: 2, maxRows: 6 }}
+                  aria-label="问题输入"
+                  onPressEnter={(event) => {
+                    if (!event.shiftKey) {
+                      event.preventDefault();
+                      void submitQuestion();
+                    }
+                  }}
                 />
+                <div className="composer-action-row">
+                  <span className="composer-context">
+                    当前系统：<strong>{selectedSystem.name}</strong>
+                  </span>
+                  <Button
+                    type="primary"
+                    shape="circle"
+                    icon={
+                      submitting || stream.phase === "streaming" || stream.phase === "preparing" ? (
+                        <Loader2 size={16} className="spin" />
+                      ) : (
+                        <Send size={16} />
+                      )
+                    }
+                    aria-label="提交问题"
+                    loading={submitting}
+                    disabled={!question.trim()}
+                    onClick={() => void submitQuestion()}
+                  />
+                </div>
+              </div>
+              <div className="composer-secondary-row">
+                <Input
+                  value={requiredTerms}
+                  onChange={(event) => setRequiredTerms(event.target.value)}
+                  placeholder="必含术语，逗号分隔（可选）"
+                  maxLength={200}
+                  aria-label="必含术语"
+                  prefix={<span className="composer-secondary-label">检索约束</span>}
+                />
+                <Space>
+                  {stream.phase !== "idle" ? (
+                    <Tooltip title="清空当前结果">
+                      <Button
+                        icon={<RefreshCw size={16} />}
+                        aria-label="清空当前结果"
+                        disabled={submitting}
+                        onClick={resetConversation}
+                      />
+                    </Tooltip>
+                  ) : null}
+                </Space>
               </div>
             </div>
-            <div className="composer-secondary-row">
-              <Input
-                value={requiredTerms}
-                onChange={(event) => setRequiredTerms(event.target.value)}
-                placeholder="必含术语，逗号分隔（可选）"
-                maxLength={200}
-                aria-label="必含术语"
-                prefix={<span className="composer-secondary-label">检索约束</span>}
-              />
-              <Space>
-                {stream.phase !== "idle" ? (
-                  <Tooltip title="清空当前结果">
-                    <Button
-                      icon={<RefreshCw size={16} />}
-                      aria-label="清空当前结果"
-                      disabled={submitting}
-                      onClick={resetConversation}
-                    />
-                  </Tooltip>
-                ) : null}
-              </Space>
-            </div>
-          </div>
+          </main>
         </div>
       )}
       {systemError && systems.length > 0 ? (
@@ -539,8 +635,13 @@ function QuestionStreamView({ state }: { state: StreamState }): ReactNode {
     <div className="current-conversation-turn">
       {state.pendingQuestion ? (
         <div className="conversation-message conversation-message-user">
-          <span className="conversation-message-label">你</span>
-          <Typography.Paragraph>{state.pendingQuestion}</Typography.Paragraph>
+          <span className="conversation-message-avatar">
+            <UserRound size={16} aria-hidden="true" />
+          </span>
+          <div className="conversation-message-body">
+            <span className="conversation-message-label">你</span>
+            <Typography.Paragraph>{state.pendingQuestion}</Typography.Paragraph>
+          </div>
         </div>
       ) : null}
       <QuestionStreamStatus state={state} />
@@ -662,13 +763,22 @@ function ConversationThread({
           key={message.id}
           className={`conversation-message conversation-message-${message.role}`}
         >
-          <div className="conversation-message-heading">
-            <span className="conversation-message-label">
-              {message.role === "user" ? "你" : "助手"}
-            </span>
-            {message.intent === "follow_up" ? <Tag color="blue">关联上下文</Tag> : null}
+          <span className="conversation-message-avatar">
+            {message.role === "user" ? (
+              <UserRound size={16} aria-hidden="true" />
+            ) : (
+              <Bot size={16} aria-hidden="true" />
+            )}
+          </span>
+          <div className="conversation-message-body">
+            <div className="conversation-message-heading">
+              <span className="conversation-message-label">
+                {message.role === "user" ? "你" : "助手"}
+              </span>
+              {message.intent === "follow_up" ? <Tag color="blue">关联上下文</Tag> : null}
+            </div>
+            <Typography.Paragraph>{message.content}</Typography.Paragraph>
           </div>
-          <Typography.Paragraph>{message.content}</Typography.Paragraph>
         </div>
       ))}
     </div>

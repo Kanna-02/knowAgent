@@ -121,6 +121,18 @@ async def test_generate_rejects_unknown_fabricated_or_missing_citations(
 
 
 @pytest.mark.anyio
+async def test_generate_treats_empty_claims_as_grounding_failure_not_provider_failure() -> None:
+    provider = StubLlmProvider({"claims": []})
+
+    with pytest.raises(ValidationError) as captured:
+        await AnswerGenerator(provider).generate(
+            question="发布前要做什么？", evidence=evidence_bundle()
+        )
+
+    assert captured.value.code == "ANSWER_NO_SUPPORTED_CLAIMS"
+
+
+@pytest.mark.anyio
 async def test_generate_rejects_claim_not_covered_by_quoted_evidence() -> None:
     provider = StubLlmProvider(
         {

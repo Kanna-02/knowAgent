@@ -34,6 +34,25 @@ class AccountService:
         temporary_password: str,
         request_id: str | None = None,
     ) -> Account:
+        return self.create_account(
+            actor_id=actor_id,
+            username=username,
+            display_name=display_name,
+            temporary_password=temporary_password,
+            role=AccountRole.ADMIN,
+            request_id=request_id,
+        )
+
+    def create_account(  # pylint: disable=too-many-arguments
+        self,
+        *,
+        actor_id: UUID,
+        username: str,
+        display_name: str,
+        temporary_password: str,
+        role: AccountRole,
+        request_id: str | None = None,
+    ) -> Account:
         try:
             normalized_username = normalize_username(username)
             normalized_display_name = normalize_display_name(display_name)
@@ -50,7 +69,7 @@ class AccountService:
             username=normalized_username,
             display_name=normalized_display_name,
             password_hash=self._passwords.hash(temporary_password),
-            role=AccountRole.ADMIN,
+            role=role,
             source=AccountSource.ADMIN_CREATED,
             status=AccountStatus.ACTIVE,
             must_change_password=True,
@@ -63,12 +82,13 @@ class AccountService:
         )
         created = self._accounts.add(account)
         self._audit.record(
-            "account.admin.create",
+            "account.admin.create" if role is AccountRole.ADMIN else "account.user.create",
             "success",
             actor_id=actor_id,
             object_type="account",
             object_id=created.id,
             request_id=request_id,
+            metadata={"role": role.value},
         )
         return created
 
@@ -122,5 +142,40 @@ class AccountService:
             object_id=updated.id,
             request_id=request_id,
             metadata={"status": status.value},
+        )
+        return updated
+
+    def set_role(
+        self,
+        *,
+        actor_id: UUID,
+        account_id: UUID,
+        role: AccountRole,
+        request_id: str | None = None,
+    ) -> Account:
+        account = self._accounts.get_by_id(account_id)
+        if account is None:
+            raise ValidationError("ACCOUNT_NOT_FOUND", "账号不存在")
+        if account.role is AccountRole.ADMIN and role is not AccountRole.ADMIN:
+            if account.status is AccountStatus.ACTIVE and self._accounts.lock_active_admins() <= 1:
+                raise ConflictError("LAST_ADMIN", "不能移除最后一个有效管理员")
+        if account.role is role:
+            return account
+        updated = replace(
+            account,
+            role=role,
+            session_version=account.session_version + 1,
+            updated_at=datetime.now(UTC),
+        )
+        updated = self._accounts.save(updated)
+        self._sessions.revoke_account(account.id)
+        self._audit.record(
+            "account.role.change",
+            "success",
+            actor_id=actor_id,
+            object_type="account",
+            object_id=updated.id,
+            request_id=request_id,
+            metadata={"old_role": account.role.value, "role": role.value},
         )
         return updated

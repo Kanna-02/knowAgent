@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from fastapi.testclient import TestClient
 
 from knowagent_model.app import create_app
@@ -28,6 +30,23 @@ class StubEmbeddingService:
 
     async def ready(self) -> bool:
         return self.is_ready
+
+
+class SlowEmbeddingService:
+    def __init__(self) -> None:
+        self.cancelled = False
+
+    async def embed(self, *, model: str, texts: tuple[str, ...]) -> EmbeddingBatch:
+        del model, texts
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            self.cancelled = True
+            raise
+        raise AssertionError("slow embedding unexpectedly completed")
+
+    async def ready(self) -> bool:
+        return True
 
 
 class StubRerankService:
@@ -84,7 +103,12 @@ def test_embeddings_endpoint_rejects_blank_text_before_provider_call() -> None:
 
 def test_embeddings_endpoint_enforces_batch_and_text_limits() -> None:
     service = StubEmbeddingService()
-    settings = ModelServiceSettings(max_request_texts=1, max_text_chars=3, max_total_text_chars=3)
+    settings = ModelServiceSettings(
+        ollama_batch_size=1,
+        max_request_texts=1,
+        max_text_chars=3,
+        max_total_text_chars=3,
+    )
     with TestClient(create_app(service=service, settings=settings)) as client:
         batch_response = client.post(
             "/v1/embeddings", json={"model": "bge-m3", "texts": ["甲", "乙"]}
@@ -102,7 +126,12 @@ def test_embeddings_endpoint_enforces_batch_and_text_limits() -> None:
 
 def test_embeddings_endpoint_enforces_total_character_limit() -> None:
     service = StubEmbeddingService()
-    settings = ModelServiceSettings(max_request_texts=2, max_text_chars=3, max_total_text_chars=4)
+    settings = ModelServiceSettings(
+        ollama_batch_size=2,
+        max_request_texts=2,
+        max_text_chars=3,
+        max_total_text_chars=4,
+    )
     with TestClient(create_app(service=service, settings=settings)) as client:
         response = client.post(
             "/v1/embeddings", json={"model": "bge-m3", "texts": ["甲乙丙", "丁戊"]}
@@ -132,6 +161,18 @@ def test_embeddings_endpoint_sanitizes_provider_failure() -> None:
         }
     }
     assert "http" not in response.text.lower()
+
+
+def test_embeddings_endpoint_cancels_provider_when_total_timeout_expires() -> None:
+    service = SlowEmbeddingService()
+    settings = ModelServiceSettings(ollama_timeout_seconds=0.01)
+
+    with TestClient(create_app(service=service, settings=settings)) as client:
+        response = client.post("/v1/embeddings", json={"model": "bge-m3", "texts": ["问题"]})
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "OLLAMA_TIMEOUT"
+    assert service.cancelled is True
 
 
 def test_health_endpoints_distinguish_liveness_and_readiness() -> None:

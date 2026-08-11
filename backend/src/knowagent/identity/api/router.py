@@ -17,10 +17,11 @@ from knowagent.identity.api.dependencies import (
     get_password_hasher,
 )
 from knowagent.identity.api.schemas import (
+    AccountCreateRequest,
     AccountPage,
+    AccountRoleRequest,
     AccountStatusRequest,
     AccountView,
-    AdminCreateRequest,
     ChangePasswordRequest,
     CurrentUserView,
     LoginRequest,
@@ -115,19 +116,20 @@ def change_password(
 
 
 @router.post("/admin/accounts", response_model=AccountView, status_code=status.HTTP_201_CREATED)
-def create_admin_account(
-    payload: AdminCreateRequest,
+def create_account(
+    payload: AccountCreateRequest,
     request: Request,
     context: AdminCsrfContext,
     database: DatabaseSession,
     redis: RedisClient,
 ) -> AccountView:
     service = _account_service(request, database, redis)
-    account = service.create_admin(
+    account = service.create_account(
         actor_id=context.account.id,
         username=payload.username,
         display_name=payload.display_name,
         temporary_password=payload.temporary_password,
+        role=payload.role,
         request_id=request.state.request_id,
     )
     return AccountView.from_account(account)
@@ -174,6 +176,24 @@ def update_account_status(
         actor_id=context.account.id,
         account_id=account_id,
         status=payload.status,
+        request_id=request.state.request_id,
+    )
+    return AccountView.from_account(account)
+
+
+@router.patch("/admin/accounts/{account_id}/role", response_model=AccountView)
+def update_account_role(
+    account_id: UUID,
+    payload: AccountRoleRequest,
+    request: Request,
+    context: AdminCsrfContext,
+    database: DatabaseSession,
+    redis: RedisClient,
+) -> AccountView:
+    account = _account_service(request, database, redis).set_role(
+        actor_id=context.account.id,
+        account_id=account_id,
+        role=payload.role,
         request_id=request.state.request_id,
     )
     return AccountView.from_account(account)

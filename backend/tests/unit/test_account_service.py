@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -119,3 +120,51 @@ def test_create_admin_rejects_invalid_username() -> None:
             display_name="Second Admin",
             temporary_password="Temporary22@",
         )
+
+
+@pytest.mark.parametrize("role", [AccountRole.USER, AccountRole.SYSTEM_OWNER])
+def test_create_account_supports_user_and_system_owner(role: AccountRole) -> None:
+    service, accounts, _ = make_service()
+
+    created = service.create_account(
+        actor_id=uuid4(),
+        username="new.user",
+        display_name="New User",
+        temporary_password="welcome1",
+        role=role,
+    )
+
+    assert accounts.account == created
+    assert created.role is role
+    assert created.source is AccountSource.ADMIN_CREATED
+    assert created.must_change_password is True
+    assert created.password_hash == "hashed:welcome1"
+
+
+def test_set_role_rotates_sessions_and_persists_role_change() -> None:
+    service, accounts, sessions = make_service()
+    accounts.account = replace(accounts.account, role=AccountRole.USER)
+
+    updated = service.set_role(
+        actor_id=uuid4(),
+        account_id=accounts.account.id,
+        role=AccountRole.SYSTEM_OWNER,
+    )
+
+    assert updated.role is AccountRole.SYSTEM_OWNER
+    assert updated.session_version == 2
+    assert sessions.revoked == [updated.id]
+
+
+def test_set_role_rejects_removing_the_last_active_admin() -> None:
+    service, accounts, sessions = make_service()
+
+    with pytest.raises(ConflictError, match="最后一个有效管理员"):
+        service.set_role(
+            actor_id=uuid4(),
+            account_id=accounts.account.id,
+            role=AccountRole.USER,
+        )
+
+    assert accounts.locked is True
+    assert sessions.revoked == []

@@ -290,10 +290,11 @@ describe("route and shell workflows", () => {
     expect(adminLogout).toHaveBeenCalled();
   });
 
-  it("renders a system-owner label", async () => {
+  it("renders the question workspace for a system owner", async () => {
     const owner = { ...user, role: "SYSTEM_OWNER" as const };
     const view = await mount(<UserHomePage />, auth({ user: owner }), "/app");
-    expect(view.container.textContent).toContain("系统负责人");
+    expect(view.container.textContent).toContain("知识问答");
+    expect(view.container.querySelector('[aria-label="选择业务系统"]')).not.toBeNull();
   });
 
   it("keeps familiar buttons callable", async () => {

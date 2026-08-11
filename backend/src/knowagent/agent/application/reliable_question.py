@@ -33,6 +33,7 @@ from knowagent.retrieval.application.evidence import EvidenceOrganizer
 from knowagent.retrieval.domain.models import RetrievalResult
 
 GROUNDING_FAILURE_CODES = {
+    "ANSWER_NO_SUPPORTED_CLAIMS",
     "ANSWER_CITATION_REQUIRED",
     "ANSWER_CITATION_UNKNOWN",
     "ANSWER_CITATION_UNSUPPORTED",

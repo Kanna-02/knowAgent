@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from datetime import datetime
 from uuid import UUID
 
@@ -50,6 +51,7 @@ class ChunkIngestionService:
         document_version_id: UUID,
         manifest_key: str,
         now: datetime,
+        on_progress: Callable[[int, int], None] | None = None,
     ) -> tuple[UUID, int]:
         """Read the manifest, persist DRAFT knowledge chunks, return source id and chunk count.
 
@@ -86,7 +88,12 @@ class ChunkIngestionService:
             else:
                 source_id = existing_source.id
             chunk_count = repository.source_chunk_count(system_id=system_id, source_id=source_id)
-        self._run_indexing(system_id=system_id, source_id=source_id, now=now)
+        self._run_indexing(
+            system_id=system_id,
+            source_id=source_id,
+            now=now,
+            on_progress=on_progress,
+        )
         with self._session_factory.begin() as session:
             version = SqlAlchemyKnowledgeRepository(session).locked_version(
                 system_id=system_id, document_version_id=document_version_id
@@ -97,16 +104,35 @@ class ChunkIngestionService:
             version.updated_at = now
         return source_id, chunk_count
 
-    def _run_indexing(self, *, system_id: UUID, source_id: UUID, now: datetime) -> int:
+    def _run_indexing(
+        self,
+        *,
+        system_id: UUID,
+        source_id: UUID,
+        now: datetime,
+        on_progress: Callable[[int, int], None] | None = None,
+    ) -> int:
         loop = asyncio.new_event_loop()
         try:
             return loop.run_until_complete(
-                self.index_source(system_id=system_id, source_id=source_id, now=now)
+                self.index_source(
+                    system_id=system_id,
+                    source_id=source_id,
+                    now=now,
+                    on_progress=on_progress,
+                )
             )
         finally:
             loop.close()
 
-    async def index_source(self, *, system_id: UUID, source_id: UUID, now: datetime) -> int:
+    async def index_source(
+        self,
+        *,
+        system_id: UUID,
+        source_id: UUID,
+        now: datetime,
+        on_progress: Callable[[int, int], None] | None = None,
+    ) -> int:
         """Generate and store embeddings for a knowledge source.
 
         Returns the number of chunks indexed. Provider failures propagate so
@@ -119,7 +145,12 @@ class ChunkIngestionService:
             embeddings=self._embeddings,
             batch_size=self._embedding_batch_size,
         )
-        summary = await service.index_source(system_id=system_id, source_id=source_id, now=now)
+        summary = await service.index_source(
+            system_id=system_id,
+            source_id=source_id,
+            now=now,
+            on_batch=on_progress,
+        )
         return summary.chunk_count
 
     def _load_manifest(self, manifest_key: str) -> ChunkManifest:

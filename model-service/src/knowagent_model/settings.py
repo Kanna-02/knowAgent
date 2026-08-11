@@ -24,14 +24,14 @@ class ModelServiceSettings:  # pylint: disable=too-many-instance-attributes
     embedding_model_version: str = "ollama-bge-m3-79076464"
     ollama_model_digest: str = "79076464"
     embedding_dimension: int = 1024
-    ollama_timeout_seconds: float = 300.0
+    ollama_timeout_seconds: float = 240.0
     ollama_health_timeout_seconds: float = 5.0
-    ollama_batch_size: int = 1
+    ollama_batch_size: int = 4
     max_request_texts: int = 32
     max_text_chars: int = 12_000
     max_total_text_chars: int = 48_000
     ollama_max_concurrency: int = 1
-    ollama_keep_alive: str = "24h"
+    ollama_keep_alive: str = "10m"
     rerank_model: str = "BAAI/bge-reranker-v2-m3"
     rerank_model_path: str | None = None
     rerank_model_version: str = "BAAI-bge-reranker-v2-m3"
@@ -112,17 +112,17 @@ class ModelServiceSettings:  # pylint: disable=too-many-instance-attributes
             ).strip(),
             embedding_dimension=int(os.getenv("KNOWAGENT_MODEL_EMBEDDING_DIMENSION", "1024")),
             ollama_timeout_seconds=float(
-                os.getenv("KNOWAGENT_MODEL_OLLAMA_TIMEOUT_SECONDS", "300")
+                os.getenv("KNOWAGENT_MODEL_OLLAMA_TIMEOUT_SECONDS", "240")
             ),
             ollama_health_timeout_seconds=float(
                 os.getenv("KNOWAGENT_MODEL_OLLAMA_HEALTH_TIMEOUT_SECONDS", "5")
             ),
-            ollama_batch_size=int(os.getenv("KNOWAGENT_MODEL_OLLAMA_BATCH_SIZE", "1")),
+            ollama_batch_size=int(os.getenv("KNOWAGENT_MODEL_OLLAMA_BATCH_SIZE", "4")),
             max_request_texts=int(os.getenv("KNOWAGENT_MODEL_MAX_REQUEST_TEXTS", "32")),
             max_text_chars=int(os.getenv("KNOWAGENT_MODEL_MAX_TEXT_CHARS", "12000")),
             max_total_text_chars=int(os.getenv("KNOWAGENT_MODEL_MAX_TOTAL_TEXT_CHARS", "48000")),
             ollama_max_concurrency=int(os.getenv("KNOWAGENT_MODEL_OLLAMA_MAX_CONCURRENCY", "1")),
-            ollama_keep_alive=os.getenv("KNOWAGENT_MODEL_OLLAMA_KEEP_ALIVE", "24h").strip(),
+            ollama_keep_alive=os.getenv("KNOWAGENT_MODEL_OLLAMA_KEEP_ALIVE", "10m").strip(),
             rerank_model=os.getenv(
                 "KNOWAGENT_MODEL_RERANK_MODEL", "BAAI/bge-reranker-v2-m3"
             ).strip(),

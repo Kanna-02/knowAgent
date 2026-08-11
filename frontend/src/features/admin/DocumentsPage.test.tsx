@@ -143,6 +143,7 @@ afterEach(async () => {
   for (const view of views.reverse()) await view.unmount();
   views = [];
   document.body.innerHTML = "";
+  window.sessionStorage.clear();
   vi.restoreAllMocks();
 });
 
@@ -169,6 +170,13 @@ describe("DocumentsPage", () => {
 
     expect(upload).toHaveBeenCalledWith(system.id, file, expect.any(Object));
     expect(document.body.textContent).toContain("入库任务已完成");
+
+    await click(document.querySelector(".ant-modal-footer .ant-btn-default")!);
+    await flush();
+
+    expect(view.container.textContent).toContain("最近导入");
+    expect(view.container.textContent).toContain("100%");
+    expect(view.container.querySelector('[aria-label="查看导入进度"]')).not.toBeNull();
   });
 
   it("allows a failed ingestion job to be retried", async () => {
@@ -202,6 +210,46 @@ describe("DocumentsPage", () => {
     await flush();
     expect(retry).toHaveBeenCalledWith(ingestionJob.job_id);
     expect(document.body.textContent).toContain("入库任务已完成");
+  });
+
+  it("restores the latest ingestion job after the page is mounted again", async () => {
+    const runningJob = { ...ingestionJob, status: "RUNNING" as const, progress: 42 };
+    vi.spyOn(apiClient, "listSystems").mockResolvedValue([system]);
+    vi.spyOn(apiClient, "listDocuments").mockResolvedValue({ ...docPage, items: [] });
+    const getJob = vi.spyOn(apiClient, "getIngestionJob").mockResolvedValue(runningJob);
+    window.sessionStorage.setItem(`knowagent:ingestion-job:${system.id}`, runningJob.job_id);
+
+    const view = await mountWithAuth(<DocumentsPage />, auth, "/admin/documents");
+    views.push(view);
+    await settleChain();
+    await flush();
+
+    expect(getJob).toHaveBeenCalledWith(runningJob.job_id);
+    expect(view.container.textContent).toContain("42%");
+    expect(view.container.textContent).toContain("处理中");
+  });
+
+  it("keeps a long upload filename inside the upload dialog", async () => {
+    vi.spyOn(apiClient, "listSystems").mockResolvedValue([system]);
+    vi.spyOn(apiClient, "listDocuments").mockResolvedValue({ ...docPage, items: [] });
+
+    const view = await mountWithAuth(<DocumentsPage />, auth, "/admin/documents");
+    views.push(view);
+    await settleChain();
+    await click(view.container.querySelector('[aria-label="导入文档"]')!);
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(["# Guide\n"], `${"very-long-document-name-".repeat(12)}.md`, {
+      type: "text/markdown",
+    });
+    await act(async () => {
+      Object.defineProperty(input, "files", { configurable: true, value: [file] });
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    const filename = document.querySelector(".document-upload-form .ant-upload-list-item-name");
+    expect(filename).not.toBeNull();
+    expect(filename?.textContent).toContain("very-long-document-name");
   });
 
   it("loads systems and documents, then shows versions drawer", async () => {

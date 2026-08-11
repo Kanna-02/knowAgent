@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic import ValidationError as PydanticValidationError
@@ -30,15 +32,20 @@ class HttpRerankProvider:  # pylint: disable=too-few-public-methods
         base_url: str,
         model: str,
         timeout_seconds: int,
+        failure_cooldown_seconds: int = 60,
         client: httpx.AsyncClient | None = None,
     ) -> None:
         if not base_url.strip() or not model.strip():
             raise ValueError("rerank provider configuration is incomplete")
         if timeout_seconds <= 0:
             raise ValueError("rerank timeout must be positive")
+        if failure_cooldown_seconds <= 0:
+            raise ValueError("rerank failure cooldown must be positive")
         self._url = f"{base_url.rstrip('/')}/rerank"
         self._model = model
         self._timeout_seconds = timeout_seconds
+        self._failure_cooldown_seconds = failure_cooldown_seconds
+        self._failure_until = 0.0
         self._client = client
 
     async def rerank(
@@ -53,6 +60,8 @@ class HttpRerankProvider:  # pylint: disable=too-few-public-methods
             raise ValidationError("RERANK_INPUT_INVALID", "重排问题和候选文本不能为空")
         if top_k <= 0 or top_k > len(documents):
             raise ValidationError("RERANK_TOP_K_INVALID", "重排结果数量超出候选范围")
+        if time.monotonic() < self._failure_until:
+            raise ProviderUnavailableError("rerank")
 
         client = self._client or httpx.AsyncClient()
         owns_client = self._client is None
@@ -71,6 +80,7 @@ class HttpRerankProvider:  # pylint: disable=too-few-public-methods
                 raise ProviderUnavailableError("rerank")
             payload = _RerankResponse.model_validate(response.json())
             self._validate_response(payload=payload, document_count=len(documents), top_k=top_k)
+            self._failure_until = 0.0
             return RerankBatch(
                 model=payload.model,
                 model_version=payload.model_version,
@@ -79,7 +89,14 @@ class HttpRerankProvider:  # pylint: disable=too-few-public-methods
                     for result in payload.results
                 ),
             )
-        except (httpx.HTTPError, PydanticValidationError, ValueError, TypeError) as error:
+        except (
+            ProviderUnavailableError,
+            httpx.HTTPError,
+            PydanticValidationError,
+            ValueError,
+            TypeError,
+        ) as error:
+            self._failure_until = time.monotonic() + self._failure_cooldown_seconds
             raise ProviderUnavailableError("rerank") from error
         finally:
             if owns_client:

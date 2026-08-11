@@ -17,13 +17,14 @@ class LoginRequest(BaseModel):
 
 class ChangePasswordRequest(BaseModel):
     current_password: str = Field(min_length=1, max_length=256)
-    new_password: str = Field(min_length=12, max_length=256)
+    new_password: str = Field(min_length=8, max_length=256)
 
 
-class AdminCreateRequest(BaseModel):
+class AccountCreateRequest(BaseModel):
     username: str = Field(min_length=3, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]+$")
     display_name: str = Field(min_length=1, max_length=100)
-    temporary_password: str = Field(min_length=12, max_length=256)
+    temporary_password: str = Field(min_length=8, max_length=256)
+    role: AccountRole = AccountRole.ADMIN
 
     @field_validator("display_name")
     @classmethod
@@ -35,6 +36,10 @@ class AdminCreateRequest(BaseModel):
 
 class AccountStatusRequest(BaseModel):
     status: AccountStatus
+
+
+class AccountRoleRequest(BaseModel):
+    role: AccountRole
 
 
 class CurrentUserView(BaseModel):

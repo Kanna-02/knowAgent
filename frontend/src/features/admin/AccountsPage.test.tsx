@@ -125,8 +125,9 @@ function findDocumentElement(selector: string, text: string): Element {
 describe("AccountsPage", () => {
   it("loads, filters, paginates, creates, and changes account status", async () => {
     const listAccounts = vi.spyOn(apiClient, "listAccounts").mockResolvedValue(page);
-    const createAdmin = vi.spyOn(apiClient, "createAdmin").mockResolvedValue(accounts[2]!);
+    const createAccount = vi.spyOn(apiClient, "createAccount").mockResolvedValue(accounts[1]!);
     const setStatus = vi.spyOn(apiClient, "setAccountStatus").mockResolvedValue(accounts[0]!);
+    const setRole = vi.spyOn(apiClient, "setAccountRole").mockResolvedValue(accounts[0]!);
     const view = await mountPage();
 
     expect(view.container.textContent).toContain("alice");
@@ -163,20 +164,24 @@ describe("AccountsPage", () => {
     await flush();
     expect(listAccounts.mock.calls.length).toBeGreaterThan(3);
 
-    await click(findDocumentElement("button", "新增管理员"));
+    await click(findDocumentElement("button", "新增用户"));
     await flush();
-    await setInput(document.querySelector("#username") as HTMLInputElement, "second.admin");
-    await setInput(document.querySelector("#displayName") as HTMLInputElement, "Second Admin");
-    await setInput(
-      document.querySelector("#temporaryPassword") as HTMLInputElement,
-      "Temporary22@",
+    await setInput(document.querySelector("#username") as HTMLInputElement, "second.owner");
+    await setInput(document.querySelector("#displayName") as HTMLInputElement, "Second Owner");
+    await mouseDown(document.querySelector('[aria-label="新账号角色"]')!);
+    await flush();
+    const ownerRoleOptions = [...document.querySelectorAll(".ant-select-item-option")].filter(
+      (option) => option.textContent?.includes("系统负责人"),
     );
+    await click(ownerRoleOptions.at(-1)!);
+    await setInput(document.querySelector("#temporaryPassword") as HTMLInputElement, "welcome1");
     await click(findDocumentElement("button", "创建"));
     await flush();
-    expect(createAdmin).toHaveBeenCalledWith({
-      username: "second.admin",
-      display_name: "Second Admin",
-      temporary_password: "Temporary22@",
+    expect(createAccount).toHaveBeenCalledWith({
+      username: "second.owner",
+      display_name: "Second Owner",
+      temporary_password: "welcome1",
+      role: "SYSTEM_OWNER",
     });
 
     const statusButton = view.container.querySelector(
@@ -187,6 +192,22 @@ describe("AccountsPage", () => {
     await click(findDocumentElement("button", "确认"));
     await flush();
     expect(setStatus).toHaveBeenCalledWith(accounts[0]!.id, "DISABLED");
+
+    await click(
+      view.container.querySelector(
+        `[data-row-key="${accounts[0]!.id}"] [aria-label="修改账号角色"]`,
+      ) as Element,
+    );
+    await flush();
+    await mouseDown(document.querySelector('[aria-label="账号角色"]')!);
+    await flush();
+    const modalRoleOptions = [...document.querySelectorAll(".ant-select-item-option")].filter(
+      (option) => option.textContent?.includes("系统负责人"),
+    );
+    await click(modalRoleOptions.at(-1)!);
+    await click(findDocumentElement("button", "保存"));
+    await flush();
+    expect(setRole).toHaveBeenCalledWith(accounts[0]!.id, "SYSTEM_OWNER");
   });
 
   it("keeps the page usable when list and mutation requests fail", async () => {
@@ -202,7 +223,7 @@ describe("AccountsPage", () => {
         }),
       )
       .mockReturnValueOnce(retry.promise);
-    vi.spyOn(apiClient, "createAdmin").mockRejectedValue(new Error("network"));
+    vi.spyOn(apiClient, "createAccount").mockRejectedValue(new Error("network"));
     const setStatus = vi
       .spyOn(apiClient, "setAccountStatus")
       .mockRejectedValue(new Error("network"));
@@ -223,7 +244,7 @@ describe("AccountsPage", () => {
     await flush();
     expect(view.container.textContent).not.toContain("request-id");
 
-    await click(findDocumentElement("button", "新增管理员"));
+    await click(findDocumentElement("button", "新增用户"));
     await flush();
     await setInput(document.querySelector("#username") as HTMLInputElement, "second.admin");
     await setInput(document.querySelector("#displayName") as HTMLInputElement, "Second Admin");

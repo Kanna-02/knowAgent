@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
+from typing import cast
 from uuid import UUID, uuid4
 
 import pytest
@@ -14,9 +16,11 @@ from knowagent.agent.api.router import (
     _persist_stream_user_turn,
     _render_event,
     _sse_token_key,
+    _stream_resolution,
 )
 from knowagent.agent.api.schemas import SseAuthToken
 from knowagent.agent.application.conversation_service import ConversationService
+from knowagent.agent.application.reliable_question import ReliableQuestionService
 from knowagent.agent.domain.conversation import (
     ConversationMessageRole,
     IntentKind,
@@ -126,6 +130,34 @@ def test_refused_sse_payload_preserves_explicit_degradation_reasons() -> None:
     payload = json.loads(rendered.decode().removeprefix("data: "))
     assert payload["type"] == "refused"
     assert payload["degraded_reasons"] == ["VECTOR_UNAVAILABLE", "RERANK_UNAVAILABLE"]
+
+
+@pytest.mark.anyio
+async def test_stream_unexpected_failure_emits_terminal_error_event() -> None:
+    class FailingQuestionService:
+        retrieval_profile_name = "default"
+        retrieval_profile_version = "profile-v1"
+
+        async def resolve_stream(self, **_kwargs: object) -> AsyncIterator[QuestionStreamEvent]:
+            raise RuntimeError("retrieval crashed")
+            yield  # Make this an async generator for the service protocol.
+
+    chunks = [
+        chunk
+        async for chunk in _stream_resolution(
+            cast(ReliableQuestionService, FailingQuestionService()),
+            run_id=uuid4(),
+            requester_id=uuid4(),
+            system_id=uuid4(),
+            question="库外问题",
+            required_terms=(),
+        )
+    ]
+
+    assert len(chunks) == 1
+    payload = json.loads(chunks[0].decode().removeprefix("data: "))
+    assert payload["type"] == "error"
+    assert payload["code"] == "QUESTION_STREAM_FAILED"
 
 
 def test_stream_user_prelude_persists_user_question() -> None:

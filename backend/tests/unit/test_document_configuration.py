@@ -193,3 +193,10 @@ def test_llm_and_retrieval_settings_reject_invalid_boundaries() -> None:
         EvidencePolicySettings(degraded_score_multiplier=float("inf"))
     with pytest.raises(ValueError, match="deduplication"):
         TicketSettings(deduplication_window_hours=0)
+
+
+def test_retrieval_defaults_fit_cpu_embedding_request_budget() -> None:
+    settings = RetrievalSettings()
+
+    assert settings.embedding_batch_size == 4
+    assert settings.embedding_timeout_seconds == 300

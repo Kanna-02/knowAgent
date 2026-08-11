@@ -189,10 +189,8 @@ class AuthService:
 
 def password_violations(password: str) -> list[str]:
     checks = (
-        (len(password) >= 12, "至少 12 个字符"),
-        (any(character.islower() for character in password), "包含小写字母"),
-        (any(character.isupper() for character in password), "包含大写字母"),
+        (len(password) >= 8, "至少 8 个字符"),
+        (any(character.isalpha() for character in password), "包含字母"),
         (any(character.isdigit() for character in password), "包含数字"),
-        (any(not character.isalnum() for character in password), "包含特殊字符"),
     )
     return [message for valid, message in checks if not valid]
