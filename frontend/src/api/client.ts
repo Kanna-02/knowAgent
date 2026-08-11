@@ -15,6 +15,8 @@ import type {
   DocumentVersionPage,
   CurrentUser,
   FrequentQuestionPage,
+  IngestionJobPage,
+  IngestionJobStatus,
   IngestionJobView,
   KnowledgeGapPage,
   NotificationConfigurationUpdate,
@@ -353,12 +355,13 @@ export class ApiClient {
 
   async listDocuments(
     systemId: string,
-    filters: { page: number; pageSize: number },
+    filters: { page: number; pageSize: number; search?: string },
   ): Promise<DocumentPage> {
     const query = new URLSearchParams({
       page: String(filters.page),
       page_size: String(filters.pageSize),
     });
+    if (filters.search?.trim()) query.set("search", filters.search.trim());
     return this.request<DocumentPage>(`/systems/${systemId}/documents?${query.toString()}`);
   }
 
@@ -376,6 +379,20 @@ export class ApiClient {
       headers: { "Idempotency-Key": options.idempotencyKey ?? crypto.randomUUID() },
       body: form,
     });
+  }
+
+  async listIngestionJobs(
+    systemId: string,
+    filters: { page: number; pageSize: number; statuses?: IngestionJobStatus[] },
+  ): Promise<IngestionJobPage> {
+    const query = new URLSearchParams({
+      page: String(filters.page),
+      page_size: String(filters.pageSize),
+    });
+    for (const status of filters.statuses ?? []) query.append("status", status);
+    return this.request<IngestionJobPage>(
+      `/systems/${systemId}/ingestion-jobs?${query.toString()}`,
+    );
   }
 
   async getIngestionJob(jobId: string): Promise<IngestionJobView> {

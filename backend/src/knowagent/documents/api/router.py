@@ -13,17 +13,24 @@ from fastapi import (
     File,
     Form,
     Header,
+    Query,
     Request,
     UploadFile,
     status,
 )
+from sqlalchemy import func, select
 
 from knowagent.common.errors import AuthorizationError, KnowAgentError, NotFoundError
-from knowagent.documents.api.schemas import IngestionJobView
+from knowagent.documents.api.schemas import IngestionJobPage, IngestionJobView
 from knowagent.documents.application.ingestion_service import DocumentIngestionService
 from knowagent.documents.domain.ingestion import IngestionBundle, IngestionStatus
 from knowagent.documents.infrastructure.parsers import ParserLimits
 from knowagent.documents.infrastructure.parsers.registry import ParserRegistry
+from knowagent.documents.infrastructure.sqlalchemy_models import (
+    DocumentRecord,
+    DocumentVersionRecord,
+    IngestionJobRecord,
+)
 from knowagent.documents.infrastructure.sqlalchemy_repository import (
     SqlAlchemyIngestionCoordinator,
     SqlAlchemyIngestionRepository,
@@ -40,6 +47,9 @@ from knowagent.identity.infrastructure.sqlalchemy_repository import SqlAlchemyAu
 from knowagent.platform.object_store import ObjectStoreError, S3ObjectStore
 from knowagent.systems.domain.models import SystemRole, SystemRoleAssignment
 from knowagent.systems.infrastructure.sqlalchemy_repository import SqlAlchemySystemRepository
+
+# SQLAlchemy dynamic namespaces trigger false positives on func.count().
+# pylint: disable=not-callable
 
 LOGGER = logging.getLogger(__name__)
 router = APIRouter()
@@ -135,6 +145,53 @@ def get_ingestion_job(
         database=database,
     )
     return IngestionJobView.from_bundle(bundle)
+
+
+@router.get("/systems/{system_id}/ingestion-jobs", response_model=IngestionJobPage)
+def list_ingestion_jobs(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    system_id: UUID,
+    context: CurrentContextDependency,
+    auth: AuthServiceDependency,
+    database: DatabaseSession,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+    status_filters: Annotated[list[IngestionStatus] | None, Query(alias="status")] = None,
+) -> IngestionJobPage:
+    _require_system_access(
+        system_id=system_id,
+        account=context.account,
+        auth=auth,
+        database=database,
+    )
+    conditions = [IngestionJobRecord.system_id == system_id]
+    if status_filters:
+        conditions.append(IngestionJobRecord.status.in_(status_filters))
+    total = database.scalar(select(func.count()).select_from(IngestionJobRecord).where(*conditions))
+    rows = database.execute(
+        select(IngestionJobRecord, DocumentVersionRecord, DocumentRecord)
+        .join(
+            DocumentVersionRecord,
+            DocumentVersionRecord.id == IngestionJobRecord.document_version_id,
+        )
+        .join(
+            DocumentRecord,
+            (DocumentRecord.id == DocumentVersionRecord.document_id)
+            & (DocumentRecord.system_id == IngestionJobRecord.system_id),
+        )
+        .where(*conditions)
+        .order_by(IngestionJobRecord.updated_at.desc(), IngestionJobRecord.id.desc())
+        .limit(page_size)
+        .offset((page - 1) * page_size)
+    ).all()
+    return IngestionJobPage(
+        items=[
+            _job_view_from_records(job=job, version=version, document=document)
+            for job, version, document in rows
+        ],
+        page=page,
+        page_size=page_size,
+        total=int(total or 0),
+    )
 
 
 @router.post(
@@ -235,6 +292,38 @@ def _bundle_or_404(repository: SqlAlchemyIngestionRepository, job_id: UUID) -> I
     if bundle is None:
         raise NotFoundError("INGESTION_JOB_NOT_FOUND", "入库任务不存在")
     return bundle
+
+
+def _job_view_from_records(
+    *,
+    job: IngestionJobRecord,
+    version: DocumentVersionRecord,
+    document: DocumentRecord,
+) -> IngestionJobView:
+    return IngestionJobView(
+        job_id=job.id,
+        document_id=document.id,
+        document_version_id=version.id,
+        version_no=version.version_no,
+        system_id=document.system_id,
+        document_name=document.name,
+        filename=version.filename,
+        media_type=version.media_type,
+        version_status=version.status,
+        publish_status=version.publish_status,
+        status=job.status,
+        stage=job.stage,
+        progress=job.progress,
+        attempt=job.attempt,
+        max_attempts=job.max_attempts,
+        error_code=job.error_code,
+        error_message=job.error_message,
+        next_retry_at=job.next_retry_at,
+        lease_expires_at=job.lease_expires_at,
+        celery_task_id=job.celery_task_id,
+        created_at=job.created_at,
+        updated_at=job.updated_at,
+    )
 
 
 def _dispatch_job(application: FastAPI, job_id: UUID) -> None:

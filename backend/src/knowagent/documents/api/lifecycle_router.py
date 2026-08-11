@@ -6,6 +6,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Query, Request, status
 from sqlalchemy import func, select
+from sqlalchemy.orm import aliased
 
 from knowagent.common.errors import NotFoundError
 from knowagent.common.lifecycle import PublicationStatus
@@ -17,6 +18,7 @@ from knowagent.documents.api.lifecycle_schemas import (
     PublishVersionResponse,
     RetireVersionResponse,
 )
+from knowagent.documents.domain.ingestion import DocumentVersionStatus
 from knowagent.documents.infrastructure.sqlalchemy_models import (
     DocumentRecord,
     DocumentVersionRecord,
@@ -52,6 +54,7 @@ def list_documents(  # pylint: disable=too-many-arguments,too-many-positional-ar
     database: DatabaseSession,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+    search: Annotated[str | None, Query(max_length=255)] = None,
 ) -> DocumentPage:
     auth.authorize(context.account, allowed_roles=MANAGEMENT_ROLES)
     require_system_access(
@@ -60,16 +63,64 @@ def list_documents(  # pylint: disable=too-many-arguments,too-many-positional-ar
         database=database,
     )
     conditions = [DocumentRecord.system_id == system_id]
+    if search and search.strip():
+        conditions.append(DocumentRecord.name.contains(search.strip(), autoescape=True))
     total = database.scalar(select(func.count()).select_from(DocumentRecord).where(*conditions))
-    records = database.scalars(
-        select(DocumentRecord)
+
+    version_summary = (
+        select(
+            DocumentVersionRecord.document_id.label("document_id"),
+            func.count().label("version_count"),
+            func.max(DocumentVersionRecord.version_no).label("latest_version_no"),
+        )
+        .group_by(DocumentVersionRecord.document_id)
+        .subquery()
+    )
+    latest_version = aliased(DocumentVersionRecord)
+    current_version = aliased(DocumentVersionRecord)
+    rows = database.execute(
+        select(
+            DocumentRecord,
+            version_summary.c.version_count,
+            version_summary.c.latest_version_no,
+            latest_version.status,
+            current_version.version_no,
+        )
+        .outerjoin(
+            version_summary,
+            version_summary.c.document_id == DocumentRecord.id,
+        )
+        .outerjoin(
+            latest_version,
+            (latest_version.document_id == DocumentRecord.id)
+            & (latest_version.version_no == version_summary.c.latest_version_no),
+        )
+        .outerjoin(
+            current_version,
+            current_version.id == DocumentRecord.current_published_version_id,
+        )
         .where(*conditions)
-        .order_by(DocumentRecord.updated_at.desc())
+        .order_by(DocumentRecord.updated_at.desc(), DocumentRecord.id.desc())
         .limit(page_size)
         .offset((page - 1) * page_size)
     ).all()
     return DocumentPage(
-        items=[_to_document_view(record) for record in records],
+        items=[
+            _to_document_view(
+                record,
+                version_count=int(version_count or 0),
+                latest_version_no=latest_version_no,
+                latest_version_status=latest_version_status,
+                current_published_version_no=current_published_version_no,
+            )
+            for (
+                record,
+                version_count,
+                latest_version_no,
+                latest_version_status,
+                current_published_version_no,
+            ) in rows
+        ],
         page=page,
         page_size=page_size,
         total=int(total or 0),
@@ -222,12 +273,23 @@ def retire_document_version(  # pylint: disable=too-many-arguments,too-many-posi
     )
 
 
-def _to_document_view(record: DocumentRecord) -> DocumentView:
+def _to_document_view(
+    record: DocumentRecord,
+    *,
+    current_published_version_no: int | None,
+    latest_version_no: int | None,
+    latest_version_status: DocumentVersionStatus | None,
+    version_count: int,
+) -> DocumentView:
     return DocumentView(
         id=record.id,
         system_id=record.system_id,
         name=record.name,
         current_published_version_id=record.current_published_version_id,
+        current_published_version_no=current_published_version_no,
+        latest_version_no=latest_version_no,
+        latest_version_status=latest_version_status,
+        version_count=version_count,
         created_at=_aware(record.created_at),
         updated_at=_aware(record.updated_at),
     )

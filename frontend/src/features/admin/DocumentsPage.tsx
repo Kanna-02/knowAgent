@@ -3,32 +3,51 @@ import {
   App,
   Button,
   Drawer,
+  Input,
   Modal,
   Popconfirm,
   Progress,
   Select,
   Space,
   Table,
+  Tabs,
   Tag,
   Tooltip,
   Upload,
 } from "antd";
 import type { TablePaginationConfig } from "antd/es/table";
 import type { UploadFile } from "antd/es/upload/interface";
-import { Archive, ChevronRight, Eye, FileText, RefreshCw, Rocket, UploadCloud } from "lucide-react";
+import {
+  Archive,
+  ChevronRight,
+  Eye,
+  FilePlus2,
+  FileText,
+  RefreshCw,
+  Rocket,
+  Search,
+  UploadCloud,
+} from "lucide-react";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { apiClient } from "../../api/client";
 import type {
   BusinessSystemView,
-  DocumentView,
+  DocumentVersionStatus,
   DocumentVersionView,
+  DocumentView,
+  IngestionJobStatus,
   IngestionJobView,
   PublicationStatus,
 } from "../../api/types";
 import { FeedbackState } from "../../shared/FeedbackState";
 import { toUiError, type UiError } from "../../shared/uiError";
+
+type ManagementView = "documents" | "jobs";
+type JobFilter = "ALL" | "ACTIVE" | "SUCCEEDED" | "FAILED";
+
+const ACTIVE_JOB_STATUSES: IngestionJobStatus[] = ["QUEUED", "RUNNING", "RETRY_SCHEDULED"];
 
 const publishStatusLabels: Record<PublicationStatus, { label: string; color: string }> = {
   DRAFT: { label: "草稿", color: "default" },
@@ -36,12 +55,29 @@ const publishStatusLabels: Record<PublicationStatus, { label: string; color: str
   RETIRED: { label: "已退役", color: "warning" },
 };
 
-const ingestionStatusLabels: Record<IngestionJobView["status"], string> = {
-  QUEUED: "排队中",
-  RUNNING: "处理中",
-  RETRY_SCHEDULED: "等待重试",
-  SUCCEEDED: "已完成",
-  FAILED: "失败",
+const versionStatusLabels: Record<DocumentVersionStatus, { label: string; color: string }> = {
+  UPLOADED: { label: "等待处理", color: "default" },
+  PARSING: { label: "解析中", color: "processing" },
+  CHUNKING: { label: "切分中", color: "processing" },
+  CHUNKED: { label: "索引中", color: "processing" },
+  READY_DRAFT: { label: "待发布", color: "success" },
+  OCR_REQUIRED: { label: "需要 OCR", color: "warning" },
+  FAILED: { label: "处理失败", color: "error" },
+};
+
+const ingestionStatusLabels: Record<IngestionJobStatus, { label: string; color: string }> = {
+  QUEUED: { label: "排队中", color: "default" },
+  RUNNING: { label: "处理中", color: "processing" },
+  RETRY_SCHEDULED: { label: "等待重试", color: "warning" },
+  SUCCEEDED: { label: "已完成", color: "success" },
+  FAILED: { label: "失败", color: "error" },
+};
+
+const ingestionStageLabels: Record<IngestionJobView["stage"], string> = {
+  STORED: "文件已保存",
+  PARSING: "解析文档",
+  CHUNKING: "切分与索引",
+  COMPLETED: "索引完成",
 };
 
 function ingestionStatusLabel(job: IngestionJobView): string {
@@ -50,46 +86,19 @@ function ingestionStatusLabel(job: IngestionJobView): string {
     job.lease_expires_at !== null &&
     new Date(job.lease_expires_at).getTime() < Date.now()
   ) {
-    return "处理超时，等待重试";
+    return "处理超时，等待恢复";
   }
-  return ingestionStatusLabels[job.status];
+  return ingestionStatusLabels[job.status].label;
 }
 
-const ingestionStageLabels: Record<IngestionJobView["stage"], string> = {
-  STORED: "文件已保存",
-  PARSING: "解析文档",
-  CHUNKING: "切分知识片段",
-  COMPLETED: "索引完成",
-};
-
-const INGESTION_JOB_STORAGE_PREFIX = "knowagent:ingestion-job:";
-
-function ingestionJobStorageKey(systemId: string): string {
-  return `${INGESTION_JOB_STORAGE_PREFIX}${systemId}`;
+function jobStatuses(filter: JobFilter): IngestionJobStatus[] | undefined {
+  if (filter === "ACTIVE") return ACTIVE_JOB_STATUSES;
+  if (filter === "SUCCEEDED" || filter === "FAILED") return [filter];
+  return undefined;
 }
 
-function readStoredIngestionJobId(systemId: string): string | null {
-  try {
-    return window.sessionStorage.getItem(ingestionJobStorageKey(systemId));
-  } catch {
-    return null;
-  }
-}
-
-function writeStoredIngestionJobId(systemId: string, jobId: string): void {
-  try {
-    window.sessionStorage.setItem(ingestionJobStorageKey(systemId), jobId);
-  } catch {
-    // Storage can be unavailable in privacy-restricted browsers; polling still works in-page.
-  }
-}
-
-function clearStoredIngestionJobId(systemId: string): void {
-  try {
-    window.sessionStorage.removeItem(ingestionJobStorageKey(systemId));
-  } catch {
-    // Ignore storage errors; the server remains the source of truth.
-  }
+function isActiveJob(job: IngestionJobView): boolean {
+  return ACTIVE_JOB_STATUSES.includes(job.status);
 }
 
 function formatFileSize(bytes: number): string {
@@ -115,6 +124,7 @@ export function DocumentsPage(): ReactNode {
   const [systemsLoading, setSystemsLoading] = useState(true);
   const [systemsError, setSystemsError] = useState<UiError | null>(null);
   const [selectedSystemId, setSelectedSystemId] = useState<string | null>(null);
+  const [activeView, setActiveView] = useState<ManagementView>("documents");
 
   const [documents, setDocuments] = useState<DocumentView[]>([]);
   const [docsLoading, setDocsLoading] = useState(false);
@@ -122,14 +132,31 @@ export function DocumentsPage(): ReactNode {
   const [docsPage, setDocsPage] = useState(1);
   const [docsPageSize, setDocsPageSize] = useState(20);
   const [docsTotal, setDocsTotal] = useState(0);
+  const [documentQuery, setDocumentQuery] = useState("");
+  const [appliedDocumentQuery, setAppliedDocumentQuery] = useState("");
+
+  const [jobs, setJobs] = useState<IngestionJobView[]>([]);
+  const [jobsLoading, setJobsLoading] = useState(false);
+  const [jobsError, setJobsError] = useState<UiError | null>(null);
+  const [jobsPage, setJobsPage] = useState(1);
+  const [jobsPageSize, setJobsPageSize] = useState(20);
+  const [jobsTotal, setJobsTotal] = useState(0);
+  const [jobFilter, setJobFilter] = useState<JobFilter>("ALL");
+  const [selectedJob, setSelectedJob] = useState<IngestionJobView | null>(null);
+  const [jobActionId, setJobActionId] = useState<string | null>(null);
 
   const [versions, setVersions] = useState<DocumentVersionView[]>([]);
   const [versionsLoading, setVersionsLoading] = useState(false);
   const [versionsError, setVersionsError] = useState<UiError | null>(null);
   const [versionsDrawerOpen, setVersionsDrawerOpen] = useState(false);
+  const [versionsPage, setVersionsPage] = useState(1);
+  const [versionsPageSize, setVersionsPageSize] = useState(20);
+  const [versionsTotal, setVersionsTotal] = useState(0);
   const [selectedDocument, setSelectedDocument] = useState<DocumentView | null>(null);
-  const [actionLoading, setActionLoading] = useState(false);
+  const [versionActionId, setVersionActionId] = useState<string | null>(null);
+
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadTarget, setUploadTarget] = useState<DocumentView | null>(null);
   const [uploadFileList, setUploadFileList] = useState<UploadFile[]>([]);
   const [uploadName, setUploadName] = useState("");
   const [uploadJob, setUploadJob] = useState<IngestionJobView | null>(null);
@@ -138,8 +165,8 @@ export function DocumentsPage(): ReactNode {
 
   const systemsRequestId = useRef(0);
   const docsRequestId = useRef(0);
+  const jobsRequestId = useRef(0);
   const versionsRequestId = useRef(0);
-  const ingestionRequestId = useRef(0);
   const selectedSystemIdRef = useRef<string | null>(null);
 
   const loadSystems = useCallback(async (): Promise<void> => {
@@ -147,13 +174,12 @@ export function DocumentsPage(): ReactNode {
     setSystemsLoading(true);
     try {
       const result = await apiClient.listSystems("ACTIVE");
-      if (requestId === systemsRequestId.current) {
-        setSystems(result);
-        setSystemsError(null);
-        if (result.length && !selectedSystemIdRef.current) {
-          selectedSystemIdRef.current = result[0]!.id;
-          setSelectedSystemId(result[0]!.id);
-        }
+      if (requestId !== systemsRequestId.current) return;
+      setSystems(result);
+      setSystemsError(null);
+      if (result.length && !selectedSystemIdRef.current) {
+        selectedSystemIdRef.current = result[0]!.id;
+        setSelectedSystemId(result[0]!.id);
       }
     } catch (error: unknown) {
       if (requestId === systemsRequestId.current) {
@@ -169,6 +195,7 @@ export function DocumentsPage(): ReactNode {
       systemId: string,
       targetPage = docsPage,
       targetPageSize = docsPageSize,
+      targetSearch = appliedDocumentQuery,
     ): Promise<void> => {
       const requestId = ++docsRequestId.current;
       setDocsLoading(true);
@@ -176,12 +203,12 @@ export function DocumentsPage(): ReactNode {
         const result = await apiClient.listDocuments(systemId, {
           page: targetPage,
           pageSize: targetPageSize,
+          ...(targetSearch.trim() ? { search: targetSearch.trim() } : {}),
         });
-        if (requestId === docsRequestId.current) {
-          setDocuments(result.items);
-          setDocsTotal(result.total);
-          setDocsError(null);
-        }
+        if (requestId !== docsRequestId.current) return;
+        setDocuments(result.items);
+        setDocsTotal(result.total);
+        setDocsError(null);
       } catch (error: unknown) {
         if (requestId === docsRequestId.current) {
           setDocsError(toUiError(error, "文档列表加载失败"));
@@ -190,29 +217,71 @@ export function DocumentsPage(): ReactNode {
         if (requestId === docsRequestId.current) setDocsLoading(false);
       }
     },
-    [docsPage, docsPageSize],
+    [appliedDocumentQuery, docsPage, docsPageSize],
   );
 
-  const loadVersions = useCallback(async (systemId: string, documentId: string): Promise<void> => {
-    const requestId = ++versionsRequestId.current;
-    setVersionsLoading(true);
-    try {
-      const result = await apiClient.listDocumentVersions(systemId, documentId, {
-        page: 1,
-        pageSize: 100,
-      });
-      if (requestId === versionsRequestId.current) {
+  const loadJobs = useCallback(
+    async (
+      systemId: string,
+      targetPage = jobsPage,
+      targetPageSize = jobsPageSize,
+      targetFilter = jobFilter,
+    ): Promise<void> => {
+      const requestId = ++jobsRequestId.current;
+      setJobsLoading(true);
+      try {
+        const statuses = jobStatuses(targetFilter);
+        const result = await apiClient.listIngestionJobs(systemId, {
+          page: targetPage,
+          pageSize: targetPageSize,
+          ...(statuses ? { statuses } : {}),
+        });
+        if (requestId !== jobsRequestId.current) return;
+        setJobs(result.items);
+        setJobsTotal(result.total);
+        setJobsError(null);
+        setSelectedJob((current) =>
+          current ? (result.items.find((job) => job.job_id === current.job_id) ?? current) : null,
+        );
+      } catch (error: unknown) {
+        if (requestId === jobsRequestId.current) {
+          setJobsError(toUiError(error, "导入任务加载失败"));
+        }
+      } finally {
+        if (requestId === jobsRequestId.current) setJobsLoading(false);
+      }
+    },
+    [jobFilter, jobsPage, jobsPageSize],
+  );
+
+  const loadVersions = useCallback(
+    async (
+      systemId: string,
+      documentId: string,
+      targetPage = versionsPage,
+      targetPageSize = versionsPageSize,
+    ): Promise<void> => {
+      const requestId = ++versionsRequestId.current;
+      setVersionsLoading(true);
+      try {
+        const result = await apiClient.listDocumentVersions(systemId, documentId, {
+          page: targetPage,
+          pageSize: targetPageSize,
+        });
+        if (requestId !== versionsRequestId.current) return;
         setVersions(result.items);
+        setVersionsTotal(result.total);
         setVersionsError(null);
+      } catch (error: unknown) {
+        if (requestId === versionsRequestId.current) {
+          setVersionsError(toUiError(error, "版本列表加载失败"));
+        }
+      } finally {
+        if (requestId === versionsRequestId.current) setVersionsLoading(false);
       }
-    } catch (error: unknown) {
-      if (requestId === versionsRequestId.current) {
-        setVersionsError(toUiError(error, "版本列表加载失败"));
-      }
-    } finally {
-      if (requestId === versionsRequestId.current) setVersionsLoading(false);
-    }
-  }, []);
+    },
+    [versionsPage, versionsPageSize],
+  );
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => void loadSystems(), 0);
@@ -232,91 +301,78 @@ export function DocumentsPage(): ReactNode {
   }, [selectedSystemId, loadDocuments]);
 
   useEffect(() => {
-    const requestId = ++ingestionRequestId.current;
-    const timeoutId = window.setTimeout(() => {
-      if (!selectedSystemId) {
-        setUploadJob(null);
-        return;
-      }
-      const storedJobId = readStoredIngestionJobId(selectedSystemId);
-      if (!storedJobId) {
-        setUploadJob(null);
-        setUploadError(null);
-        return;
-      }
-      setUploadJob(null);
-      setUploadError(null);
-      void apiClient
-        .getIngestionJob(storedJobId)
-        .then((job) => {
-          if (requestId !== ingestionRequestId.current || job.system_id !== selectedSystemId)
-            return;
-          setUploadJob(job);
-        })
-        .catch((error: unknown) => {
-          if (requestId !== ingestionRequestId.current) return;
-          if ((error as { status?: number }).status === 404) {
-            clearStoredIngestionJobId(selectedSystemId);
-            return;
-          }
-          setUploadError(toUiError(error, "入库任务状态获取失败"));
-        });
-    }, 0);
+    if (!selectedSystemId) return;
+    const timeoutId = window.setTimeout(() => void loadJobs(selectedSystemId), 0);
     return () => {
       window.clearTimeout(timeoutId);
-      ingestionRequestId.current += 1;
+      jobsRequestId.current += 1;
     };
-  }, [selectedSystemId]);
+  }, [selectedSystemId, loadJobs]);
 
-  const openVersions = (doc: DocumentView): void => {
-    setSelectedDocument(doc);
+  useEffect(() => {
+    if (!selectedSystemId || !jobs.some(isActiveJob)) return;
+    const timeoutId = window.setTimeout(
+      () => void loadJobs(selectedSystemId, jobsPage, jobsPageSize, jobFilter),
+      2500,
+    );
+    return () => window.clearTimeout(timeoutId);
+  }, [jobFilter, jobs, jobsPage, jobsPageSize, loadJobs, selectedSystemId]);
+
+  useEffect(() => {
+    if (!uploadJob || !isActiveJob(uploadJob)) return;
+    const timeoutId = window.setTimeout(() => {
+      void apiClient
+        .getIngestionJob(uploadJob.job_id)
+        .then((job) => {
+          setUploadJob(job);
+          setUploadError(null);
+          setSelectedJob((current) => (current?.job_id === job.job_id ? job : current));
+          if (!isActiveJob(job) && selectedSystemId) {
+            void loadJobs(selectedSystemId);
+            void loadDocuments(selectedSystemId);
+          }
+        })
+        .catch((error: unknown) => {
+          setUploadError(toUiError(error, "入库任务状态获取失败"));
+        });
+    }, 2000);
+    return () => window.clearTimeout(timeoutId);
+  }, [loadDocuments, loadJobs, selectedSystemId, uploadJob]);
+
+  const selectSystem = (value: string): void => {
+    selectedSystemIdRef.current = value;
+    setSelectedSystemId(value);
+    setDocsPage(1);
+    setJobsPage(1);
+    setSelectedJob(null);
+    setUploadJob(null);
+  };
+
+  const refreshCurrentView = (): void => {
+    void loadSystems();
+    if (!selectedSystemId) return;
+    if (activeView === "documents") void loadDocuments(selectedSystemId);
+    else void loadJobs(selectedSystemId);
+  };
+
+  const applyDocumentSearch = (): void => {
+    setDocsPage(1);
+    setAppliedDocumentQuery(documentQuery.trim());
+  };
+
+  const openVersions = (document: DocumentView): void => {
+    setSelectedDocument(document);
+    setVersionsPage(1);
     setVersionsDrawerOpen(true);
-    if (selectedSystemId) void loadVersions(selectedSystemId, doc.id);
+    if (selectedSystemId) void loadVersions(selectedSystemId, document.id, 1, versionsPageSize);
   };
 
-  const publishVersion = async (version: DocumentVersionView): Promise<void> => {
-    if (!selectedSystemId || !selectedDocument) return;
-    setActionLoading(true);
-    try {
-      await apiClient.publishDocumentVersion(selectedSystemId, selectedDocument.id, version.id);
-      void message.success("版本已发布");
-      await loadVersions(selectedSystemId, selectedDocument.id);
-      await loadDocuments(selectedSystemId, docsPage, docsPageSize);
-    } catch (error: unknown) {
-      void message.error(toUiError(error, "版本发布失败").message);
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  const retireVersion = async (version: DocumentVersionView): Promise<void> => {
-    if (!selectedSystemId || !selectedDocument) return;
-    setActionLoading(true);
-    try {
-      await apiClient.retireDocumentVersion(selectedSystemId, selectedDocument.id, version.id);
-      void message.success("版本已退役");
-      await loadVersions(selectedSystemId, selectedDocument.id);
-      await loadDocuments(selectedSystemId, docsPage, docsPageSize);
-    } catch (error: unknown) {
-      void message.error(toUiError(error, "版本退役失败").message);
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  const openUpload = (): void => {
+  const openUpload = (target: DocumentView | null = null): void => {
+    setUploadTarget(target);
     setUploadFileList([]);
     setUploadName("");
+    setUploadJob(null);
     setUploadError(null);
-    setUploadOpen(true);
-  };
-
-  const closeUpload = (): void => {
-    if (uploading) return;
-    setUploadOpen(false);
-  };
-
-  const showUploadProgress = (): void => {
     setUploadOpen(true);
   };
 
@@ -330,13 +386,17 @@ export function DocumentsPage(): ReactNode {
     setUploadError(null);
     try {
       const job = await apiClient.uploadDocument(selectedSystemId, file, {
-        documentName: uploadName,
+        ...(uploadTarget ? { documentId: uploadTarget.id } : { documentName: uploadName }),
       });
-      writeStoredIngestionJobId(selectedSystemId, job.job_id);
       setUploadJob(job);
-      void message.success("文档已提交入库");
-      await loadDocuments(selectedSystemId, 1, docsPageSize);
+      setUploadFileList([]);
+      void message.success(uploadTarget ? "新版本已提交导入" : "文档已提交导入");
       setDocsPage(1);
+      setJobsPage(1);
+      await Promise.all([
+        loadDocuments(selectedSystemId, 1, docsPageSize),
+        loadJobs(selectedSystemId, 1, jobsPageSize),
+      ]);
     } catch (error: unknown) {
       setUploadError(toUiError(error, "文档导入失败"));
     } finally {
@@ -344,89 +404,362 @@ export function DocumentsPage(): ReactNode {
     }
   };
 
-  const retryUpload = async (): Promise<void> => {
-    if (!uploadJob) return;
-    setUploading(true);
-    setUploadError(null);
+  const retryJob = async (job: IngestionJobView): Promise<void> => {
+    setJobActionId(job.job_id);
     try {
-      setUploadJob(await apiClient.retryIngestionJob(uploadJob.job_id));
+      const retried = await apiClient.retryIngestionJob(job.job_id);
+      setSelectedJob((current) => (current?.job_id === retried.job_id ? retried : current));
+      setUploadJob((current) => (current?.job_id === retried.job_id ? retried : current));
+      void message.success("导入任务已重新排队");
+      if (selectedSystemId) await loadJobs(selectedSystemId);
     } catch (error: unknown) {
-      setUploadError(toUiError(error, "入库任务重试失败"));
+      void message.error(toUiError(error, "导入任务重试失败").message);
     } finally {
-      setUploading(false);
+      setJobActionId(null);
     }
   };
 
-  useEffect(() => {
-    if (!uploadJob || uploadJob.status === "SUCCEEDED" || uploadJob.status === "FAILED") return;
-    const timerId = window.setTimeout(() => {
-      void apiClient
-        .getIngestionJob(uploadJob.job_id)
-        .then((job) => {
-          if (selectedSystemId && job.system_id === selectedSystemId) {
-            writeStoredIngestionJobId(selectedSystemId, job.job_id);
-            setUploadError(null);
-            setUploadJob(job);
-          }
-        })
-        .catch((error: unknown) => {
-          if ((error as { status?: number }).status === 404 && selectedSystemId) {
-            clearStoredIngestionJobId(selectedSystemId);
-            setUploadJob(null);
-            return;
-          }
-          setUploadError(toUiError(error, "入库任务状态获取失败"));
-          // Keep polling after a transient status request failure.
-          setUploadJob((current) => (current ? { ...current } : current));
-        });
-    }, 2000);
-    return () => window.clearTimeout(timerId);
-  }, [selectedSystemId, uploadJob]);
+  const publishVersion = async (version: DocumentVersionView): Promise<void> => {
+    if (!selectedSystemId || !selectedDocument) return;
+    setVersionActionId(version.id);
+    try {
+      await apiClient.publishDocumentVersion(selectedSystemId, selectedDocument.id, version.id);
+      void message.success("版本已发布");
+      await Promise.all([
+        loadVersions(selectedSystemId, selectedDocument.id),
+        loadDocuments(selectedSystemId),
+      ]);
+    } catch (error: unknown) {
+      void message.error(toUiError(error, "版本发布失败").message);
+    } finally {
+      setVersionActionId(null);
+    }
+  };
+
+  const retireVersion = async (version: DocumentVersionView): Promise<void> => {
+    if (!selectedSystemId || !selectedDocument) return;
+    setVersionActionId(version.id);
+    try {
+      await apiClient.retireDocumentVersion(selectedSystemId, selectedDocument.id, version.id);
+      void message.success("版本已退役");
+      await Promise.all([
+        loadVersions(selectedSystemId, selectedDocument.id),
+        loadDocuments(selectedSystemId),
+      ]);
+    } catch (error: unknown) {
+      void message.error(toUiError(error, "版本退役失败").message);
+    } finally {
+      setVersionActionId(null);
+    }
+  };
+
+  const documentTable = (
+    <>
+      <div className="document-view-toolbar">
+        <div className="document-search-controls">
+          <Input
+            value={documentQuery}
+            allowClear
+            aria-label="搜索文档名称"
+            placeholder="搜索文档名称"
+            onChange={(event) => setDocumentQuery(event.target.value)}
+            onPressEnter={applyDocumentSearch}
+          />
+          <Tooltip title="搜索">
+            <Button
+              icon={<Search size={16} />}
+              aria-label="搜索文档"
+              onClick={applyDocumentSearch}
+            />
+          </Tooltip>
+        </div>
+        <span className="toolbar-summary">共 {docsTotal} 个文档</span>
+      </div>
+      {selectedSystemId && docsError ? (
+        <FeedbackState
+          status="error"
+          title="文档列表加载失败"
+          error={docsError}
+          retryLabel="重试加载文档列表"
+          retrying={docsLoading}
+          onRetry={() => void loadDocuments(selectedSystemId)}
+        />
+      ) : null}
+      <Table<DocumentView>
+        rowKey="id"
+        loading={docsLoading}
+        dataSource={documents}
+        locale={{ emptyText: selectedSystemId ? "没有符合条件的文档" : "请先选择业务系统" }}
+        scroll={{ x: 980 }}
+        pagination={{
+          current: docsPage,
+          pageSize: docsPageSize,
+          total: docsTotal,
+          showSizeChanger: true,
+          showTotal: (value) => `共 ${value} 项`,
+        }}
+        onChange={(pagination: TablePaginationConfig) => {
+          setDocsPage(pagination.current ?? 1);
+          setDocsPageSize(pagination.pageSize ?? 20);
+        }}
+        columns={[
+          {
+            title: "文档名称",
+            dataIndex: "name",
+            width: 300,
+            render: (value: string, document) => (
+              <div className="document-name-cell">
+                <FileText size={16} aria-hidden="true" />
+                <div>
+                  <strong>{value}</strong>
+                  <span>
+                    {document.version_count} 个版本
+                    {document.latest_version_status
+                      ? ` · ${versionStatusLabels[document.latest_version_status].label}`
+                      : ""}
+                  </span>
+                </div>
+              </div>
+            ),
+          },
+          {
+            title: "最新版本",
+            key: "latest_version",
+            width: 130,
+            render: (_, document) =>
+              document.latest_version_no ? `v${document.latest_version_no}` : "-",
+          },
+          {
+            title: "最新处理状态",
+            dataIndex: "latest_version_status",
+            width: 140,
+            render: (value: DocumentVersionStatus | null) => {
+              if (!value) return <Tag>暂无版本</Tag>;
+              const config = versionStatusLabels[value];
+              return <Tag color={config.color}>{config.label}</Tag>;
+            },
+          },
+          {
+            title: "当前发布",
+            key: "current_version",
+            width: 130,
+            render: (_, document) =>
+              document.current_published_version_id ? (
+                <Tag color="success">
+                  {document.current_published_version_no
+                    ? `v${document.current_published_version_no}`
+                    : "已发布"}
+                </Tag>
+              ) : (
+                <Tag>未发布</Tag>
+              ),
+          },
+          {
+            title: "更新时间",
+            dataIndex: "updated_at",
+            width: 180,
+            render: (value: string) => formatDateTime(value),
+          },
+          {
+            title: "操作",
+            key: "actions",
+            width: 112,
+            fixed: "right",
+            render: (_, document) => (
+              <Space size={0}>
+                <Tooltip title="导入新版本">
+                  <Button
+                    type="text"
+                    icon={<FilePlus2 size={16} />}
+                    aria-label="导入新版本"
+                    onClick={() => openUpload(document)}
+                  />
+                </Tooltip>
+                <Tooltip title="查看版本">
+                  <Button
+                    type="text"
+                    icon={<ChevronRight size={16} />}
+                    aria-label="查看文档版本"
+                    onClick={() => openVersions(document)}
+                  />
+                </Tooltip>
+              </Space>
+            ),
+          },
+        ]}
+      />
+    </>
+  );
+
+  const jobTable = (
+    <>
+      <div className="document-view-toolbar">
+        <Select<JobFilter>
+          value={jobFilter}
+          aria-label="筛选导入任务"
+          options={[
+            { value: "ALL", label: "全部任务" },
+            { value: "ACTIVE", label: "正在导入" },
+            { value: "SUCCEEDED", label: "导入完成" },
+            { value: "FAILED", label: "导入失败" },
+          ]}
+          onChange={(value) => {
+            setJobFilter(value);
+            setJobsPage(1);
+          }}
+        />
+        <span className="toolbar-summary">共 {jobsTotal} 个任务</span>
+      </div>
+      {selectedSystemId && jobsError ? (
+        <FeedbackState
+          status="error"
+          title="导入任务加载失败"
+          error={jobsError}
+          retryLabel="重试加载导入任务"
+          retrying={jobsLoading}
+          onRetry={() => void loadJobs(selectedSystemId)}
+        />
+      ) : null}
+      <Table<IngestionJobView>
+        rowKey="job_id"
+        loading={jobsLoading}
+        dataSource={jobs}
+        locale={{ emptyText: selectedSystemId ? "暂无导入任务" : "请先选择业务系统" }}
+        scroll={{ x: 1080 }}
+        pagination={{
+          current: jobsPage,
+          pageSize: jobsPageSize,
+          total: jobsTotal,
+          showSizeChanger: true,
+          showTotal: (value) => `共 ${value} 项`,
+        }}
+        onChange={(pagination: TablePaginationConfig) => {
+          setJobsPage(pagination.current ?? 1);
+          setJobsPageSize(pagination.pageSize ?? 20);
+        }}
+        columns={[
+          {
+            title: "文档 / 文件",
+            key: "document",
+            width: 300,
+            render: (_, job) => (
+              <div className="account-cell">
+                <strong>{job.document_name}</strong>
+                <span>
+                  v{job.version_no} · {ingestionStatusLabel(job)} · {job.filename}
+                </span>
+              </div>
+            ),
+          },
+          {
+            title: "任务状态",
+            dataIndex: "status",
+            width: 130,
+            render: (_: IngestionJobStatus, job) => {
+              const config = ingestionStatusLabels[job.status];
+              return <Tag color={config.color}>{ingestionStatusLabel(job)}</Tag>;
+            },
+          },
+          {
+            title: "当前阶段",
+            dataIndex: "stage",
+            width: 140,
+            render: (value: IngestionJobView["stage"]) => ingestionStageLabels[value],
+          },
+          {
+            title: "进度",
+            dataIndex: "progress",
+            width: 190,
+            render: (value: number, job) => (
+              <Progress
+                percent={value}
+                size="small"
+                {...(job.status === "FAILED" ? { status: "exception" as const } : {})}
+              />
+            ),
+          },
+          {
+            title: "尝试次数",
+            key: "attempt",
+            width: 100,
+            render: (_, job) => `${job.attempt}/${job.max_attempts}`,
+          },
+          {
+            title: "更新时间",
+            dataIndex: "updated_at",
+            width: 180,
+            render: (value: string) => formatDateTime(value),
+          },
+          {
+            title: "操作",
+            key: "actions",
+            fixed: "right",
+            width: 100,
+            render: (_, job) => (
+              <Space size={0}>
+                <Tooltip title="查看详情">
+                  <Button
+                    type="text"
+                    icon={<Eye size={16} />}
+                    aria-label="查看导入任务详情"
+                    onClick={() => setSelectedJob(job)}
+                  />
+                </Tooltip>
+                {job.status === "FAILED" ? (
+                  <Tooltip title="重试">
+                    <Button
+                      type="text"
+                      icon={<RefreshCw size={16} />}
+                      aria-label="重试导入任务"
+                      loading={jobActionId === job.job_id}
+                      onClick={() => void retryJob(job)}
+                    />
+                  </Tooltip>
+                ) : null}
+              </Space>
+            ),
+          },
+        ]}
+      />
+    </>
+  );
 
   return (
-    <section className="page-section">
+    <section className="page-section document-management-page">
       <div className="page-heading-row">
         <div>
           <h1>文档版本管理</h1>
-          <p>管理业务系统的文档发布与退役</p>
+          <p>管理文档导入、处理进度、版本发布与退役</p>
         </div>
         <Button
           type="primary"
           icon={<UploadCloud size={16} />}
           aria-label="导入文档"
           disabled={!selectedSystemId}
-          onClick={openUpload}
+          onClick={() => openUpload()}
         >
           导入文档
         </Button>
       </div>
-      <div className="table-toolbar">
-        <Space wrap>
-          <Select<string>
-            loading={systemsLoading}
-            placeholder="选择业务系统"
-            value={selectedSystemId}
-            style={{ minWidth: 200 }}
-            options={systems.map((sys) => ({ value: sys.id, label: sys.name }))}
-            onChange={(value) => {
-              selectedSystemIdRef.current = value;
-              setSelectedSystemId(value);
-              setDocsPage(1);
-            }}
-            aria-label="选择业务系统"
-          />
-        </Space>
-        <Tooltip title="刷新">
+
+      <div className="table-toolbar document-system-toolbar">
+        <Select<string>
+          loading={systemsLoading}
+          placeholder="选择业务系统"
+          value={selectedSystemId}
+          options={systems.map((system) => ({ value: system.id, label: system.name }))}
+          onChange={selectSystem}
+          aria-label="选择业务系统"
+        />
+        <Tooltip title="刷新当前视图">
           <Button
             icon={<RefreshCw size={16} />}
             aria-label="刷新文档列表"
-            onClick={() => {
-              void loadSystems();
-              if (selectedSystemId) void loadDocuments(selectedSystemId);
-            }}
+            onClick={refreshCurrentView}
           />
         </Tooltip>
       </div>
+
       {uploadJob ? (
         <div className="document-ingestion-status" aria-live="polite">
           <div className="document-ingestion-status-copy">
@@ -447,11 +780,15 @@ export function DocumentsPage(): ReactNode {
               type="text"
               icon={<Eye size={16} />}
               aria-label="查看导入进度"
-              onClick={showUploadProgress}
+              onClick={() => {
+                setSelectedJob(uploadJob);
+                setActiveView("jobs");
+              }}
             />
           </Tooltip>
         </div>
       ) : null}
+
       {systemsError ? (
         <FeedbackState
           status="error"
@@ -462,93 +799,31 @@ export function DocumentsPage(): ReactNode {
           onRetry={() => void loadSystems()}
         />
       ) : null}
-      {selectedSystemId && docsError ? (
-        <FeedbackState
-          status="error"
-          title="文档列表加载失败"
-          error={docsError}
-          retryLabel="重试加载文档列表"
-          retrying={docsLoading}
-          onRetry={() => void loadDocuments(selectedSystemId)}
-        />
-      ) : null}
-      <Table<DocumentView>
-        rowKey="id"
-        loading={docsLoading}
-        dataSource={documents}
-        locale={{ emptyText: selectedSystemId ? "该系统暂无文档" : "请先选择业务系统" }}
-        scroll={{ x: 760 }}
-        pagination={{
-          current: docsPage,
-          pageSize: docsPageSize,
-          total: docsTotal,
-          showSizeChanger: true,
-          showTotal: (value) => `共 ${value} 项`,
-        }}
-        onChange={(pagination: TablePaginationConfig) => {
-          setDocsPage(pagination.current ?? 1);
-          setDocsPageSize(pagination.pageSize ?? 20);
-        }}
-        columns={[
+
+      <Tabs
+        activeKey={activeView}
+        onChange={(key) => setActiveView(key as ManagementView)}
+        items={[
           {
-            title: "文档名称",
-            dataIndex: "name",
-            width: 320,
-            render: (value: string) => (
-              <div className="account-cell">
-                <FileText size={15} aria-hidden="true" />
-                <strong>{value}</strong>
-              </div>
-            ),
+            key: "documents",
+            label: <span aria-label="文档库">文档库</span>,
+            children: documentTable,
           },
           {
-            title: "当前发布版本",
-            key: "current_version",
-            width: 160,
-            render: (_, doc) =>
-              doc.current_published_version_id ? (
-                <Tag color="success">已发布</Tag>
-              ) : (
-                <Tag>未发布</Tag>
-              ),
-          },
-          {
-            title: "创建时间",
-            dataIndex: "created_at",
-            width: 180,
-            render: (value: string) => formatDateTime(value),
-          },
-          {
-            title: "更新时间",
-            dataIndex: "updated_at",
-            width: 180,
-            render: (value: string) => formatDateTime(value),
-          },
-          {
-            title: "操作",
-            key: "actions",
-            width: 100,
-            fixed: "right",
-            render: (_, doc) => (
-              <Tooltip title="查看版本">
-                <Button
-                  type="text"
-                  icon={<ChevronRight size={16} />}
-                  aria-label="查看文档版本"
-                  onClick={() => openVersions(doc)}
-                />
-              </Tooltip>
-            ),
+            key: "jobs",
+            label: <span aria-label="导入任务">导入任务</span>,
+            children: jobTable,
           },
         ]}
       />
+
       <Drawer
         title={
           <span className="drawer-title">
-            <FileText size={18} /> {selectedDocument?.name} — 版本列表
+            <FileText size={18} /> {selectedDocument?.name} - 版本列表
           </span>
         }
-        size={560}
+        size={640}
         open={versionsDrawerOpen}
         destroyOnHidden
         onClose={() => setVersionsDrawerOpen(false)}
@@ -572,9 +847,24 @@ export function DocumentsPage(): ReactNode {
           loading={versionsLoading}
           dataSource={versions}
           size="small"
-          pagination={false}
-          scroll={{ x: 480 }}
+          scroll={{ x: 600 }}
           locale={{ emptyText: "暂无版本" }}
+          pagination={{
+            current: versionsPage,
+            pageSize: versionsPageSize,
+            total: versionsTotal,
+            showSizeChanger: true,
+            showTotal: (value) => `共 ${value} 个版本`,
+          }}
+          onChange={(pagination: TablePaginationConfig) => {
+            const nextPage = pagination.current ?? 1;
+            const nextSize = pagination.pageSize ?? 20;
+            setVersionsPage(nextPage);
+            setVersionsPageSize(nextSize);
+            if (selectedSystemId && selectedDocument) {
+              void loadVersions(selectedSystemId, selectedDocument.id, nextPage, nextSize);
+            }
+          }}
           columns={[
             {
               title: "版本",
@@ -582,11 +872,7 @@ export function DocumentsPage(): ReactNode {
               width: 70,
               render: (value: number) => `v${value}`,
             },
-            {
-              title: "文件名",
-              dataIndex: "filename",
-              ellipsis: true,
-            },
+            { title: "文件名", dataIndex: "filename", ellipsis: true },
             {
               title: "大小",
               dataIndex: "size_bytes",
@@ -596,16 +882,19 @@ export function DocumentsPage(): ReactNode {
             {
               title: "处理状态",
               dataIndex: "status",
-              width: 100,
-              render: (value: string) => <Tag>{value}</Tag>,
+              width: 110,
+              render: (value: DocumentVersionStatus) => {
+                const config = versionStatusLabels[value];
+                return <Tag color={config.color}>{config.label}</Tag>;
+              },
             },
             {
               title: "发布状态",
               dataIndex: "publish_status",
-              width: 90,
+              width: 100,
               render: (value: PublicationStatus) => {
-                const cfg = publishStatusLabels[value];
-                return <Tag color={cfg.color}>{cfg.label}</Tag>;
+                const config = publishStatusLabels[value];
+                return <Tag color={config.color}>{config.label}</Tag>;
               },
             },
             {
@@ -614,10 +903,11 @@ export function DocumentsPage(): ReactNode {
               width: 80,
               render: (_, version) => (
                 <Space size={0}>
-                  {version.publish_status === "DRAFT" || version.publish_status === "RETIRED" ? (
+                  {version.status === "READY_DRAFT" &&
+                  (version.publish_status === "DRAFT" || version.publish_status === "RETIRED") ? (
                     <Popconfirm
                       title="发布此版本？"
-                      description="发布后会原子切换当前发布指针并退役旧版本。"
+                      description="发布后会切换当前版本并退役旧版本。"
                       okText="确认"
                       cancelText="取消"
                       onConfirm={() => void publishVersion(version)}
@@ -628,7 +918,7 @@ export function DocumentsPage(): ReactNode {
                           size="small"
                           icon={<Rocket size={15} />}
                           aria-label="发布版本"
-                          loading={actionLoading}
+                          loading={versionActionId === version.id}
                         />
                       </Tooltip>
                     </Popconfirm>
@@ -647,7 +937,7 @@ export function DocumentsPage(): ReactNode {
                           size="small"
                           icon={<Archive size={15} />}
                           aria-label="退役版本"
-                          loading={actionLoading}
+                          loading={versionActionId === version.id}
                         />
                       </Tooltip>
                     </Popconfirm>
@@ -658,30 +948,97 @@ export function DocumentsPage(): ReactNode {
           ]}
         />
       </Drawer>
+
+      <Drawer
+        title="导入任务详情"
+        size={480}
+        open={selectedJob !== null}
+        destroyOnHidden
+        onClose={() => setSelectedJob(null)}
+      >
+        {selectedJob ? (
+          <div className="ingestion-job-detail">
+            <div className="ingestion-job-detail-heading">
+              <div>
+                <strong>{selectedJob.document_name}</strong>
+                <span>
+                  v{selectedJob.version_no} · {selectedJob.filename}
+                </span>
+              </div>
+              <Tag color={ingestionStatusLabels[selectedJob.status].color}>
+                {ingestionStatusLabel(selectedJob)}
+              </Tag>
+            </div>
+            <Progress
+              percent={selectedJob.progress}
+              {...(selectedJob.status === "FAILED" ? { status: "exception" as const } : {})}
+            />
+            {selectedJob.error_message ? (
+              <Alert
+                type="error"
+                showIcon
+                title={selectedJob.error_message}
+                description={selectedJob.error_code ?? undefined}
+              />
+            ) : null}
+            <dl className="ingestion-job-metadata">
+              <dt>当前阶段</dt>
+              <dd>{ingestionStageLabels[selectedJob.stage]}</dd>
+              <dt>尝试次数</dt>
+              <dd>
+                {selectedJob.attempt}/{selectedJob.max_attempts}
+              </dd>
+              <dt>创建时间</dt>
+              <dd>{formatDateTime(selectedJob.created_at)}</dd>
+              <dt>更新时间</dt>
+              <dd>{formatDateTime(selectedJob.updated_at)}</dd>
+              <dt>下次重试</dt>
+              <dd>{formatDateTime(selectedJob.next_retry_at)}</dd>
+            </dl>
+            {selectedJob.status === "FAILED" ? (
+              <Button
+                type="primary"
+                icon={<RefreshCw size={16} />}
+                loading={jobActionId === selectedJob.job_id}
+                onClick={() => void retryJob(selectedJob)}
+              >
+                重新导入
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+      </Drawer>
+
       <Modal
         title={
           <span className="drawer-title">
-            <UploadCloud size={18} /> 导入知识文档
+            <UploadCloud size={18} />
+            {uploadTarget ? `导入「${uploadTarget.name}」的新版本` : "导入新文档"}
           </span>
         }
         open={uploadOpen}
         destroyOnHidden
-        onCancel={closeUpload}
+        onCancel={() => {
+          if (!uploading) setUploadOpen(false);
+        }}
         okText="开始导入"
         cancelText="关闭"
         okButtonProps={{
           "aria-label": "开始导入",
           loading: uploading,
-          disabled:
-            uploadFileList.length === 0 ||
-            !selectedSystemId ||
-            (uploadJob !== null &&
-              uploadJob.status !== "SUCCEEDED" &&
-              uploadJob.status !== "FAILED"),
+          disabled: uploadFileList.length === 0 || !selectedSystemId,
         }}
         onOk={() => void submitUpload()}
       >
         <div className="document-upload-form">
+          {uploadTarget ? (
+            <div className="upload-target-context">
+              <FileText size={16} aria-hidden="true" />
+              <span>
+                新文件将作为 <strong>{uploadTarget.name}</strong> 的下一个版本导入
+              </span>
+            </div>
+          ) : null}
           <Upload.Dragger
             accept=".pdf,.docx,.md,.markdown,.xlsx"
             maxCount={1}
@@ -702,21 +1059,23 @@ export function DocumentsPage(): ReactNode {
               支持 PDF、DOCX、Markdown 和 XLSX，单个文件不超过 25 MB
             </p>
           </Upload.Dragger>
-          <label className="document-upload-name">
-            <span>知识库名称（可选）</span>
-            <input
-              value={uploadName}
-              maxLength={255}
-              placeholder="留空时使用文件名"
-              onChange={(event) => setUploadName(event.target.value)}
-            />
-          </label>
-          {uploadError ? <Alert type="error" showIcon message={uploadError.message} /> : null}
+          {!uploadTarget ? (
+            <label className="document-upload-name">
+              <span>文档名称（可选）</span>
+              <input
+                value={uploadName}
+                maxLength={255}
+                placeholder="留空时使用文件名"
+                onChange={(event) => setUploadName(event.target.value)}
+              />
+            </label>
+          ) : null}
+          {uploadError ? <Alert type="error" showIcon title={uploadError.message} /> : null}
           {uploadJob ? (
             <div className="document-upload-job" aria-live="polite">
               <div className="document-upload-job-header">
                 <strong>{uploadJob.document_name}</strong>
-                <Tag color={uploadJob.status === "FAILED" ? "error" : "processing"}>
+                <Tag color={ingestionStatusLabels[uploadJob.status].color}>
                   {ingestionStatusLabel(uploadJob)}
                 </Tag>
               </div>
@@ -732,8 +1091,8 @@ export function DocumentsPage(): ReactNode {
                 <Button
                   icon={<RefreshCw size={15} />}
                   aria-label="重试入库"
-                  loading={uploading}
-                  onClick={() => void retryUpload()}
+                  loading={jobActionId === uploadJob.job_id}
+                  onClick={() => void retryJob(uploadJob)}
                 >
                   重试入库
                 </Button>

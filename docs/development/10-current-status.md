@@ -5,7 +5,7 @@
 ## 1. 快照时间
 
 ```text
-更新时间：2026-08-11 08:12 CST（文档 Embedding/Ollama 深度现场诊断完成）
+更新时间：2026-08-11 19:34 CST（文档版本与导入任务管理工作台完成）
 更新人/助手：Codex
 当前分支：master
 远程仓库：git@github.com:Kanna-02/knowAgent.git
@@ -18,7 +18,7 @@
 当前阶段：Phase 2 关闭门禁待真实评测数据；Phase 3 质量与运营增强 4/4 功能范围已实现，等待外部联调和质量门禁
 阶段目标：保留 Phase 2 系统隔离问答/工单闭环，同时完成混合检索调优、Rerank、用户可见降级、多轮上下文与意图识别、提示词与检索配置版本化、通知投递/重试/记录，以及文档生命周期、对话分析、高频问题、知识缺口与审计运营能力
 当前任务：取得真实 ESB 标注评测集关闭 AC-004/AC-005，并使用真实公司通知 API 联调鉴权、限流、幂等接收和回执语义以关闭 AC-014
-任务状态：本轮五项可用性与性能问题已修复，并完成 P0/P1 相关全量验证。后端 `411 passed, 25 skipped`（覆盖率 88.66%）、model-service `52 passed, 2 skipped`（覆盖率 88.69%）、前端 `22 个测试文件 / 102 passed`；类型检查、Lint、构建、依赖审计和 Python 安全扫描通过。Phase 2 与 Phase 3 的功能范围均已完成但阶段验收仍未关闭，剩余门禁依赖真实评测数据、真实公司通知 API 和目标 Linux 资源。
+任务状态：文档管理改版已完成：新增服务端导入任务分页/状态过滤、文档搜索与版本概览，前端落地文档库/导入任务双视图、已有文档版本追加、自动刷新、失败诊断与重试。后端相关 24 项、前端全量 105 项、双端类型/格式/Lint/构建门禁与 1440×900/390×844 浏览器验收通过；Phase 2 与 Phase 3 阶段验收仍依赖真实评测数据、真实公司通知 API 和目标 Linux 资源。
 ```
 
 ## 3. 已完成
@@ -117,6 +117,7 @@
 91. 已修复文档 Embedding 串行超时：Ollama 批大小默认 4、服务端总超时 240 秒并支持客户端断开取消；知识索引改为批次级落库并从未生成向量的片段恢复，后端批大小调整为 4、请求超时为 300 秒，任务进度在 70% 到 95% 间按批次真实推进。
 92. 已完成真实导入失败现场诊断：`fd0a49be-b621-409c-9e23-0a00dfd5531b` 为 `FAILED/CHUNKING/70%`、3/3 次尝试，109 个 chunk 全部落库但向量为 0；后端 16 条请求被 model-service 拆为 4 条串行 Ollama 请求，真实 4 条长 chunk 约 68.43 秒，单个后端请求理论上约 274 秒，超过 model-service 240 秒总超时。
 93. 已完成 Ollama 取消与 CPU 现场复验：Docker `rag-ollama` 的 2 CPU 限额在推理期间瞬时约 200%，客户端 5 秒断开后约 5.18 秒收到 `context canceled` 且 CPU 数秒内回到 0%；`keep_alive=24h` 只造成约 1.4 GiB 模型常驻内存，不代表持续计算。测试后已终止精确 runner PID，服务保持 ready。
+94. 已将“文档版本管理”升级为文档库/导入任务双视图：服务器分页管理全部导入任务，进行中任务自动刷新，失败任务可查看诊断并重试；文档总表支持名称搜索、版本/状态概览和从已有文档追加新版本，版本抽屉使用中文状态、分页和就绪态发布门禁。
 
 ## 4. 正在进行
 
@@ -145,6 +146,7 @@
 
 | 文件 | 改动说明 | 状态 |
 | --- | --- | --- |
+| `backend/src/knowagent/documents/api/{router,schemas,lifecycle_router,lifecycle_schemas}.py`、`backend/tests/integration/test_identity_api.py`、`frontend/src/features/admin/DocumentsPage.tsx`、对应 API/组件测试和样式 | 导入任务服务端分页/过滤、文档搜索与版本概览、文档库/导入任务双视图、版本追加和失败重试 | 已完成；后端相关 24 项、前端 105/105、静态/构建和桌面/移动浏览器验收通过 |
 | `backend/src/knowagent/identity/`、`retrieval/infrastructure/http_rerank.py`、`platform/settings.py`、`frontend/src/features/admin/{AccountsPage,DocumentsPage,SystemsPage}.tsx`、`frontend/src/features/auth/{UserHomePage,streamTextBatcher}.ts(x)`、`frontend/src/styles.css` | 三角色新增、密码策略、负责人空态、持久导入进度、Rerank 冷却、SSE 批处理和问答双栏/移动响应式修复 | 已完成；后端 411/25、model-service 52/2、前端 102/102，全量覆盖率与生产构建通过 |
 | `backend/src/knowagent/identity/`、`backend/src/knowagent/api/app.py`、`backend/src/knowagent/agent/application/{answer_generation,reliable_question}.py`、`frontend/src/features/admin/AccountsPage.tsx`、`frontend/src/api/client.ts` | 账号角色修改、422 结构化错误、空证据声明拒答修复 | 已完成；后端身份 20 项、问答 28 项、前端账号/API 11 项定向测试通过，Python/TypeScript 类型检查通过 |
 | `frontend/src/api/client.test.ts`、`frontend/src/features/tickets/TicketsPage.test.tsx`、`frontend/src/features/auth/AuthContext.test.tsx`、5 个管理页测试 | API 契约、工单工作流、认证竞态、筛选/空值/状态展示与错误恢复覆盖率补强 | 已完成；93/93，四维全局覆盖率均超过 80% |
@@ -248,6 +250,7 @@
 
 | 命令/方式 | 结果 | 说明 |
 | --- | --- | --- |
+| 2026-08-11 文档版本与导入任务管理改版 | 通过 | 后端 identity API + 文档生命周期 24 项通过（`--no-cov`），相关 mypy strict、Pylint 10.00/10、Black/isort 通过；前端 22 个测试文件 105/105，TypeScript、ESLint、Prettier、Vite build 通过；隔离样例 API 下 1440×900/390×844 浏览器无整页溢出、重叠和本项目控制台告警；真实文件上传/Worker 未触发 |
 | 2026-08-10 P0/P1 修复全量验证 | 通过（保留既有前端 act/Ant Design deprecation warnings） | 后端 411 passed、25 skipped、覆盖率 88.66%；model-service 52 passed、2 skipped、覆盖率 88.69%；前端 22 个测试文件 102 passed，TypeScript、ESLint、生产构建和 npm audit 通过；修改文件 mypy/Black/isort/Bandit 与 git diff --check 通过；真实 Ollama Embedding smoke test 返回 1024 维向量 |
 | 本地完整运行栈启动与健康检查 | 通过 | `./scripts/local-env.sh serve` 完成数据库迁移并持续托管 PostgreSQL `5440`、Redis `6380`、MinIO `9200/9201`、model-service `8100`、API `8200`、Celery Worker/Beat 和 Vite `5273`；model-service live/ready、API live、前端登录页和 MinIO live 均返回 HTTP 200 |
 | 本地管理员/用户双入口测试账号 | 通过（用户明确覆盖密码策略） | 仅在 `127.0.0.1:5440` 开发库创建 ACTIVE ADMIN/USER 测试账号，密码仅保存 Argon2id 摘要且不写入仓库；真实 API 登录、角色、`PHASE3_TEST` 系统列表、管理员账号列表和登出通过，交叉入口均返回 401 |

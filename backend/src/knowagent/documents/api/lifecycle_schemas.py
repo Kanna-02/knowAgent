@@ -45,6 +45,10 @@ class DocumentView(BaseModel):
     system_id: UUID
     name: str
     current_published_version_id: UUID | None = None
+    current_published_version_no: int | None = None
+    latest_version_no: int | None = None
+    latest_version_status: DocumentVersionStatus | None = None
+    version_count: int = Field(ge=0)
     created_at: datetime
     updated_at: datetime
 

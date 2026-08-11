@@ -250,7 +250,12 @@ describe("ApiClient", () => {
     await client.submitTicketAnswer("ticket-1", "Resolved by restarting the connector");
     await client.transitionTicket("ticket-1", "close", "Resolved");
     await client.transitionTicket("ticket-1", "reopen");
-    await client.listDocuments("system-1", { page: 2, pageSize: 10 });
+    await client.listDocuments("system-1", { page: 2, pageSize: 10, search: "Guide v2" });
+    await client.listIngestionJobs("system-1", {
+      page: 2,
+      pageSize: 10,
+      statuses: ["QUEUED", "RUNNING", "RETRY_SCHEDULED"],
+    });
     await client.listDocumentVersions("system-1", "document-1", { page: 2, pageSize: 10 });
     await client.publishDocumentVersion("system-1", "document-1", "version-1");
     await client.retireDocumentVersion("system-1", "document-1", "version-1");
@@ -310,6 +315,19 @@ describe("ApiClient", () => {
       method: "POST",
       body: JSON.stringify({ body: "Resolved" }),
     });
+    expect(
+      calls.some(
+        ({ url }) =>
+          url ===
+          "/api/v1/systems/system-1/ingestion-jobs?page=2&page_size=10&status=QUEUED&status=RUNNING&status=RETRY_SCHEDULED",
+      ),
+    ).toBe(true);
+    expect(
+      calls.some(
+        ({ url }) =>
+          url === "/api/v1/systems/system-1/documents?page=2&page_size=10&search=Guide+v2",
+      ),
+    ).toBe(true);
     expect(
       calls.some(
         ({ url }) =>

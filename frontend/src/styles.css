@@ -446,6 +446,108 @@ p {
   white-space: nowrap;
 }
 
+.document-management-page .ant-tabs-nav {
+  margin-bottom: 0;
+}
+
+.document-management-page .ant-tabs-content-holder {
+  min-width: 0;
+}
+
+.document-view-toolbar {
+  display: flex;
+  min-height: 56px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-bottom: 0;
+  padding: var(--space-3);
+  background: var(--color-surface);
+}
+
+.document-search-controls {
+  display: grid;
+  width: min(100%, 420px);
+  grid-template-columns: minmax(0, 1fr) var(--control-height);
+  gap: var(--space-2);
+}
+
+.document-search-controls .ant-btn {
+  width: var(--control-height);
+  height: var(--control-height);
+}
+
+.document-name-cell,
+.upload-target-context,
+.ingestion-job-detail-heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.document-name-cell > div,
+.ingestion-job-detail-heading > div {
+  display: grid;
+  min-width: 0;
+}
+
+.document-name-cell strong,
+.document-name-cell span,
+.ingestion-job-detail-heading strong,
+.ingestion-job-detail-heading span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.document-name-cell span,
+.ingestion-job-detail-heading span {
+  color: var(--color-text-secondary);
+  font-size: var(--font-small-size);
+}
+
+.document-name-cell > svg,
+.upload-target-context > svg {
+  flex: 0 0 auto;
+  color: var(--color-primary);
+}
+
+.upload-target-context {
+  align-items: flex-start;
+  border-left: 3px solid var(--color-primary);
+  padding: var(--space-3);
+  background: var(--color-surface-elevated);
+  color: var(--color-text-secondary);
+}
+
+.ingestion-job-detail {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.ingestion-job-detail-heading {
+  justify-content: space-between;
+}
+
+.ingestion-job-metadata {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-3) var(--space-5);
+  margin: 0;
+}
+
+.ingestion-job-metadata dt {
+  color: var(--color-text-secondary);
+}
+
+.ingestion-job-metadata dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 .feedback-state {
   display: grid;
   min-height: calc(var(--space-10) * 4);
@@ -1228,6 +1330,33 @@ p {
   .document-ingestion-status .ant-progress {
     grid-column: 1 / -1;
     grid-row: 2;
+  }
+
+  .document-system-toolbar .ant-select,
+  .document-search-controls {
+    width: 100%;
+  }
+
+  .document-view-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .document-view-toolbar > .ant-select {
+    width: 100%;
+  }
+
+  .ingestion-job-detail-heading {
+    align-items: flex-start;
+  }
+
+  .ingestion-job-metadata {
+    grid-template-columns: 1fr;
+    gap: var(--space-1);
+  }
+
+  .ingestion-job-metadata dd {
+    margin-bottom: var(--space-2);
   }
 
   .composer-secondary-row {

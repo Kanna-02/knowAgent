@@ -627,6 +627,30 @@ def test_owner_upload_is_idempotent_queryable_and_failed_job_can_be_retried(
     assert status_response.json()["progress"] == 0
     assert status_response.json()["celery_task_id"].startswith("task-")
 
+    job_page = client.get(
+        f"/api/v1/systems/{system['id']}/ingestion-jobs",
+        params=[("page", "1"), ("page_size", "10"), ("status", "QUEUED")],
+    )
+    forbidden_job_page = client.get(f"/api/v1/systems/{other_system['id']}/ingestion-jobs")
+    assert job_page.status_code == 200
+    assert job_page.json()["total"] == 1
+    assert job_page.json()["items"][0]["job_id"] == first.json()["job_id"]
+    assert forbidden_job_page.status_code == 403
+    assert forbidden_job_page.json()["code"] == "SYSTEM_ACCESS_DENIED"
+
+    document_page = client.get(
+        f"/api/v1/systems/{system['id']}/documents", params={"search": "Guide"}
+    )
+    empty_document_page = client.get(
+        f"/api/v1/systems/{system['id']}/documents", params={"search": "Missing"}
+    )
+    assert document_page.status_code == 200
+    assert document_page.json()["total"] == 1
+    assert document_page.json()["items"][0]["version_count"] == 1
+    assert document_page.json()["items"][0]["latest_version_no"] == 1
+    assert document_page.json()["items"][0]["latest_version_status"] == "UPLOADED"
+    assert empty_document_page.json()["total"] == 0
+
     invalid_retry = client.post(
         f"/api/v1/ingestion-jobs/{first.json()['job_id']}/retry",
         headers={"X-CSRF-Token": str(owner_session["csrf_token"])},

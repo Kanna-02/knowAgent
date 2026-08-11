@@ -7,6 +7,8 @@ export type SystemRole = "SYSTEM_OWNER";
 export type PublicationStatus = "DRAFT" | "PUBLISHED" | "RETIRED";
 export type DocumentVersionStatus =
   "UPLOADED" | "PARSING" | "CHUNKING" | "CHUNKED" | "READY_DRAFT" | "OCR_REQUIRED" | "FAILED";
+export type IngestionJobStatus = "QUEUED" | "RUNNING" | "RETRY_SCHEDULED" | "SUCCEEDED" | "FAILED";
+export type IngestionStage = "STORED" | "PARSING" | "CHUNKING" | "COMPLETED";
 export type GapSource = "refusal" | "unsolved_ticket";
 
 export interface DocumentView {
@@ -14,6 +16,10 @@ export interface DocumentView {
   system_id: string;
   name: string;
   current_published_version_id: string | null;
+  current_published_version_no: number | null;
+  latest_version_no: number | null;
+  latest_version_status: DocumentVersionStatus | null;
+  version_count: number;
   created_at: string;
   updated_at: string;
 }
@@ -63,8 +69,8 @@ export interface IngestionJobView {
   media_type: string;
   version_status: DocumentVersionStatus;
   publish_status: PublicationStatus;
-  status: "QUEUED" | "RUNNING" | "RETRY_SCHEDULED" | "SUCCEEDED" | "FAILED";
-  stage: "STORED" | "PARSING" | "CHUNKING" | "COMPLETED";
+  status: IngestionJobStatus;
+  stage: IngestionStage;
   progress: number;
   attempt: number;
   max_attempts: number;
@@ -75,6 +81,13 @@ export interface IngestionJobView {
   celery_task_id: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface IngestionJobPage {
+  items: IngestionJobView[];
+  page: number;
+  page_size: number;
+  total: number;
 }
 
 export interface PublishVersionResponse {

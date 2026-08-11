@@ -179,7 +179,8 @@ class SourceLocator(BaseModel):
 | `PATCH /admin/systems/{system_id}` | `SystemUpdateRequest` | `SystemView` | 平台管理员 |
 | `PUT /admin/systems/{system_id}/owners` | `OwnerAssignmentRequest` | `list[OwnerView]` | 平台管理员 |
 | `POST /systems/{system_id}/documents` | multipart 文件 + `Idempotency-Key`；可选 `document_id` 创建下一版本 | `202 IngestionJobView` | 负责人/管理员；格式、大小、系统授权和幂等校验；跨系统 `document_id` 按不存在处理 |
-| `GET /systems/{system_id}/documents` | 分页/状态/关键词 | `Page[DocumentView]` | 负责人/管理员；强制系统授权 |
+| `GET /systems/{system_id}/documents` | 分页/名称关键词 | `Page[DocumentView]` | 负责人/管理员；强制系统授权；返回版本数、最新处理状态和当前发布版本号 |
+| `GET /systems/{system_id}/ingestion-jobs` | 分页；可重复 `status` 过滤 | `IngestionJobPage` | 负责人/管理员；数据库级 `system_id` 隔离 |
 | `GET /document-versions/{version_id}` | 无 | `DocumentVersionView` | 所属系统授权 |
 | `GET /ingestion-jobs/{job_id}` | 无 | `IngestionJobView` | 所属系统授权 |
 | `POST /ingestion-jobs/{job_id}/retry` | 无 | `202 IngestionJobView` | 仅 `FAILED` 任务可重试；其余状态返回稳定 409 |
@@ -239,8 +240,10 @@ class SourceLocator(BaseModel):
 | `AccountCreateRequest` | `username: str`, `display_name: str`, `temporary_password: str`, `role: USER \| SYSTEM_OWNER \| ADMIN` |
 | `SystemCreateRequest` | `code: str`, `name: str`, `description: str \| None`, `status: ACTIVE \| DISABLED` |
 | `OwnerAssignmentRequest` | `account_ids: list[UUID]`, `replace_existing: bool` |
+| `DocumentView` | `id: UUID`, `system_id: UUID`, `name: str`, `version_count: int`, `latest_version_no/status`, `current_published_version_id/no`, `updated_at: datetime` |
 | `DocumentVersionView` | `id: UUID`, `document_id: UUID`, `system_id: UUID`, `filename: str`, `version_no: int`, `parse_status`, `publish_status`, `error_code: str \| None`, `created_at: datetime` |
-| `IngestionJobView` | `id: UUID`, `version_id: UUID`, `stage`, `status`, `progress: int`, `attempt: int`, `error_code: str \| None`, `updated_at: datetime` |
+| `IngestionJobView` | `id: UUID`, `document_id: UUID`, `version_id: UUID`, `stage`, `status`, `progress: int`, `attempt/max_attempts`, `error_code/message`, `updated_at: datetime` |
+| `IngestionJobPage` | `items: list[IngestionJobView]`, `page: int`, `page_size: int`, `total: int` |
 | `ConversationCreateRequest` | `system_id: UUID` |
 | `QuestionRequest` | `content: str`；`system_id` 不允许由消息覆盖 |
 | `AcceptedRunView` | `run_id: UUID`, `question_message_id: UUID`, `status: ACCEPTED`, `events_url: str` |

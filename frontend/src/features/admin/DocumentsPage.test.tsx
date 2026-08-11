@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 
 import { ApiError, apiClient } from "../../api/client";
@@ -8,11 +8,12 @@ import type {
   DocumentVersionPage,
   DocumentVersionView,
   DocumentView,
+  IngestionJobPage,
   IngestionJobView,
   PublishVersionResponse,
   RetireVersionResponse,
 } from "../../api/types";
-import { click, flush, mountWithAuth, type MountedView } from "../../test/renderTestApp";
+import { click, flush, mountWithAuth, setInput, type MountedView } from "../../test/renderTestApp";
 import type { AuthContextValue } from "../auth/authContextValue";
 import { DocumentsPage } from "./DocumentsPage";
 
@@ -32,6 +33,10 @@ const doc: DocumentView = {
   system_id: system.id,
   name: "ESB 接口文档.docx",
   current_published_version_id: null,
+  current_published_version_no: null,
+  latest_version_no: 1,
+  latest_version_status: "READY_DRAFT",
+  version_count: 1,
   created_at: "2026-08-03T10:00:00Z",
   updated_at: "2026-08-03T10:00:00Z",
 };
@@ -95,6 +100,13 @@ const ingestionJob: IngestionJobView = {
   updated_at: version.updated_at,
 };
 
+const ingestionJobPage: IngestionJobPage = {
+  items: [],
+  page: 1,
+  page_size: 20,
+  total: 0,
+};
+
 const publishResponse: PublishVersionResponse = {
   document_id: doc.id,
   version_id: version.id,
@@ -138,6 +150,10 @@ const auth: AuthContextValue = {
 };
 
 let views: MountedView[] = [];
+
+beforeEach(() => {
+  vi.spyOn(apiClient, "listIngestionJobs").mockResolvedValue(ingestionJobPage);
+});
 
 afterEach(async () => {
   for (const view of views.reverse()) await view.unmount();
@@ -212,21 +228,113 @@ describe("DocumentsPage", () => {
     expect(document.body.textContent).toContain("入库任务已完成");
   });
 
-  it("restores the latest ingestion job after the page is mounted again", async () => {
+  it("restores active ingestion jobs from the server after the page is mounted", async () => {
     const runningJob = { ...ingestionJob, status: "RUNNING" as const, progress: 42 };
     vi.spyOn(apiClient, "listSystems").mockResolvedValue([system]);
     vi.spyOn(apiClient, "listDocuments").mockResolvedValue({ ...docPage, items: [] });
-    const getJob = vi.spyOn(apiClient, "getIngestionJob").mockResolvedValue(runningJob);
-    window.sessionStorage.setItem(`knowagent:ingestion-job:${system.id}`, runningJob.job_id);
+    const listIngestionJobs = vi.spyOn(apiClient, "listIngestionJobs");
+    listIngestionJobs.mockResolvedValue({
+      ...ingestionJobPage,
+      items: [runningJob],
+      total: 1,
+    });
 
     const view = await mountWithAuth(<DocumentsPage />, auth, "/admin/documents");
     views.push(view);
     await settleChain();
     await flush();
 
-    expect(getJob).toHaveBeenCalledWith(runningJob.job_id);
+    await click(view.container.querySelector('[aria-label="导入任务"]')!);
+    await flush();
+    expect(listIngestionJobs).toHaveBeenCalledWith(system.id, {
+      page: 1,
+      pageSize: 20,
+    });
     expect(view.container.textContent).toContain("42%");
     expect(view.container.textContent).toContain("处理中");
+  });
+
+  it("retries a failed job from the ingestion task table", async () => {
+    const failedJob = {
+      ...ingestionJob,
+      status: "FAILED" as const,
+      progress: 70,
+      error_code: "INVALID_FILE",
+      error_message: "文件无法解析",
+    };
+    vi.spyOn(apiClient, "listSystems").mockResolvedValue([system]);
+    vi.spyOn(apiClient, "listDocuments").mockResolvedValue(docPage);
+    const listIngestionJobs = vi.spyOn(apiClient, "listIngestionJobs");
+    listIngestionJobs.mockResolvedValue({
+      ...ingestionJobPage,
+      items: [failedJob],
+      total: 1,
+    });
+    const retry = vi.spyOn(apiClient, "retryIngestionJob").mockResolvedValue({
+      ...failedJob,
+      status: "QUEUED",
+      progress: 0,
+      error_code: null,
+      error_message: null,
+    });
+
+    const view = await mountWithAuth(<DocumentsPage />, auth, "/admin/documents");
+    views.push(view);
+    await settleChain();
+    await click(view.container.querySelector('[aria-label="导入任务"]')!);
+    await flush();
+    await click(view.container.querySelector('[aria-label="重试导入任务"]')!);
+    await flush();
+
+    expect(retry).toHaveBeenCalledWith(failedJob.job_id);
+  });
+
+  it("imports a new version from an existing document row", async () => {
+    vi.spyOn(apiClient, "listSystems").mockResolvedValue([system]);
+    vi.spyOn(apiClient, "listDocuments").mockResolvedValue(docPage);
+    const upload = vi.spyOn(apiClient, "uploadDocument").mockResolvedValue({
+      ...ingestionJob,
+      version_no: 2,
+    });
+
+    const view = await mountWithAuth(<DocumentsPage />, auth, "/admin/documents");
+    views.push(view);
+    await settleChain();
+    await click(view.container.querySelector('[aria-label="导入新版本"]')!);
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(["# Guide v2\n"], "guide-v2.md", { type: "text/markdown" });
+    await act(async () => {
+      Object.defineProperty(input, "files", { configurable: true, value: [file] });
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      await Promise.resolve();
+    });
+    await click(document.querySelector('[aria-label="开始导入"]')!);
+    await flush();
+
+    expect(document.body.textContent).toContain("ESB 接口文档.docx");
+    expect(upload).toHaveBeenCalledWith(
+      system.id,
+      file,
+      expect.objectContaining({ documentId: doc.id }),
+    );
+  });
+
+  it("searches documents by name on the server", async () => {
+    vi.spyOn(apiClient, "listSystems").mockResolvedValue([system]);
+    const listDocuments = vi.spyOn(apiClient, "listDocuments").mockResolvedValue(docPage);
+
+    const view = await mountWithAuth(<DocumentsPage />, auth, "/admin/documents");
+    views.push(view);
+    await settleChain();
+    await setInput(view.container.querySelector('[aria-label="搜索文档名称"]')!, "接口规范");
+    await click(view.container.querySelector('[aria-label="搜索文档"]')!);
+    await flush();
+
+    expect(listDocuments).toHaveBeenLastCalledWith(system.id, {
+      page: 1,
+      pageSize: 20,
+      search: "接口规范",
+    });
   });
 
   it("keeps a long upload filename inside the upload dialog", async () => {

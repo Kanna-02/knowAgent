@@ -66,3 +66,10 @@ class IngestionJobView(BaseModel):
             created_at=bundle.job.created_at,
             updated_at=bundle.job.updated_at,
         )
+
+
+class IngestionJobPage(BaseModel):
+    items: list[IngestionJobView]
+    page: int
+    page_size: int
+    total: int

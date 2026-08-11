@@ -17,6 +17,25 @@
 
 ## 功能变更记录
 
+### 2026-08-11 - 文档版本与导入任务管理工作台
+
+类型：变更 / 新增 / 测试 / 文档
+
+相关需求：REQ-011；AC-003、AC-007。
+
+相关文件：`backend/src/knowagent/documents/api/{router,schemas,lifecycle_router,lifecycle_schemas}.py`、`backend/tests/integration/test_identity_api.py`、`frontend/src/features/admin/DocumentsPage.tsx`、`frontend/src/features/admin/DocumentsPage.test.tsx`、`frontend/src/api/{client,client.test,types}.ts`、`frontend/src/styles.css` 及需求、架构、设计、路线图、追溯和状态文档。
+
+变更说明：
+
+1. 新增按业务系统隔离的导入任务分页查询，支持多个 `status` 条件；任务、版本和文档使用单条联结查询返回，页面不再依赖 sessionStorage 保存最近一个任务。
+2. 文档总表新增服务端名称搜索、版本总数、最新版本号/处理状态和当前发布版本号；版本抽屉增加分页与中文状态，并仅允许 `READY_DRAFT` 发布。
+3. 管理页调整为“文档库 / 导入任务”双视图；导入任务支持状态筛选、自动刷新、进度、尝试次数、失败详情与人工重试。
+4. 文档行新增“导入新版本”，复用既有 multipart `document_id` 契约追加 v2+；新文档导入、进度摘要、发布与退役能力保持不变。
+
+影响范围：文档管理 API 的只读查询响应、管理端文档/导入任务工作流和相关文档；不修改数据库 Schema、对象存储、Worker 状态机或发布事务。
+
+验证方式：后端 identity API + 文档生命周期 24 项通过（定向测试使用 `--no-cov`），4 个相关源文件 `mypy --strict` 零错误、Pylint 10.00/10、Black/isort 清洁；前端全量 22 个测试文件、105/105 通过，TypeScript、ESLint、Prettier 和 Vite 生产构建通过。隔离样例 API 下在 1440×900 与 390×844 验证文档库、任务表、失败详情、版本抽屉和版本追加弹窗，页面无整页横向溢出、控件重叠或本项目控制台告警；真实文件上传与 Worker 处理未在本轮浏览器中触发。
+
 ### 2026-08-10 - 账号角色修改与问答拒答错误修复
 
 类型：修复 / 变更 / 测试
