@@ -1,6 +1,6 @@
 # Runtime Resource Baseline And Local Inventory
 
-本文档记录 KnowAgent 的运行资源基线，以及 2026-08-08 对当前 macOS 宿主机和 Docker Desktop 的盘点与本地 Rerank 验证结果。过程不读取密钥值、不下载模型权重；仅在项目 model-service 虚拟环境安装项目锁定的可选推理依赖。
+本文档记录 KnowAgent 的运行资源基线，以及 2026-08-08 对当前 macOS 宿主机和 Docker Desktop 的盘点、本地 Rerank 验证结果和 2026-08-13 的 Ollama 原生化调整。过程不读取密钥值、不下载模型权重；仅在项目 model-service 虚拟环境安装项目锁定的可选推理依赖。
 
 ## 1. 系统所需资源清单
 
@@ -11,7 +11,7 @@
 | 数据库 | PostgreSQL | 16+；必须加载 `vector` 和 `pg_trgm` | `backend/.env.example`、Alembic 迁移 |
 | 会话与任务 | Redis | 7+；Session、登录限流、Celery broker 和恢复调度 | `backend/.env.example` |
 | 对象存储 | S3 兼容服务 | 本地使用 MinIO；生产使用公司 S3 兼容端点和受控 TLS/CA | `backend/.env.example` |
-| Embedding | Ollama + `bge-m3` | 1024 维归一化向量；model-service 转换为 `/v1/embeddings` | `model-service/.env.example` |
+| Embedding | macOS 原生 Ollama + `bge-m3` | 1024 维归一化向量；`ollama serve` 监听 `127.0.0.1:11434`，model-service 转换为 `/v1/embeddings` | `model-service/.env.example`、`scripts/local-env.sh` |
 | Rerank | `BAAI/bge-reranker-v2-m3` | 对最多 20 个融合候选精排，默认返回 10 个 | `model-service/.env.example` |
 | Rerank 运行时 | `FlagEmbedding==1.4.0` + PyTorch | 可选 extra；还需要其 Transformers 等传递依赖 | `model-service/pyproject.toml` |
 | 生成模型 | Qwen OpenAI 兼容 API | 外部 API；Base URL、Key、模型名只从环境或密钥设施读取 | `backend/.env.example` |
@@ -42,7 +42,7 @@ Phase 3 本地默认 Rerank 限制为 `batch_size=4`、`max_length=512`、`max_c
 | PostgreSQL 扩展 | `vector 0.8.6`、`pg_trgm 1.6` | 是 |
 | Redis | 8.10.0，运行于 `127.0.0.1:6380`，当前约 1.48 MB | 是 |
 | MinIO | `RELEASE.2025-10-15T17-29-55Z`，二进制已安装，当前停止 | 已安装，需要完整入库链路时启动 |
-| Ollama CLI | 宿主机未安装 | 不需要；当前由 Docker 容器提供 |
+| Ollama CLI | 当前未安装/未运行 | 本地脚本要求 macOS 原生 CLI；启动前执行 `brew install ollama`、`ollama serve`、`ollama pull bge-m3` |
 | model-service | 当前未监听 8100 | 需要 Rerank/Embedding 适配时启动 |
 
 项目 `.runtime` 当前约 83 MB，其中 PostgreSQL 数据目录约 83 MB、Redis 约 208 KB、MinIO 数据约 64 KB。前端 `node_modules` 约 361 MB。
@@ -64,12 +64,12 @@ Phase 3 本地默认 Rerank 限制为 `batch_size=4`、`max_length=512`、`max_c
 
 | 位置 | 资源 | 大小/状态 | 复用结论 |
 | --- | --- | --- | --- |
-| Docker volume `deploy_ollama-models` | `bge-m3:latest` | 1.158 GB；digest `790764642607...`；F16 | 可直接复用；与项目默认 digest 前缀 `79076464` 一致 |
+| Docker volume `deploy_ollama-models`（历史） | `bge-m3:latest` | 1.158 GB；digest `790764642607...`；F16 | 2026-08-13 起不再作为 KnowAgent 本地依赖；如需迁移可复制到 `~/.ollama`，禁止重复拉取 |
 | `knowledge-rag/deploy/models/bge-reranker-v2-m3` | 原生 Safetensors 模型 | 约 2.1 GB；`model.safetensors` 2,271,071,852 bytes | 权重完整候选，可供 FlagEmbedding/PyTorch 使用 |
 | `knowledge-rag/deploy/models/bge-reranker-v2-m3-onnx` | ONNX External Data 模型 | 约 2.1 GB；`model.onnx` + 2,271,088,656-byte `model.onnx_data` | 权重完整候选，可供 ONNX/TEI 备选方案使用 |
 | `~/.cache/huggingface` | BAAI 与 ONNX 模型引用 | 总计约 504 KB，仅有 `refs/main`，无 blobs/snapshots | 不可视为已下载模型 |
 | `~/.cache/modelscope` | Rerank lock 目录 | 0 B，无模型文件 | 不可复用 |
-| `~/.ollama` | 宿主机 Ollama 缓存 | 不存在 | 使用 Docker volume，不需要重复下载 |
+| `~/.ollama` | 宿主机 Ollama 缓存 | 当前不存在/未运行 | 首次 `ollama serve` / `ollama pull bge-m3` 后由 CLI 创建；本地脚本不再使用 Docker volume |
 
 原生模型 `config.json` 声明 `XLMRobertaForSequenceClassification`、hidden size 1024、24 层、FP32 权重元数据，与 `bge-reranker-v2-m3` 交叉编码器结构相符。2026-08-08 已由当前 model-service 真实加载：示例相关候选得分约 `4.82495`，无关候选约 `-11.01469`；进程级 `/v1/rerank` HTTP 请求约 10.37 秒。
 
@@ -81,13 +81,15 @@ Phase 3 本地默认 Rerank 限制为 `batch_size=4`、`max_length=512`、`max_c
 
 | 资源 | 状态 | 占用/说明 |
 | --- | --- | --- |
-| 容器 `rag-ollama` | 运行且 healthy，映射 `11434:11434` | 镜像 `ollama/ollama:0.3.14`；提供 `bge-m3` |
-| 镜像 `ollama/ollama:0.3.14` | 已存在 | 约 3.23 GB |
-| 卷 `deploy_ollama-models` | 被 1 个容器使用 | 1.158 GB；必须复用，禁止重复拉取 `bge-m3` |
+| 容器 `rag-ollama` | 历史资源，KnowAgent 不再依赖 | 曾映射 `11434:11434`；本地启动脚本不再创建或检查 |
+| 镜像 `ollama/ollama:0.3.14` | 历史资源 | 约 3.23 GB；可忽略 |
+| 卷 `deploy_ollama-models` | 历史资源 | 1.158 GB；可迁移到 `~/.ollama` 或忽略 |
 | 卷 `deploy_tei-cache` | 未使用 | 0 B；不含 Rerank 权重 |
 | 卷 `deploy_pgdata` | 未使用 | 67.35 MB；属于 `knowledge-rag`，KnowAgent 不复用其数据库 |
 | 卷 `deploy_rag-uploads` | 未使用 | 419.4 KB；属于 `knowledge-rag`，KnowAgent 不复用其业务对象 |
 | TEI 容器/镜像 | 不存在 | 若改用 ONNX + TEI，需要另行确认镜像和 Apple Silicon 模拟成本 |
+
+2026-08-13 起本地 Embedding 使用 macOS 原生 Ollama，上述 Docker 资源不再参与 KnowAgent 链路；即使已运行，也只作为历史资源保留，不作为脚本依赖。
 
 ### 4.2 其他项目容器
 

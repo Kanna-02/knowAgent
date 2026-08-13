@@ -9,12 +9,17 @@ from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from knowagent.api.app import create_app
 from knowagent.documents.domain.ingestion import DocumentVersionStatus
 from knowagent.identity.domain.models import AccountRole, AccountSource, AccountStatus
 from knowagent.identity.infrastructure.passwords import Argon2PasswordHasher
-from knowagent.identity.infrastructure.sqlalchemy_models import AccountRecord, Base
+from knowagent.identity.infrastructure.sqlalchemy_models import (
+    AccountRecord,
+    AuditLogRecord,
+    Base,
+)
 from knowagent.platform.settings import Settings
 
 
@@ -717,3 +722,118 @@ def test_owner_upload_is_idempotent_queryable_and_failed_job_can_be_retried(
     assert next_version.json()["publish_status"] == "DRAFT"
     assert cross_system_version.status_code == 404
     assert cross_system_version.json()["code"] == "DOCUMENT_NOT_FOUND"
+
+
+def test_admin_filters_deletes_and_cleans_documents_and_versions(
+    client: TestClient,
+) -> None:
+    admin = _login(client, "admin", "admin")
+    csrf = str(admin["csrf_token"])
+    system = client.post(
+        "/api/v1/admin/systems",
+        headers={"X-CSRF-Token": csrf},
+        json={"code": "DOCDEL", "name": "删除测试"},
+    ).json()
+    system_id = system["id"]
+    first = client.post(
+        f"/api/v1/systems/{system_id}/documents",
+        headers={"X-CSRF-Token": csrf, "Idempotency-Key": "docdel-v1"},
+        data={"document_name": "Alpha"},
+        files={"file": ("alpha-v1.md", b"# Alpha 1\n", "text/markdown")},
+    )
+    assert first.status_code == 202, first.text
+    second = client.post(
+        f"/api/v1/systems/{system_id}/documents",
+        headers={"X-CSRF-Token": csrf, "Idempotency-Key": "docdel-v2"},
+        data={"document_id": first.json()["document_id"]},
+        files={"file": ("alpha-v2.md", b"# Alpha 2\n", "text/markdown")},
+    )
+    assert second.status_code == 202, second.text
+    document_id = first.json()["document_id"]
+
+    all_versions = client.get(f"/api/v1/systems/{system_id}/documents/{document_id}/versions")
+    filtered_versions = client.get(
+        f"/api/v1/systems/{system_id}/documents/{document_id}/versions",
+        params={
+            "search": "alpha-v2",
+            "status": "UPLOADED",
+            "publish_status": "DRAFT",
+        },
+    )
+    assert all_versions.json()["total"] == 2
+    assert filtered_versions.json()["total"] == 1
+    assert filtered_versions.json()["items"][0]["filename"] == "alpha-v2.md"
+    job_search = client.get(
+        f"/api/v1/systems/{system_id}/ingestion-jobs",
+        params={"search": "Alpha"},
+    )
+    missing_job_search = client.get(
+        f"/api/v1/systems/{system_id}/ingestion-jobs",
+        params={"search": "Missing"},
+    )
+    assert job_search.json()["total"] == 2
+    assert missing_job_search.json()["total"] == 0
+
+    busy = client.delete(
+        f"/api/v1/systems/{system_id}/documents/{document_id}",
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert busy.status_code == 409
+    assert busy.json()["code"] == "DOCUMENT_DELETE_BUSY"
+
+    for job_id in (first.json()["job_id"], second.json()["job_id"]):
+        _fail_ingestion_job(client, UUID(job_id))
+
+    filtered_docs = client.get(
+        f"/api/v1/systems/{system_id}/documents",
+        params={"latest_status": "FAILED", "published": "false"},
+    )
+    assert filtered_docs.json()["total"] == 1
+
+    assert len(client.app.state.object_store.objects) == 2
+    deleted_version = client.delete(
+        f"/api/v1/systems/{system_id}/documents/{document_id}"
+        f"/versions/{first.json()['document_version_id']}",
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert deleted_version.status_code == 204
+    assert len(client.app.state.object_store.objects) == 1
+    remaining_versions = client.get(f"/api/v1/systems/{system_id}/documents/{document_id}/versions")
+    assert remaining_versions.json()["total"] == 1
+
+    deleted_document = client.delete(
+        f"/api/v1/systems/{system_id}/documents/{document_id}",
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert deleted_document.status_code == 204
+    assert client.app.state.object_store.objects == {}
+    empty_docs = client.get(f"/api/v1/systems/{system_id}/documents")
+    assert empty_docs.json()["total"] == 0
+    missing_versions = client.get(f"/api/v1/systems/{system_id}/documents/{document_id}/versions")
+    assert missing_versions.status_code == 404
+
+    with client.app.state.session_factory() as session:
+        actions = set(session.scalars(select(AuditLogRecord.action)).all())
+    assert {"document.delete", "document_version.delete"}.issubset(actions)
+
+
+def _fail_ingestion_job(client: TestClient, job_id: UUID) -> None:
+    coordinator = client.app.state.ingestion_coordinator
+    claimed = coordinator.claim(
+        job_id,
+        owner="test-worker",
+        now=datetime.now(UTC),
+        lease_seconds=60,
+    )
+    assert claimed is not None
+    coordinator.fail(
+        job_id,
+        owner="test-worker",
+        attempt=claimed.job.attempt,
+        error_code="INVALID_FILE",
+        error_message="文件无效",
+        retryable=False,
+        version_status=DocumentVersionStatus.FAILED,
+        now=datetime.now(UTC),
+        retry_base_seconds=1,
+    )

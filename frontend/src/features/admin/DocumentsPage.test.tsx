@@ -13,7 +13,14 @@ import type {
   PublishVersionResponse,
   RetireVersionResponse,
 } from "../../api/types";
-import { click, flush, mountWithAuth, setInput, type MountedView } from "../../test/renderTestApp";
+import {
+  click,
+  flush,
+  mountWithAuth,
+  mouseDown,
+  setInput,
+  type MountedView,
+} from "../../test/renderTestApp";
 import type { AuthContextValue } from "../auth/authContextValue";
 import { DocumentsPage } from "./DocumentsPage";
 
@@ -335,6 +342,112 @@ describe("DocumentsPage", () => {
       pageSize: 20,
       search: "接口规范",
     });
+  });
+
+  it("filters documents by processing and publication status", async () => {
+    vi.spyOn(apiClient, "listSystems").mockResolvedValue([system]);
+    const listDocuments = vi.spyOn(apiClient, "listDocuments").mockResolvedValue(docPage);
+
+    const view = await mountWithAuth(<DocumentsPage />, auth, "/admin/documents");
+    views.push(view);
+    await settleChain();
+
+    const selects = view.container.querySelectorAll(".document-filter-controls .ant-select");
+    await mouseDown(selects[0] as Element);
+    await click(
+      [...document.body.querySelectorAll(".ant-select-item-option")].find((option) =>
+        option.textContent?.includes("处理失败"),
+      )!,
+    );
+    await mouseDown(selects[1] as Element);
+    await click(
+      [...document.body.querySelectorAll(".ant-select-item-option")].find((option) =>
+        option.textContent?.includes("未发布"),
+      )!,
+    );
+    await flush();
+
+    expect(listDocuments).toHaveBeenLastCalledWith(system.id, {
+      page: 1,
+      pageSize: 20,
+      latestStatus: "FAILED",
+      published: false,
+    });
+  });
+
+  it("deletes a document after confirmation", async () => {
+    vi.spyOn(apiClient, "listSystems").mockResolvedValue([system]);
+    vi.spyOn(apiClient, "listDocuments").mockResolvedValue(docPage);
+    const remove = vi.spyOn(apiClient, "deleteDocument").mockResolvedValue();
+
+    const view = await mountWithAuth(<DocumentsPage />, auth, "/admin/documents");
+    views.push(view);
+    await settleChain();
+
+    await click(view.container.querySelector('[aria-label="删除文档"]')!);
+    await flush();
+    await click(document.body.querySelector(".ant-popconfirm-buttons .ant-btn-primary")!);
+    await flush();
+    await flush();
+
+    expect(remove).toHaveBeenCalledWith(system.id, doc.id);
+  });
+
+  it("searches and filters versions inside the drawer", async () => {
+    vi.spyOn(apiClient, "listSystems").mockResolvedValue([system]);
+    vi.spyOn(apiClient, "listDocuments").mockResolvedValue(docPage);
+    const listVersions = vi.spyOn(apiClient, "listDocumentVersions").mockResolvedValue(versionPage);
+
+    const view = await mountWithAuth(<DocumentsPage />, auth, "/admin/documents");
+    views.push(view);
+    await settleChain();
+    await click(view.container.querySelector('[aria-label="查看文档版本"]')!);
+    await flush();
+
+    await setInput(document.body.querySelector('[aria-label="搜索版本文件名"]')!, "guide");
+    await click(document.body.querySelector('[aria-label="搜索版本"]')!);
+    await mouseDown(document.body.querySelector('[aria-label="筛选版本处理状态"]')!);
+    await click(
+      [...document.body.querySelectorAll(".ant-select-item-option")].find((option) =>
+        option.textContent?.includes("处理失败"),
+      )!,
+    );
+    await mouseDown(document.body.querySelector('[aria-label="筛选版本发布状态"]')!);
+    await click(
+      [...document.body.querySelectorAll(".ant-select-item-option")].find((option) =>
+        option.textContent?.includes("草稿"),
+      )!,
+    );
+    await flush();
+
+    expect(listVersions).toHaveBeenLastCalledWith(system.id, doc.id, {
+      page: 1,
+      pageSize: 20,
+      search: "guide",
+      statuses: ["FAILED"],
+      publishStatuses: ["DRAFT"],
+    });
+  });
+
+  it("deletes a version after confirmation", async () => {
+    vi.spyOn(apiClient, "listSystems").mockResolvedValue([system]);
+    vi.spyOn(apiClient, "listDocuments").mockResolvedValue(docPage);
+    vi.spyOn(apiClient, "listDocumentVersions").mockResolvedValue(versionPage);
+    const remove = vi.spyOn(apiClient, "deleteDocumentVersion").mockResolvedValue();
+
+    const view = await mountWithAuth(<DocumentsPage />, auth, "/admin/documents");
+    views.push(view);
+    await settleChain();
+    await click(view.container.querySelector('[aria-label="查看文档版本"]')!);
+    await flush();
+
+    await click(document.body.querySelector('[aria-label="删除版本"]')!);
+    await flush();
+    await click(document.body.querySelector(".ant-popconfirm-buttons .ant-btn-primary")!);
+    await flush();
+    await flush();
+
+    expect(remove).toHaveBeenCalledWith(system.id, doc.id, version.id);
   });
 
   it("keeps a long upload filename inside the upload dialog", async () => {

@@ -52,6 +52,8 @@ def test_object_storage_and_ingestion_settings_load_without_leaking_secrets(
     monkeypatch.setenv("KNOWAGENT_INGESTION_MAX_ATTEMPTS", "4")
     monkeypatch.setenv("KNOWAGENT_INGESTION_SOFT_TIME_LIMIT_SECONDS", "60")
     monkeypatch.setenv("KNOWAGENT_INGESTION_HARD_TIME_LIMIT_SECONDS", "90")
+    monkeypatch.setenv("KNOWAGENT_INGESTION_BATCH_SOFT_TIME_LIMIT_SECONDS", "45")
+    monkeypatch.setenv("KNOWAGENT_INGESTION_BATCH_HARD_TIME_LIMIT_SECONDS", "75")
 
     settings = Settings.from_environment()
 
@@ -59,6 +61,8 @@ def test_object_storage_and_ingestion_settings_load_without_leaking_secrets(
     assert settings.object_storage.verify_value == "/etc/pki/company-ca.pem"
     assert settings.ingestion.lease_seconds == 120
     assert settings.ingestion.max_attempts == 4
+    assert settings.ingestion.batch_soft_time_limit_seconds == 45
+    assert settings.ingestion.batch_hard_time_limit_seconds == 75
     assert "test-secret" not in repr(settings.object_storage)
     assert "test-access" not in repr(settings.object_storage)
 
@@ -72,6 +76,11 @@ def test_invalid_storage_and_ingestion_boundaries_fail_fast() -> None:
         IngestionSettings(soft_time_limit_seconds=60, hard_time_limit_seconds=60)
     with pytest.raises(ValueError, match="lease"):
         IngestionSettings(lease_seconds=60, soft_time_limit_seconds=30, hard_time_limit_seconds=90)
+    with pytest.raises(ValueError, match="batch hard time"):
+        IngestionSettings(
+            batch_soft_time_limit_seconds=60,
+            batch_hard_time_limit_seconds=60,
+        )
 
 
 def test_security_boolean_settings_reject_unknown_values(
@@ -103,6 +112,8 @@ def test_celery_configuration_uses_late_ack_low_prefetch_and_bounded_tasks() -> 
     assert application.conf.worker_prefetch_multiplier == 1
     assert application.conf.task_soft_time_limit == 600
     assert application.conf.task_time_limit == 660
+    assert application.conf.task_annotations["knowagent.ingestion.batch"]["soft_time_limit"] == 300
+    assert application.conf.task_annotations["knowagent.ingestion.batch"]["time_limit"] == 360
     assert application.conf.beat_schedule["recover-ingestion-jobs"]["task"] == (
         "knowagent.ingestion.recover"
     )

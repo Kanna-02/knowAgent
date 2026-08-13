@@ -142,7 +142,9 @@ class IngestionJob:  # pylint: disable=too-many-instance-attributes
             raise ValueError("job cannot be claimed from its current status")
         if not owner.strip() or lease_seconds <= 0:
             raise ValueError("claim requires an owner and positive lease")
-        restarting = self.status is IngestionStatus.RETRY_SCHEDULED
+        restarting = (
+            self.status is IngestionStatus.RETRY_SCHEDULED and self.stage is IngestionStage.STORED
+        )
         return replace(
             self,
             status=IngestionStatus.RUNNING,
@@ -154,6 +156,48 @@ class IngestionJob:  # pylint: disable=too-many-instance-attributes
             next_retry_at=None,
             error_code=None,
             error_message=None,
+            started_at=self.started_at or now,
+            updated_at=now,
+        )
+
+    def release_for_continuation(self, *, now: datetime) -> IngestionJob:
+        """Release a batch lease without consuming the document retry budget."""
+        if self.status is not IngestionStatus.RUNNING:
+            raise ValueError("only a running job can continue")
+        return replace(
+            self,
+            status=IngestionStatus.QUEUED,
+            lease_owner=None,
+            lease_expires_at=None,
+            next_retry_at=None,
+            celery_task_id=None,
+            last_dispatched_at=None,
+            updated_at=now,
+        )
+
+    def claim_continuation(self, *, owner: str, now: datetime, lease_seconds: int) -> IngestionJob:
+        due_retry = (
+            self.status is IngestionStatus.RETRY_SCHEDULED
+            and self.next_retry_at is not None
+            and self.next_retry_at <= now
+        )
+        if self.status is not IngestionStatus.QUEUED and not due_retry:
+            raise ValueError("job cannot be continued from its current status")
+        if self.stage is not IngestionStage.CHUNKING:
+            raise ValueError("only a chunking job can continue")
+        if not owner.strip() or lease_seconds <= 0:
+            raise ValueError("claim requires an owner and positive lease")
+        return replace(
+            self,
+            status=IngestionStatus.RUNNING,
+            attempt=self.attempt + (1 if due_retry else 0),
+            lease_owner=owner,
+            lease_expires_at=now + timedelta(seconds=lease_seconds),
+            next_retry_at=None,
+            error_code=None,
+            error_message=None,
+            celery_task_id=None,
+            last_dispatched_at=None,
             started_at=self.started_at or now,
             updated_at=now,
         )
@@ -222,8 +266,14 @@ class IngestionJob:  # pylint: disable=too-many-instance-attributes
         return replace(
             self,
             status=IngestionStatus.FAILED if exhausted else IngestionStatus.QUEUED,
-            stage=IngestionStage.STORED if not exhausted else self.stage,
-            progress=0 if not exhausted else self.progress,
+            stage=(
+                IngestionStage.STORED
+                if not exhausted and self.stage is not IngestionStage.CHUNKING
+                else self.stage
+            ),
+            progress=(
+                0 if not exhausted and self.stage is not IngestionStage.CHUNKING else self.progress
+            ),
             lease_owner=None,
             lease_expires_at=None,
             next_retry_at=None,

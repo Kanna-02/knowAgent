@@ -26,6 +26,7 @@ import {
   RefreshCw,
   Rocket,
   Search,
+  Trash2,
   UploadCloud,
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -46,6 +47,9 @@ import { toUiError, type UiError } from "../../shared/uiError";
 
 type ManagementView = "documents" | "jobs";
 type JobFilter = "ALL" | "ACTIVE" | "SUCCEEDED" | "FAILED";
+type DocumentPublishedFilter = "ALL" | "PUBLISHED" | "UNPUBLISHED";
+type VersionStatusFilter = "ALL" | DocumentVersionStatus;
+type VersionPublishFilter = "ALL" | PublicationStatus;
 
 const ACTIVE_JOB_STATUSES: IngestionJobStatus[] = ["QUEUED", "RUNNING", "RETRY_SCHEDULED"];
 
@@ -134,6 +138,8 @@ export function DocumentsPage(): ReactNode {
   const [docsTotal, setDocsTotal] = useState(0);
   const [documentQuery, setDocumentQuery] = useState("");
   const [appliedDocumentQuery, setAppliedDocumentQuery] = useState("");
+  const [docLatestStatus, setDocLatestStatus] = useState<DocumentVersionStatus | "ALL">("ALL");
+  const [docPublished, setDocPublished] = useState<DocumentPublishedFilter>("ALL");
 
   const [jobs, setJobs] = useState<IngestionJobView[]>([]);
   const [jobsLoading, setJobsLoading] = useState(false);
@@ -142,6 +148,8 @@ export function DocumentsPage(): ReactNode {
   const [jobsPageSize, setJobsPageSize] = useState(20);
   const [jobsTotal, setJobsTotal] = useState(0);
   const [jobFilter, setJobFilter] = useState<JobFilter>("ALL");
+  const [jobQuery, setJobQuery] = useState("");
+  const [appliedJobQuery, setAppliedJobQuery] = useState("");
   const [selectedJob, setSelectedJob] = useState<IngestionJobView | null>(null);
   const [jobActionId, setJobActionId] = useState<string | null>(null);
 
@@ -152,8 +160,13 @@ export function DocumentsPage(): ReactNode {
   const [versionsPage, setVersionsPage] = useState(1);
   const [versionsPageSize, setVersionsPageSize] = useState(20);
   const [versionsTotal, setVersionsTotal] = useState(0);
+  const [versionQuery, setVersionQuery] = useState("");
+  const [appliedVersionQuery, setAppliedVersionQuery] = useState("");
+  const [versionStatusFilter, setVersionStatusFilter] = useState<VersionStatusFilter>("ALL");
+  const [versionPublishFilter, setVersionPublishFilter] = useState<VersionPublishFilter>("ALL");
   const [selectedDocument, setSelectedDocument] = useState<DocumentView | null>(null);
   const [versionActionId, setVersionActionId] = useState<string | null>(null);
+  const [documentActionId, setDocumentActionId] = useState<string | null>(null);
 
   const [uploadOpen, setUploadOpen] = useState(false);
   const [uploadTarget, setUploadTarget] = useState<DocumentView | null>(null);
@@ -196,6 +209,8 @@ export function DocumentsPage(): ReactNode {
       targetPage = docsPage,
       targetPageSize = docsPageSize,
       targetSearch = appliedDocumentQuery,
+      targetLatestStatus = docLatestStatus,
+      targetPublished = docPublished,
     ): Promise<void> => {
       const requestId = ++docsRequestId.current;
       setDocsLoading(true);
@@ -204,6 +219,8 @@ export function DocumentsPage(): ReactNode {
           page: targetPage,
           pageSize: targetPageSize,
           ...(targetSearch.trim() ? { search: targetSearch.trim() } : {}),
+          ...(targetLatestStatus !== "ALL" ? { latestStatus: targetLatestStatus } : {}),
+          ...(targetPublished !== "ALL" ? { published: targetPublished === "PUBLISHED" } : {}),
         });
         if (requestId !== docsRequestId.current) return;
         setDocuments(result.items);
@@ -217,7 +234,7 @@ export function DocumentsPage(): ReactNode {
         if (requestId === docsRequestId.current) setDocsLoading(false);
       }
     },
-    [appliedDocumentQuery, docsPage, docsPageSize],
+    [appliedDocumentQuery, docLatestStatus, docPublished, docsPage, docsPageSize],
   );
 
   const loadJobs = useCallback(
@@ -226,6 +243,7 @@ export function DocumentsPage(): ReactNode {
       targetPage = jobsPage,
       targetPageSize = jobsPageSize,
       targetFilter = jobFilter,
+      targetSearch = appliedJobQuery,
     ): Promise<void> => {
       const requestId = ++jobsRequestId.current;
       setJobsLoading(true);
@@ -235,6 +253,7 @@ export function DocumentsPage(): ReactNode {
           page: targetPage,
           pageSize: targetPageSize,
           ...(statuses ? { statuses } : {}),
+          ...(targetSearch.trim() ? { search: targetSearch.trim() } : {}),
         });
         if (requestId !== jobsRequestId.current) return;
         setJobs(result.items);
@@ -251,7 +270,7 @@ export function DocumentsPage(): ReactNode {
         if (requestId === jobsRequestId.current) setJobsLoading(false);
       }
     },
-    [jobFilter, jobsPage, jobsPageSize],
+    [appliedJobQuery, jobFilter, jobsPage, jobsPageSize],
   );
 
   const loadVersions = useCallback(
@@ -260,6 +279,9 @@ export function DocumentsPage(): ReactNode {
       documentId: string,
       targetPage = versionsPage,
       targetPageSize = versionsPageSize,
+      targetSearch = appliedVersionQuery,
+      targetStatus = versionStatusFilter,
+      targetPublishStatus = versionPublishFilter,
     ): Promise<void> => {
       const requestId = ++versionsRequestId.current;
       setVersionsLoading(true);
@@ -267,6 +289,9 @@ export function DocumentsPage(): ReactNode {
         const result = await apiClient.listDocumentVersions(systemId, documentId, {
           page: targetPage,
           pageSize: targetPageSize,
+          ...(targetSearch.trim() ? { search: targetSearch.trim() } : {}),
+          ...(targetStatus !== "ALL" ? { statuses: [targetStatus] } : {}),
+          ...(targetPublishStatus !== "ALL" ? { publishStatuses: [targetPublishStatus] } : {}),
         });
         if (requestId !== versionsRequestId.current) return;
         setVersions(result.items);
@@ -280,7 +305,13 @@ export function DocumentsPage(): ReactNode {
         if (requestId === versionsRequestId.current) setVersionsLoading(false);
       }
     },
-    [versionsPage, versionsPageSize],
+    [
+      appliedVersionQuery,
+      versionPublishFilter,
+      versionStatusFilter,
+      versionsPage,
+      versionsPageSize,
+    ],
   );
 
   useEffect(() => {
@@ -358,6 +389,71 @@ export function DocumentsPage(): ReactNode {
   const applyDocumentSearch = (): void => {
     setDocsPage(1);
     setAppliedDocumentQuery(documentQuery.trim());
+  };
+
+  const changeDocumentStatusFilter = (value: DocumentVersionStatus | "ALL"): void => {
+    setDocLatestStatus(value);
+    setDocsPage(1);
+  };
+
+  const changeDocumentPublishedFilter = (value: DocumentPublishedFilter): void => {
+    setDocPublished(value);
+    setDocsPage(1);
+  };
+
+  const applyJobSearch = (): void => {
+    const query = jobQuery.trim();
+    setAppliedJobQuery(query);
+    setJobsPage(1);
+  };
+
+  const applyVersionSearch = (): void => {
+    const query = versionQuery.trim();
+    setAppliedVersionQuery(query);
+    setVersionsPage(1);
+    if (selectedSystemId && selectedDocument) {
+      void loadVersions(
+        selectedSystemId,
+        selectedDocument.id,
+        1,
+        versionsPageSize,
+        query,
+        versionStatusFilter,
+        versionPublishFilter,
+      );
+    }
+  };
+
+  const changeVersionStatusFilter = (value: VersionStatusFilter): void => {
+    setVersionStatusFilter(value);
+    setVersionsPage(1);
+    if (selectedSystemId && selectedDocument) {
+      void loadVersions(
+        selectedSystemId,
+        selectedDocument.id,
+        1,
+        versionsPageSize,
+        appliedVersionQuery,
+        value,
+        versionPublishFilter,
+      );
+    }
+  };
+
+  const changeVersionPublishFilter = (value: VersionPublishFilter): void => {
+    setVersionPublishFilter(value);
+    setVersionsPage(1);
+    if (selectedSystemId && selectedDocument) {
+      void loadVersions(
+        selectedSystemId,
+        selectedDocument.id,
+        1,
+        versionsPageSize,
+        appliedVersionQuery,
+        versionStatusFilter,
+        value,
+      );
+    }
   };
 
   const openVersions = (document: DocumentView): void => {
@@ -453,25 +549,85 @@ export function DocumentsPage(): ReactNode {
     }
   };
 
+  const deleteVersion = async (version: DocumentVersionView): Promise<void> => {
+    if (!selectedSystemId || !selectedDocument) return;
+    setVersionActionId(version.id);
+    try {
+      await apiClient.deleteDocumentVersion(selectedSystemId, selectedDocument.id, version.id);
+      void message.success("版本已删除");
+      await Promise.all([
+        loadVersions(selectedSystemId, selectedDocument.id),
+        loadDocuments(selectedSystemId),
+      ]);
+    } catch (error: unknown) {
+      void message.error(toUiError(error, "版本删除失败").message);
+    } finally {
+      setVersionActionId(null);
+    }
+  };
+
+  const deleteDocument = async (document: DocumentView): Promise<void> => {
+    if (!selectedSystemId) return;
+    setDocumentActionId(document.id);
+    try {
+      await apiClient.deleteDocument(selectedSystemId, document.id);
+      void message.success("文档已删除");
+      if (selectedDocument?.id === document.id) {
+        setVersionsDrawerOpen(false);
+        setSelectedDocument(null);
+      }
+      setDocsPage(1);
+      await loadDocuments(selectedSystemId, 1, docsPageSize);
+    } catch (error: unknown) {
+      void message.error(toUiError(error, "文档删除失败").message);
+    } finally {
+      setDocumentActionId(null);
+    }
+  };
+
   const documentTable = (
     <>
       <div className="document-view-toolbar">
-        <div className="document-search-controls">
-          <Input
-            value={documentQuery}
-            allowClear
-            aria-label="搜索文档名称"
-            placeholder="搜索文档名称"
-            onChange={(event) => setDocumentQuery(event.target.value)}
-            onPressEnter={applyDocumentSearch}
-          />
-          <Tooltip title="搜索">
-            <Button
-              icon={<Search size={16} />}
-              aria-label="搜索文档"
-              onClick={applyDocumentSearch}
+        <div className="document-filter-controls">
+          <div className="document-search-controls">
+            <Input
+              value={documentQuery}
+              allowClear
+              aria-label="搜索文档名称"
+              placeholder="搜索文档名称"
+              onChange={(event) => setDocumentQuery(event.target.value)}
+              onPressEnter={applyDocumentSearch}
             />
-          </Tooltip>
+            <Tooltip title="搜索">
+              <Button
+                icon={<Search size={16} />}
+                aria-label="搜索文档"
+                onClick={applyDocumentSearch}
+              />
+            </Tooltip>
+          </div>
+          <Select<DocumentVersionStatus | "ALL">
+            value={docLatestStatus}
+            aria-label="筛选文档处理状态"
+            options={[
+              { value: "ALL", label: "全部处理状态" },
+              ...Object.entries(versionStatusLabels).map(([value, config]) => ({
+                value: value as DocumentVersionStatus,
+                label: config.label,
+              })),
+            ]}
+            onChange={changeDocumentStatusFilter}
+          />
+          <Select<DocumentPublishedFilter>
+            value={docPublished}
+            aria-label="筛选文档发布状态"
+            options={[
+              { value: "ALL", label: "全部发布状态" },
+              { value: "PUBLISHED", label: "已发布" },
+              { value: "UNPUBLISHED", label: "未发布" },
+            ]}
+            onChange={changeDocumentPublishedFilter}
+          />
         </div>
         <span className="toolbar-summary">共 {docsTotal} 个文档</span>
       </div>
@@ -563,7 +719,7 @@ export function DocumentsPage(): ReactNode {
           {
             title: "操作",
             key: "actions",
-            width: 112,
+            width: 160,
             fixed: "right",
             render: (_, document) => (
               <Space size={0}>
@@ -583,6 +739,23 @@ export function DocumentsPage(): ReactNode {
                     onClick={() => openVersions(document)}
                   />
                 </Tooltip>
+                <Popconfirm
+                  title="删除此文档？"
+                  description="将删除全部版本、知识片段和文件，且不可恢复。"
+                  okText="确认"
+                  cancelText="取消"
+                  onConfirm={() => void deleteDocument(document)}
+                >
+                  <Tooltip title="删除文档">
+                    <Button
+                      type="text"
+                      danger
+                      icon={<Trash2 size={16} />}
+                      aria-label="删除文档"
+                      loading={documentActionId === document.id}
+                    />
+                  </Tooltip>
+                </Popconfirm>
               </Space>
             ),
           },
@@ -594,20 +767,39 @@ export function DocumentsPage(): ReactNode {
   const jobTable = (
     <>
       <div className="document-view-toolbar">
-        <Select<JobFilter>
-          value={jobFilter}
-          aria-label="筛选导入任务"
-          options={[
-            { value: "ALL", label: "全部任务" },
-            { value: "ACTIVE", label: "正在导入" },
-            { value: "SUCCEEDED", label: "导入完成" },
-            { value: "FAILED", label: "导入失败" },
-          ]}
-          onChange={(value) => {
-            setJobFilter(value);
-            setJobsPage(1);
-          }}
-        />
+        <div className="document-filter-controls">
+          <div className="document-search-controls">
+            <Input
+              value={jobQuery}
+              allowClear
+              aria-label="搜索导入任务"
+              placeholder="搜索文档名称"
+              onChange={(event) => setJobQuery(event.target.value)}
+              onPressEnter={applyJobSearch}
+            />
+            <Tooltip title="搜索">
+              <Button
+                icon={<Search size={16} />}
+                aria-label="搜索导入任务"
+                onClick={applyJobSearch}
+              />
+            </Tooltip>
+          </div>
+          <Select<JobFilter>
+            value={jobFilter}
+            aria-label="筛选导入任务"
+            options={[
+              { value: "ALL", label: "全部任务" },
+              { value: "ACTIVE", label: "正在导入" },
+              { value: "SUCCEEDED", label: "导入完成" },
+              { value: "FAILED", label: "导入失败" },
+            ]}
+            onChange={(value) => {
+              setJobFilter(value);
+              setJobsPage(1);
+            }}
+          />
+        </div>
         <span className="toolbar-summary">共 {jobsTotal} 个任务</span>
       </div>
       {selectedSystemId && jobsError ? (
@@ -828,6 +1020,51 @@ export function DocumentsPage(): ReactNode {
         destroyOnHidden
         onClose={() => setVersionsDrawerOpen(false)}
       >
+        <div className="document-view-toolbar version-view-toolbar">
+          <div className="document-filter-controls">
+            <div className="document-search-controls">
+              <Input
+                value={versionQuery}
+                allowClear
+                aria-label="搜索版本文件名"
+                placeholder="搜索文件名"
+                onChange={(event) => setVersionQuery(event.target.value)}
+                onPressEnter={applyVersionSearch}
+              />
+              <Tooltip title="搜索">
+                <Button
+                  icon={<Search size={16} />}
+                  aria-label="搜索版本"
+                  onClick={applyVersionSearch}
+                />
+              </Tooltip>
+            </div>
+            <Select<VersionStatusFilter>
+              value={versionStatusFilter}
+              aria-label="筛选版本处理状态"
+              options={[
+                { value: "ALL", label: "全部状态" },
+                ...Object.entries(versionStatusLabels).map(([value, config]) => ({
+                  value: value as DocumentVersionStatus,
+                  label: config.label,
+                })),
+              ]}
+              onChange={changeVersionStatusFilter}
+            />
+            <Select<VersionPublishFilter>
+              value={versionPublishFilter}
+              aria-label="筛选版本发布状态"
+              options={[
+                { value: "ALL", label: "全部发布状态" },
+                { value: "DRAFT", label: "草稿" },
+                { value: "PUBLISHED", label: "已发布" },
+                { value: "RETIRED", label: "已退役" },
+              ]}
+              onChange={changeVersionPublishFilter}
+            />
+          </div>
+          <span className="toolbar-summary">共 {versionsTotal} 个版本</span>
+        </div>
         {versionsError ? (
           <FeedbackState
             status="error"
@@ -847,7 +1084,7 @@ export function DocumentsPage(): ReactNode {
           loading={versionsLoading}
           dataSource={versions}
           size="small"
-          scroll={{ x: 600 }}
+          scroll={{ x: 860 }}
           locale={{ emptyText: "暂无版本" }}
           pagination={{
             current: versionsPage,
@@ -898,9 +1135,21 @@ export function DocumentsPage(): ReactNode {
               },
             },
             {
+              title: "知识片段",
+              dataIndex: "chunk_count",
+              width: 90,
+              render: (value: number) => (value > 0 ? `${value} 个` : "-"),
+            },
+            {
+              title: "创建时间",
+              dataIndex: "created_at",
+              width: 170,
+              render: (value: string) => formatDateTime(value),
+            },
+            {
               title: "操作",
               key: "actions",
-              width: 80,
+              width: 120,
               render: (_, version) => (
                 <Space size={0}>
                   {version.status === "READY_DRAFT" &&
@@ -942,6 +1191,24 @@ export function DocumentsPage(): ReactNode {
                       </Tooltip>
                     </Popconfirm>
                   ) : null}
+                  <Popconfirm
+                    title="删除此版本？"
+                    description="将删除该版本文件、知识片段和导入记录，且不可恢复。"
+                    okText="确认"
+                    cancelText="取消"
+                    onConfirm={() => void deleteVersion(version)}
+                  >
+                    <Tooltip title="删除版本">
+                      <Button
+                        type="text"
+                        size="small"
+                        danger
+                        icon={<Trash2 size={15} />}
+                        aria-label="删除版本"
+                        loading={versionActionId === version.id}
+                      />
+                    </Tooltip>
+                  </Popconfirm>
                 </Space>
               ),
             },

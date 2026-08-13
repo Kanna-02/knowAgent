@@ -17,6 +17,7 @@ __all__ = [
     "KnowledgeChunk",
     "KnowledgeChunkDraft",
     "KnowledgeIndexSummary",
+    "KnowledgeIndexBatchSummary",
     "KnowledgeSource",
     "KnowledgeSourceType",
     "PublicationStatus",
@@ -38,6 +39,17 @@ class ChunkEmbeddingUpdate:
 class KnowledgeIndexSummary:
     source_id: UUID
     chunk_count: int
+    model: str
+    model_version: str
+    dimension: int
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeIndexBatchSummary:
+    source_id: UUID
+    total_chunks: int
+    completed_chunks: int
+    complete: bool
     model: str
     model_version: str
     dimension: int

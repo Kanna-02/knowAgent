@@ -356,6 +356,10 @@ class SqlAlchemyIngestionCoordinator:
             repository.save_job(claimed)
             return repository.get_by_job_id(job_id)
 
+    def get_job(self, job_id: UUID) -> IngestionJob | None:
+        with self._session_factory() as session:
+            return SqlAlchemyIngestionRepository(session).get_job(job_id)
+
     def advance(  # pylint: disable=too-many-arguments
         self,
         job_id: UUID,
@@ -377,6 +381,80 @@ class SqlAlchemyIngestionCoordinator:
             )
             repository.save_job(bundle.job.advance(stage, progress=progress, now=now))
             repository.save_version(replace(bundle.version, status=version_status, updated_at=now))
+            return self._required_bundle(repository, job_id)
+
+    def claim_continuation(
+        self, job_id: UUID, *, owner: str, now: datetime, lease_seconds: int
+    ) -> IngestionBundle | None:
+        with self._session_factory.begin() as session:
+            record = session.scalar(
+                select(IngestionJobRecord)
+                .where(IngestionJobRecord.id == job_id)
+                .with_for_update(skip_locked=True)
+            )
+            if record is None:
+                return None
+            repository = SqlAlchemyIngestionRepository(session)
+            job = repository._to_job(record)  # pylint: disable=protected-access
+            try:
+                continued = job.claim_continuation(
+                    owner=owner, now=now, lease_seconds=lease_seconds
+                )
+            except ValueError:
+                return None
+            repository.save_job(continued)
+            return repository.get_by_job_id(job_id)
+
+    def release_for_continuation(  # pylint: disable=too-many-arguments
+        self,
+        job_id: UUID,
+        *,
+        owner: str,
+        attempt: int,
+        now: datetime,
+    ) -> IngestionBundle:
+        with self._session_factory.begin() as session:
+            repository, bundle = self._locked_owned_bundle(
+                session, job_id, owner=owner, attempt=attempt, now=now
+            )
+            released = bundle.job.release_for_continuation(now=now)
+            repository.save_job(released)
+            repository.save_version(
+                replace(bundle.version, status=DocumentVersionStatus.CHUNKED, updated_at=now)
+            )
+            return self._required_bundle(repository, job_id)
+
+    def record_chunk_manifest(  # pylint: disable=too-many-arguments
+        self,
+        job_id: UUID,
+        *,
+        owner: str,
+        attempt: int,
+        manifest_key: str,
+        chunk_count: int,
+        parser_name: str,
+        parser_version: str,
+        schema_version: str,
+        now: datetime,
+    ) -> IngestionBundle:
+        with self._session_factory.begin() as session:
+            repository, bundle = self._locked_owned_bundle(
+                session, job_id, owner=owner, attempt=attempt, now=now
+            )
+            if bundle.job.stage is not IngestionStage.CHUNKING:
+                raise ConflictError("INGESTION_STAGE_INVALID", "入库任务不在分块阶段")
+            repository.save_version(
+                replace(
+                    bundle.version,
+                    status=DocumentVersionStatus.CHUNKED,
+                    chunk_manifest_key=manifest_key,
+                    chunk_count=chunk_count,
+                    parser_name=parser_name,
+                    parser_version=parser_version,
+                    schema_version=schema_version,
+                    updated_at=now,
+                )
+            )
             return self._required_bundle(repository, job_id)
 
     def complete(  # pylint: disable=too-many-arguments

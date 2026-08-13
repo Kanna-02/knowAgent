@@ -174,6 +174,116 @@ def test_coordinator_persists_claim_progress_and_completion_across_sessions() ->
         assert persisted == completed
 
 
+def test_coordinator_persists_chunking_lease_continuation_and_manifest_across_sessions() -> None:
+    factory = make_factory()
+    bundle = make_bundle()
+    with factory.begin() as session:
+        SqlAlchemyIngestionRepository(session).add(bundle)
+    coordinator = SqlAlchemyIngestionCoordinator(factory)
+
+    claimed = coordinator.claim(bundle.job.id, owner="worker-1", now=NOW, lease_seconds=60)
+    assert claimed is not None
+    coordinator.advance(
+        bundle.job.id,
+        owner="worker-1",
+        attempt=claimed.job.attempt,
+        stage=IngestionStage.CHUNKING,
+        progress=70,
+        version_status=DocumentVersionStatus.CHUNKING,
+        now=NOW,
+    )
+    released = coordinator.release_for_continuation(
+        bundle.job.id,
+        owner="worker-1",
+        attempt=claimed.job.attempt,
+        now=NOW,
+    )
+    continued = coordinator.claim_continuation(
+        bundle.job.id,
+        owner="worker-2",
+        now=NOW,
+        lease_seconds=60,
+    )
+    assert continued is not None
+    recorded = coordinator.record_chunk_manifest(
+        bundle.job.id,
+        owner="worker-2",
+        attempt=continued.job.attempt,
+        manifest_key="documents/chunks-v1.json",
+        chunk_count=3,
+        parser_name="markdown-it-py",
+        parser_version="4.2.0",
+        schema_version="chunks-v1",
+        now=NOW,
+    )
+
+    assert released.job.status is IngestionStatus.QUEUED
+    assert released.job.attempt == 1
+    assert released.job.progress == 70
+    assert released.version.status is DocumentVersionStatus.CHUNKED
+    assert continued.job.status is IngestionStatus.RUNNING
+    assert continued.job.stage is IngestionStage.CHUNKING
+    assert continued.job.attempt == 1
+    assert recorded.version.chunk_manifest_key == "documents/chunks-v1.json"
+    assert recorded.version.chunk_count == 3
+    with factory() as session:
+        persisted = SqlAlchemyIngestionRepository(session).get_by_job_id(bundle.job.id)
+        assert persisted is not None
+        assert persisted.job.stage is IngestionStage.CHUNKING
+        assert persisted.job.attempt == 1
+        assert persisted.version.chunk_manifest_key == "documents/chunks-v1.json"
+
+
+def test_coordinator_claims_due_chunking_retry_continuation_across_sessions() -> None:
+    factory = make_factory()
+    bundle = make_bundle()
+    with factory.begin() as session:
+        SqlAlchemyIngestionRepository(session).add(bundle)
+    coordinator = SqlAlchemyIngestionCoordinator(factory)
+
+    claimed = coordinator.claim(bundle.job.id, owner="worker-1", now=NOW, lease_seconds=60)
+    assert claimed is not None
+    coordinator.advance(
+        bundle.job.id,
+        owner="worker-1",
+        attempt=claimed.job.attempt,
+        stage=IngestionStage.CHUNKING,
+        progress=70,
+        version_status=DocumentVersionStatus.CHUNKING,
+        now=NOW,
+    )
+    failed = coordinator.fail(
+        bundle.job.id,
+        owner="worker-1",
+        attempt=claimed.job.attempt,
+        error_code="EMBEDDING_UNAVAILABLE",
+        error_message="temporary failure",
+        retryable=True,
+        version_status=DocumentVersionStatus.CHUNKED,
+        now=NOW,
+        retry_base_seconds=10,
+    )
+    assert failed.job.next_retry_at is not None
+
+    continued = coordinator.claim_continuation(
+        bundle.job.id,
+        owner="worker-2",
+        now=failed.job.next_retry_at,
+        lease_seconds=60,
+    )
+
+    assert continued is not None
+    assert continued.job.status is IngestionStatus.RUNNING
+    assert continued.job.stage is IngestionStage.CHUNKING
+    assert continued.job.progress == 70
+    assert continued.job.attempt == 2
+    with factory() as session:
+        persisted = SqlAlchemyIngestionRepository(session).get_by_job_id(bundle.job.id)
+        assert persisted is not None
+        assert persisted.job.attempt == 2
+        assert persisted.job.lease_owner == "worker-2"
+
+
 def test_recovery_requeues_expired_lease_and_limits_dispatch_frequency() -> None:
     factory = make_factory()
     bundle = make_bundle()

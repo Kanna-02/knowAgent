@@ -66,6 +66,8 @@ class IngestionRepository(Protocol):
 
 
 class IngestionCoordinator(Protocol):
+    def get_job(self, job_id: UUID) -> IngestionJob | None: ...
+
     def claim(
         self, job_id: UUID, *, owner: str, now: datetime, lease_seconds: int
     ) -> IngestionBundle | None: ...
@@ -79,6 +81,33 @@ class IngestionCoordinator(Protocol):
         stage: IngestionStage,
         progress: int,
         version_status: DocumentVersionStatus,
+        now: datetime,
+    ) -> IngestionBundle: ...
+
+    def claim_continuation(
+        self, job_id: UUID, *, owner: str, now: datetime, lease_seconds: int
+    ) -> IngestionBundle | None: ...
+
+    def release_for_continuation(
+        self,
+        job_id: UUID,
+        *,
+        owner: str,
+        attempt: int,
+        now: datetime,
+    ) -> IngestionBundle: ...
+
+    def record_chunk_manifest(  # pylint: disable=too-many-arguments
+        self,
+        job_id: UUID,
+        *,
+        owner: str,
+        attempt: int,
+        manifest_key: str,
+        chunk_count: int,
+        parser_name: str,
+        parser_version: str,
+        schema_version: str,
         now: datetime,
     ) -> IngestionBundle: ...
 
@@ -139,3 +168,16 @@ class ChunkIngestionHook(Protocol):  # pylint: disable=too-few-public-methods
         now: datetime,
         on_progress: Callable[[int, int], None] | None = None,
     ) -> tuple[UUID, int]: ...
+
+    def prepare_chunks(
+        self,
+        *,
+        system_id: UUID,
+        document_version_id: UUID,
+        manifest_key: str,
+        now: datetime,
+    ) -> tuple[UUID, int]: ...
+
+    def source_id_for_version(self, *, system_id: UUID, document_version_id: UUID) -> UUID: ...
+
+    def index_next_batch(self, *, system_id: UUID, source_id: UUID, now: datetime) -> object: ...

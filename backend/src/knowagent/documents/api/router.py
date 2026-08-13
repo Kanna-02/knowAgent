@@ -156,6 +156,7 @@ def list_ingestion_jobs(  # pylint: disable=too-many-arguments,too-many-position
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
     status_filters: Annotated[list[IngestionStatus] | None, Query(alias="status")] = None,
+    search: Annotated[str | None, Query(max_length=255)] = None,
 ) -> IngestionJobPage:
     _require_system_access(
         system_id=system_id,
@@ -166,7 +167,22 @@ def list_ingestion_jobs(  # pylint: disable=too-many-arguments,too-many-position
     conditions = [IngestionJobRecord.system_id == system_id]
     if status_filters:
         conditions.append(IngestionJobRecord.status.in_(status_filters))
-    total = database.scalar(select(func.count()).select_from(IngestionJobRecord).where(*conditions))
+    if search and search.strip():
+        conditions.append(DocumentRecord.name.contains(search.strip(), autoescape=True))
+    total = database.scalar(
+        select(func.count())
+        .select_from(IngestionJobRecord)
+        .join(
+            DocumentVersionRecord,
+            DocumentVersionRecord.id == IngestionJobRecord.document_version_id,
+        )
+        .join(
+            DocumentRecord,
+            (DocumentRecord.id == DocumentVersionRecord.document_id)
+            & (DocumentRecord.system_id == IngestionJobRecord.system_id),
+        )
+        .where(*conditions)
+    )
     rows = database.execute(
         select(IngestionJobRecord, DocumentVersionRecord, DocumentRecord)
         .join(

@@ -109,6 +109,7 @@
 - **资源门禁**：在目标 Linux 服务器上用真实 ESB 样本完成延迟、吞吐和内存测试后，再确认 PyTorch、ONNX Runtime 或 INT8 量化方式；资源不足时可替换轻量模型而不改变 provider 契约。
 - **本地适配决策（2026-08-03）**：用户确认先复用 `knowledge-rag` 已下载的 Ollama `bge-m3`。`model-service` 作为防腐层把 Ollama `/api/embed`（旧版回退 `/api/embeddings`）转换为稳定 `/v1/embeddings` 契约，并负责维度校验和 L2 归一化；主应用不直接依赖 Ollama 协议。
 - **实施状态（2026-08-04）**：主应用侧 HTTP Provider、批量索引、模型契约校验和原子向量写回已实现；`model-service` 的 Ollama 适配、健康检查、请求限制及自动化测试已实现。适配层在 readiness 和每次推理前校验实际模型 tag 与 digest；配置的对外 `model_version` 必须以 8-64 位 digest 前缀结尾，避免模型替换后误用旧版本标签。健康检查使用独立短超时，推理日志只记录脱敏状态、耗时和错误类别。本地默认模型版本对应当前 manifest digest 前缀 `79076464`，生产必须按实际 manifest 同步覆盖版本与 digest。真实 bge-m3 冒烟已返回 1024 维归一化向量，冷启动约 18.21 秒、热请求约 3.73 秒；目标 Linux 的最终推理运行时、量化和组合验收仍受资源门禁约束。
+- **本地运行时调整（2026-08-13）**：macOS 本地不再启动或依赖 Docker `rag-ollama`。`scripts/local-env.sh` 要求宿主机安装 Ollama CLI，Ollama 以 `ollama serve` 监听 `127.0.0.1:11434`，本地 `KNOWAGENT_MODEL_OLLAMA_BASE_URL` 必须为该地址。模型服务仍通过同一地址访问，`model-service` 的 `/v1/embeddings` 契约、digest 校验和健康检查不变。
 
 ### TD-004：独立内网 Rerank 服务
 
@@ -144,6 +145,7 @@
 - **备选方案**：Dramatiq API 更轻但复杂工作流和运维生态较弱；使用 PostgreSQL `SKIP LOCKED` 自研 worker 可减少基础设施，但需要自行实现调度、心跳、租约、恢复和并发控制，研发风险更高。
 - **权衡**：增加 Celery 配置和至少一个独立 worker 进程；换取成熟任务执行能力。Celery 消息只携带 `job_id`，不得携带文档全文、向量或大对象。
 - **可靠性配置**：启用 late ack、worker 丢失时拒绝确认、低预取、软/硬超时和指数退避；Redis 需要 AOF、合理持久化策略、独立命名空间和禁止因缓存淘汰任务消息。
+- **批任务超时与 checkpoint（2026-08-13）**：知识索引把 `CHUNKING` 阶段拆为独立 `knowagent.ingestion.batch` 任务，每批只索引 `embedding IS NULL` 的前 N 个片段，成功后立即写回向量并释放租约；批任务独立使用 300/360 秒软/硬超时，租约仍为 900 秒并保持大于硬超时，异常批按持久重试续跑，不重复已完成批次。
 - **幂等与恢复**：任务每个阶段依据数据库状态和幂等键执行；定时扫描超时租约并恢复或转人工重试，允许 broker 重复投递但禁止重复发布知识或重复写入向量。
 - **通知一致性**：工单和知识事务内写入 Outbox，Celery 只发送已提交的 Outbox 记录；通知失败不回滚工单状态，并保留永久失败和人工重试入口。
 - **部署边界**：至少运行 `knowagent-api.service` 和 `knowagent-worker.service`；需要周期恢复和统计时增加单实例 `knowagent-scheduler.service`。

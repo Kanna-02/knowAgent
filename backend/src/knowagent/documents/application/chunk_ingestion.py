@@ -12,7 +12,7 @@ from knowagent.documents.application.processor import ChunkManifest
 from knowagent.documents.domain.ingestion import DocumentVersionStatus
 from knowagent.documents.domain.models import KnowledgeChunk as ParsedKnowledgeChunk
 from knowagent.documents.ports import ObjectStore
-from knowagent.knowledge.domain.models import KnowledgeChunkDraft
+from knowagent.knowledge.domain.models import KnowledgeChunkDraft, KnowledgeIndexBatchSummary
 from knowagent.knowledge.infrastructure.sqlalchemy_repository import (
     SqlAlchemyKnowledgeRepository,
 )
@@ -58,6 +58,36 @@ class ChunkIngestionService:
         Advances the document version to ``READY_DRAFT`` only after
         :meth:`index_source` succeeds.
         """
+        source_id, chunk_count = self.prepare_chunks(
+            system_id=system_id,
+            document_version_id=document_version_id,
+            manifest_key=manifest_key,
+            now=now,
+        )
+        self._run_indexing(
+            system_id=system_id,
+            source_id=source_id,
+            now=now,
+            on_progress=on_progress,
+        )
+        with self._session_factory.begin() as session:
+            version = SqlAlchemyKnowledgeRepository(session).locked_version(
+                system_id=system_id, document_version_id=document_version_id
+            )
+            if version is None:
+                raise NotFoundError("DOCUMENT_VERSION_NOT_FOUND", "文档版本不存在")
+            version.status = DocumentVersionStatus.READY_DRAFT
+            version.updated_at = now
+        return source_id, chunk_count
+
+    def prepare_chunks(
+        self,
+        *,
+        system_id: UUID,
+        document_version_id: UUID,
+        manifest_key: str,
+        now: datetime,
+    ) -> tuple[UUID, int]:
         manifest = self._load_manifest(manifest_key)
         drafts = tuple(self._to_draft(chunk) for chunk in manifest.chunks)
         with self._session_factory.begin() as session:
@@ -88,21 +118,17 @@ class ChunkIngestionService:
             else:
                 source_id = existing_source.id
             chunk_count = repository.source_chunk_count(system_id=system_id, source_id=source_id)
-        self._run_indexing(
-            system_id=system_id,
-            source_id=source_id,
-            now=now,
-            on_progress=on_progress,
-        )
-        with self._session_factory.begin() as session:
-            version = SqlAlchemyKnowledgeRepository(session).locked_version(
-                system_id=system_id, document_version_id=document_version_id
-            )
-            if version is None:
-                raise NotFoundError("DOCUMENT_VERSION_NOT_FOUND", "文档版本不存在")
-            version.status = DocumentVersionStatus.READY_DRAFT
-            version.updated_at = now
         return source_id, chunk_count
+
+    def source_id_for_version(self, *, system_id: UUID, document_version_id: UUID) -> UUID:
+        with self._session_factory() as session:
+            source = SqlAlchemyKnowledgeRepository(session).get_source_by_version(
+                system_id=system_id,
+                document_version_id=document_version_id,
+            )
+        if source is None:
+            raise NotFoundError("KNOWLEDGE_SOURCE_NOT_FOUND", "知识来源不存在")
+        return source.id
 
     def _run_indexing(
         self,
@@ -152,6 +178,27 @@ class ChunkIngestionService:
             on_batch=on_progress,
         )
         return summary.chunk_count
+
+    def index_next_batch(
+        self,
+        *,
+        system_id: UUID,
+        source_id: UUID,
+        now: datetime,
+    ) -> KnowledgeIndexBatchSummary:
+        from knowagent.knowledge.application.indexing import KnowledgeIndexService  # noqa: PLC0415
+
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(
+                KnowledgeIndexService(
+                    self._session_factory,
+                    embeddings=self._embeddings,
+                    batch_size=self._embedding_batch_size,
+                ).index_next_batch(system_id=system_id, source_id=source_id, now=now)
+            )
+        finally:
+            loop.close()
 
     def _load_manifest(self, manifest_key: str) -> ChunkManifest:
         content = self._object_store.get(key=manifest_key)

@@ -19,6 +19,14 @@ class CeleryIngestionDispatcher:  # pylint: disable=too-few-public-methods
         )
         return str(result.id)
 
+    def enqueue_batch(self, job_id: UUID) -> str:
+        result = self._application.send_task(
+            "knowagent.ingestion.batch",
+            args=[str(job_id)],
+            queue="ingestion",
+        )
+        return str(result.id)
+
     @property
     def broker_url(self) -> str:
         return str(self._application.conf.broker_url)

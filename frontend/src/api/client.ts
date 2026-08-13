@@ -13,6 +13,7 @@ import type {
   ConversationView,
   DocumentPage,
   DocumentVersionPage,
+  DocumentVersionStatus,
   CurrentUser,
   FrequentQuestionPage,
   IngestionJobPage,
@@ -25,6 +26,7 @@ import type {
   NotificationDeliveryStatus,
   NotificationDeliveryView,
   NotificationEventType,
+  PublicationStatus,
   PublishVersionResponse,
   RetireVersionResponse,
   PromptDefinitionPage,
@@ -355,13 +357,23 @@ export class ApiClient {
 
   async listDocuments(
     systemId: string,
-    filters: { page: number; pageSize: number; search?: string },
+    filters: {
+      page: number;
+      pageSize: number;
+      search?: string;
+      latestStatus?: DocumentVersionStatus;
+      published?: boolean;
+    },
   ): Promise<DocumentPage> {
     const query = new URLSearchParams({
       page: String(filters.page),
       page_size: String(filters.pageSize),
     });
     if (filters.search?.trim()) query.set("search", filters.search.trim());
+    if (filters.latestStatus) query.set("latest_status", filters.latestStatus);
+    if (typeof filters.published === "boolean") {
+      query.set("published", String(filters.published));
+    }
     return this.request<DocumentPage>(`/systems/${systemId}/documents?${query.toString()}`);
   }
 
@@ -383,13 +395,19 @@ export class ApiClient {
 
   async listIngestionJobs(
     systemId: string,
-    filters: { page: number; pageSize: number; statuses?: IngestionJobStatus[] },
+    filters: {
+      page: number;
+      pageSize: number;
+      statuses?: IngestionJobStatus[];
+      search?: string;
+    },
   ): Promise<IngestionJobPage> {
     const query = new URLSearchParams({
       page: String(filters.page),
       page_size: String(filters.pageSize),
     });
     for (const status of filters.statuses ?? []) query.append("status", status);
+    if (filters.search?.trim()) query.set("search", filters.search.trim());
     return this.request<IngestionJobPage>(
       `/systems/${systemId}/ingestion-jobs?${query.toString()}`,
     );
@@ -406,15 +424,42 @@ export class ApiClient {
   async listDocumentVersions(
     systemId: string,
     documentId: string,
-    filters: { page: number; pageSize: number },
+    filters: {
+      page: number;
+      pageSize: number;
+      search?: string;
+      statuses?: DocumentVersionStatus[];
+      publishStatuses?: PublicationStatus[];
+    },
   ): Promise<DocumentVersionPage> {
     const query = new URLSearchParams({
       page: String(filters.page),
       page_size: String(filters.pageSize),
     });
+    if (filters.search?.trim()) query.set("search", filters.search.trim());
+    for (const status of filters.statuses ?? []) query.append("status", status);
+    for (const publishStatus of filters.publishStatuses ?? []) {
+      query.append("publish_status", publishStatus);
+    }
     return this.request<DocumentVersionPage>(
       `/systems/${systemId}/documents/${documentId}/versions?${query.toString()}`,
     );
+  }
+
+  async deleteDocument(systemId: string, documentId: string): Promise<void> {
+    await this.request<void>(`/systems/${systemId}/documents/${documentId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async deleteDocumentVersion(
+    systemId: string,
+    documentId: string,
+    versionId: string,
+  ): Promise<void> {
+    await this.request<void>(`/systems/${systemId}/documents/${documentId}/versions/${versionId}`, {
+      method: "DELETE",
+    });
   }
 
   async publishDocumentVersion(

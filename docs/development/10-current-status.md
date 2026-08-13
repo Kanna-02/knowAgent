@@ -5,11 +5,11 @@
 ## 1. 快照时间
 
 ```text
-更新时间：2026-08-11 19:34 CST（文档版本与导入任务管理工作台完成）
+更新时间：2026-08-13 CST（文档导入批任务超时保护与原生 Ollama 完成）
 更新人/助手：Codex
 当前分支：master
 远程仓库：git@github.com:Kanna-02/knowAgent.git
-当前环境：Python 3.11.15；PostgreSQL 17.10 + vector 0.8.6 + pg_trgm 1.6；Redis 8.10.0；MinIO RELEASE.2025-10-15T17-29-55Z；Node.js 24.16.0；本地 Ollama 0.3.14 + bge-m3；Qwen qwen3.5-27b
+当前环境：Python 3.11.15；PostgreSQL 17.10 + vector 0.8.6 + pg_trgm 1.6；Redis 8.10.0；MinIO RELEASE.2025-10-15T17-29-55Z；Node.js 24.16.0；Ollama 约定为 macOS 原生 CLI（当前未安装/未运行，需 `brew install ollama` + `ollama serve` + `ollama pull bge-m3`）；Qwen qwen3.5-27b
 ```
 
 ## 2. 当前阶段
@@ -18,7 +18,7 @@
 当前阶段：Phase 2 关闭门禁待真实评测数据；Phase 3 质量与运营增强 4/4 功能范围已实现，等待外部联调和质量门禁
 阶段目标：保留 Phase 2 系统隔离问答/工单闭环，同时完成混合检索调优、Rerank、用户可见降级、多轮上下文与意图识别、提示词与检索配置版本化、通知投递/重试/记录，以及文档生命周期、对话分析、高频问题、知识缺口与审计运营能力
 当前任务：取得真实 ESB 标注评测集关闭 AC-004/AC-005，并使用真实公司通知 API 联调鉴权、限流、幂等接收和回执语义以关闭 AC-014
-任务状态：文档管理改版已完成：新增服务端导入任务分页/状态过滤、文档搜索与版本概览，前端落地文档库/导入任务双视图、已有文档版本追加、自动刷新、失败诊断与重试。后端相关 24 项、前端全量 105 项、双端类型/格式/Lint/构建门禁与 1440×900/390×844 浏览器验收通过；Phase 2 与 Phase 3 阶段验收仍依赖真实评测数据、真实公司通知 API 和目标 Linux 资源。
+任务状态：文档版本管理增强已完成：新增文档/版本删除、版本文件名搜索与状态筛选、文档处理/发布状态筛选、导入任务名称搜索，删除会清理知识片段、导入任务和对象存储文件并记录审计，处理中任务拒绝删除。文档导入已按方案 C 落地：每批向量化独立 Celery 任务、300/360 秒批超时、`embedding IS NULL` checkpoint 续跑，本地 Ollama 改为 macOS 原生 CLI。后端全量 426 passed、25 skipped，覆盖率 85.66%；Phase 2 与 Phase 3 阶段验收仍依赖真实评测数据、真实公司通知 API 和目标 Linux 资源。
 ```
 
 ## 3. 已完成
@@ -118,6 +118,8 @@
 92. 已完成真实导入失败现场诊断：`fd0a49be-b621-409c-9e23-0a00dfd5531b` 为 `FAILED/CHUNKING/70%`、3/3 次尝试，109 个 chunk 全部落库但向量为 0；后端 16 条请求被 model-service 拆为 4 条串行 Ollama 请求，真实 4 条长 chunk 约 68.43 秒，单个后端请求理论上约 274 秒，超过 model-service 240 秒总超时。
 93. 已完成 Ollama 取消与 CPU 现场复验：Docker `rag-ollama` 的 2 CPU 限额在推理期间瞬时约 200%，客户端 5 秒断开后约 5.18 秒收到 `context canceled` 且 CPU 数秒内回到 0%；`keep_alive=24h` 只造成约 1.4 GiB 模型常驻内存，不代表持续计算。测试后已终止精确 runner PID，服务保持 ready。
 94. 已将“文档版本管理”升级为文档库/导入任务双视图：服务器分页管理全部导入任务，进行中任务自动刷新，失败任务可查看诊断并重试；文档总表支持名称搜索、版本/状态概览和从已有文档追加新版本，版本抽屉使用中文状态、分页和就绪态发布门禁。
+95. 已为文档版本管理补充删除与检索增强：文档库支持处理/发布状态筛选和删除确认，版本抽屉支持文件名搜索、处理/发布状态筛选、知识片段与创建时间列及版本删除确认，导入任务支持名称搜索；后端删除端点清理版本、知识来源/片段、导入任务和对象存储文件，并写入审计，处理中任务返回 409。
+96. 已按方案 C 完成导入批任务超时保护：每批向量化独立 Celery 任务，软/硬超时默认 300/360 秒，每批写回后释放租约并继续，`embedding IS NULL` checkpoint 保证重启、租约过期或模型暂时不可用时不重复已完成批次；`scripts/local-env.sh` 与本地文档改为 macOS 原生 Ollama（`ollama serve`，`127.0.0.1:11434`），不再依赖 `rag-ollama` Docker 容器。
 
 ## 4. 正在进行
 
@@ -250,6 +252,7 @@
 
 | 命令/方式 | 结果 | 说明 |
 | --- | --- | --- |
+| 2026-08-13 批任务超时保护与原生 Ollama 验证 | 通过 | 后端全量 426 passed、25 skipped，覆盖率 85.66%；方案 C 相关源文件与测试 `mypy --strict` 零错误、Black/isort 清洁、`git diff --check` 通过；`local-env.sh` Bash 语法检查通过，Ollama CLI 未安装/服务未运行时脚本会显式失败 |
 | 2026-08-11 文档版本与导入任务管理改版 | 通过 | 后端 identity API + 文档生命周期 24 项通过（`--no-cov`），相关 mypy strict、Pylint 10.00/10、Black/isort 通过；前端 22 个测试文件 105/105，TypeScript、ESLint、Prettier、Vite build 通过；隔离样例 API 下 1440×900/390×844 浏览器无整页溢出、重叠和本项目控制台告警；真实文件上传/Worker 未触发 |
 | 2026-08-10 P0/P1 修复全量验证 | 通过（保留既有前端 act/Ant Design deprecation warnings） | 后端 411 passed、25 skipped、覆盖率 88.66%；model-service 52 passed、2 skipped、覆盖率 88.69%；前端 22 个测试文件 102 passed，TypeScript、ESLint、生产构建和 npm audit 通过；修改文件 mypy/Black/isort/Bandit 与 git diff --check 通过；真实 Ollama Embedding smoke test 返回 1024 维向量 |
 | 本地完整运行栈启动与健康检查 | 通过 | `./scripts/local-env.sh serve` 完成数据库迁移并持续托管 PostgreSQL `5440`、Redis `6380`、MinIO `9200/9201`、model-service `8100`、API `8200`、Celery Worker/Beat 和 Vite `5273`；model-service live/ready、API live、前端登录页和 MinIO live 均返回 HTTP 200 |

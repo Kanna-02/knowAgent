@@ -7,7 +7,7 @@
 - PostgreSQL 16+ 测试实例，服务端必须能加载 `vector` 与 `pg_trgm` 扩展。
 - Redis 7 测试实例，用于 Session、Celery broker 和恢复调度。
 - 数据库迁移账号必须具有目标 Schema 建表/索引权限，以及 `CREATE EXTENSION vector`、`CREATE EXTENSION pg_trgm` 权限；若扩展由 DBA 预装，应用账号不需要扩展创建权限。
-- 一个可访问的 Ollama 服务和已加载的 `bge-m3`；仓库内 `model-service` 将其适配为主应用使用的 `POST /v1/embeddings` 契约。本机可复用 `knowledge-rag` 的 `deploy_ollama-models` volume，生产环境不以 Docker 为前提。
+- macOS 主机已安装 Ollama CLI，且已加载 `bge-m3`。Ollama 必须由 macOS 原生进程监听 `127.0.0.1:11434`；仓库内 `model-service` 将其适配为主应用使用的 `POST /v1/embeddings` 契约。KnowAgent 本地脚本不启动或依赖 Docker Ollama。
 - Qwen OpenAI 兼容 API 的完整 Key、Base URL 和模型名；没有 Key 时可运行关键词/向量之外的单测，但不能完成真实回答生成。
 
 本地 HTTP 调试可设置 `KNOWAGENT_COOKIE_SECURE=false`；类生产和生产环境必须使用 HTTPS，并保持 `true`。
@@ -34,7 +34,7 @@ brew install postgresql@17 pgvector redis minio
 ./scripts/local-env.sh stop
 ```
 
-`start` 会初始化并启动项目独立 PostgreSQL `5440`、Redis `6380` 和 MinIO `9200/9201`，自动创建 `knowagent-dev` Bucket，检查 Ollama、执行 `alembic upgrade head`，再启动 model-service、API `8200`、Celery Worker、Celery Beat 和 Vite 前端 `5273`。Vite 使用严格端口并通过 `VITE_API_PROXY_TARGET` 自动代理到项目 API。普通终端可使用 `start` 后台运行；需要由当前终端持续托管进程时使用 `serve`，按 `Ctrl+C` 会统一停止。`stop` 会同时校验 `.runtime/` 中的 PID 和进程启动时间，只停止本次脚本启动的 KnowAgent 进程；过期或已被复用的 PID 记录只会被清理，不会向无关进程发送信号。单独执行迁移使用 `./scripts/local-env.sh migrate`。
+`start` 会初始化并启动项目独立 PostgreSQL `5440`、Redis `6380` 和 MinIO `9200/9201`，自动创建 `knowagent-dev` Bucket，检查 macOS 原生 Ollama、执行 `alembic upgrade head`，再启动 model-service、API `8200`、Celery Worker、Celery Beat 和 Vite 前端 `5273`。Vite 使用严格端口并通过 `VITE_API_PROXY_TARGET` 自动代理到项目 API。普通终端可使用 `start` 后台运行；需要由当前终端持续托管进程时使用 `serve`，按 `Ctrl+C` 会统一停止。`stop` 会同时校验 `.runtime/` 中的 PID 和进程启动时间，只停止本次脚本启动的 KnowAgent 进程；过期或已被复用的 PID 记录只会被清理，不会向无关进程发送信号。单独执行迁移使用 `./scripts/local-env.sh migrate`。
 
 ## 2. 后端
 
@@ -84,6 +84,8 @@ Phase 2 关键变量：
 
 parser 是同步的 CPU/内存密集端口，只能由独立文档 worker 调用，不得直接放入 FastAPI `async` 请求链。`KNOWAGENT_INGESTION_*` 配置任务最大尝试次数、租约、退避、派发超时、恢复批大小和 Celery 软/硬超时；硬超时必须大于软超时，租约必须大于硬超时。Worker 每次写状态都校验 owner、attempt 和租约有效期，过期执行只记录告警，不覆盖已被重新领取的任务。
 
+`KNOWAGENT_INGESTION_BATCH_SOFT_TIME_LIMIT_SECONDS` / `KNOWAGENT_INGESTION_BATCH_HARD_TIME_LIMIT_SECONDS` 默认分别为 300/360 秒，只作用于每批向量化任务；解析/恢复任务继续使用通用 600/660 秒超时。批任务每批只处理 `embedding IS NULL` 的前 N 个片段，成功后立即写回向量并释放租约，下一批通过 checkpoint 续跑。
+
 通知地址、鉴权方式、鉴权 Header、密钥引用名、JSON 模板、成功状态码、超时和重试参数由管理员后台保存。密钥值不进入数据库，应把配置中的引用名（例如 `KNOWAGENT_NOTIFICATION_TOKEN`）作为 Worker 环境变量注入。生产环境仅允许 HTTPS 且 Host 必须位于 `KNOWAGENT_NOTIFICATION_ALLOWED_HOSTS`；真实公司协议未提供前，可保持通知关闭。
 
 应用数据库迁移并启动 API：
@@ -125,10 +127,12 @@ Celery 消息只携带 `job_id` 或 `delivery_id`；业务状态以 PostgreSQL �
 
 ## 3. Embedding / Rerank 模型服务
 
-本机已有 Docker volume `deploy_ollama-models`，其中 `bge-m3` 模型层约 1.158 GB。仅用于本地联调时，可从 `knowledge-rag/deploy` 恢复 Ollama 容器；Compose 会复用同名 volume，不重新下载模型权重：
+首次使用时在 macOS 安装并启动 Ollama，然后加载模型：
 
 ```bash
-docker compose -f ../knowledge-rag/deploy/docker-compose.yml up -d ollama
+brew install ollama
+ollama serve
+ollama pull bge-m3
 ```
 
 安装并启动适配层：
@@ -159,7 +163,7 @@ Windows 使用 `py -3.11 -m venv .venv`、`.\.venv\Scripts\Activate.ps1` 和 `$e
 
 `.env` 中的 `KNOWAGENT_MODEL_OLLAMA_MODEL_DIGEST` 必须是 Ollama `/api/tags` 返回 digest 的 8-64 位十六进制前缀，`KNOWAGENT_MODEL_EMBEDDING_VERSION` 必须以同一前缀结尾。服务会在 readiness 和每次推理前核对实际模型；tag 或 digest 不匹配时返回未就绪，不生成或误标向量。`KNOWAGENT_MODEL_OLLAMA_HEALTH_TIMEOUT_SECONDS` 仅控制 `/api/tags` 检查，默认 5 秒，不受 240 秒推理超时影响。
 
-Embedding 默认以每次 4 个文本调用 Ollama，适配层总超时为 240 秒；后端每 4 个片段提交一批，客户端请求超时为 300 秒，并在每批成功后写入向量和推进入库进度。客户端超时或断开时，适配层会取消正在执行的 Ollama 请求，避免失效任务继续占用 CPU。低内存机器应先保持并发为 1，再逐步压测批大小。
+Embedding 默认以每次 4 个文本调用 Ollama，适配层总超时为 240 秒；后端每 4 个片段提交一批，单批 Celery 任务软/硬超时默认为 300/360 秒。每批成功后立即写入向量并推进进度，下一批通过 `embedding IS NULL` checkpoint 续跑；进程重启、租约过期或模型暂时不可用不会重复已完成批次。客户端超时或断开时，适配层会取消正在执行的 Ollama 请求，避免失效任务继续占用 CPU。低内存机器应先保持并发为 1，再逐步压测批大小。
 
 ```bash
 curl http://127.0.0.1:8100/health/ready

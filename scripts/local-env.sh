@@ -337,6 +337,7 @@ start_all() {
   require_command redis-server
   require_command npm
   require_command minio
+  require_command ollama
   require_command ps
   [[ -x "${ROOT_DIR}/backend/.venv/bin/python" ]] || fail "backend/.venv is missing"
   [[ -x "${ROOT_DIR}/model-service/.venv/bin/knowagent-model-service" ]] || fail "model-service/.venv is missing"
@@ -350,9 +351,12 @@ start_all() {
   start_minio
   migrate_database
 
+  [[ "$(uname -s)" == "Darwin" ]] || fail "local Ollama runtime must run on macOS"
+  [[ "${KNOWAGENT_MODEL_OLLAMA_BASE_URL}" == "http://127.0.0.1:11434" ]] \
+    || fail "KNOWAGENT_MODEL_OLLAMA_BASE_URL must be http://127.0.0.1:11434 for macOS local runtime"
   curl --fail --silent --show-error --max-time 5 \
-    "${KNOWAGENT_MODEL_OLLAMA_BASE_URL}/api/tags" >/dev/null \
-    || fail "Ollama is not reachable at ${KNOWAGENT_MODEL_OLLAMA_BASE_URL}"
+    "http://127.0.0.1:11434/api/tags" >/dev/null \
+    || fail "Ollama is not reachable at http://127.0.0.1:11434; start it with 'ollama serve'"
 
   start_process model-service "${ROOT_DIR}/model-service" \
     "${ROOT_DIR}/model-service/.venv/bin/knowagent-model-service"

@@ -138,6 +138,8 @@ class IngestionSettings:
     recovery_batch_size: int = 100
     soft_time_limit_seconds: int = 600
     hard_time_limit_seconds: int = 660
+    batch_soft_time_limit_seconds: int = 300
+    batch_hard_time_limit_seconds: int = 360
 
     def __post_init__(self) -> None:
         values = (
@@ -148,6 +150,8 @@ class IngestionSettings:
             self.recovery_batch_size,
             self.soft_time_limit_seconds,
             self.hard_time_limit_seconds,
+            self.batch_soft_time_limit_seconds,
+            self.batch_hard_time_limit_seconds,
         )
         if any(value <= 0 for value in values):
             raise ValueError("ingestion settings must be positive")
@@ -155,6 +159,10 @@ class IngestionSettings:
             raise ValueError("ingestion hard time limit must exceed soft time limit")
         if self.lease_seconds <= self.hard_time_limit_seconds:
             raise ValueError("ingestion lease must exceed hard time limit")
+        if self.batch_hard_time_limit_seconds <= self.batch_soft_time_limit_seconds:
+            raise ValueError("batch hard time limit must exceed batch soft time limit")
+        if self.lease_seconds <= self.batch_hard_time_limit_seconds:
+            raise ValueError("ingestion lease must exceed batch hard time limit")
 
     @classmethod
     def from_environment(cls) -> IngestionSettings:
@@ -171,6 +179,12 @@ class IngestionSettings:
             ),
             hard_time_limit_seconds=int(
                 os.getenv("KNOWAGENT_INGESTION_HARD_TIME_LIMIT_SECONDS", "660")
+            ),
+            batch_soft_time_limit_seconds=int(
+                os.getenv("KNOWAGENT_INGESTION_BATCH_SOFT_TIME_LIMIT_SECONDS", "300")
+            ),
+            batch_hard_time_limit_seconds=int(
+                os.getenv("KNOWAGENT_INGESTION_BATCH_HARD_TIME_LIMIT_SECONDS", "360")
             ),
         )
 

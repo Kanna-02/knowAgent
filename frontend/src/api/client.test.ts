@@ -250,15 +250,30 @@ describe("ApiClient", () => {
     await client.submitTicketAnswer("ticket-1", "Resolved by restarting the connector");
     await client.transitionTicket("ticket-1", "close", "Resolved");
     await client.transitionTicket("ticket-1", "reopen");
-    await client.listDocuments("system-1", { page: 2, pageSize: 10, search: "Guide v2" });
+    await client.listDocuments("system-1", {
+      page: 2,
+      pageSize: 10,
+      search: "Guide v2",
+      latestStatus: "FAILED",
+      published: false,
+    });
     await client.listIngestionJobs("system-1", {
       page: 2,
       pageSize: 10,
       statuses: ["QUEUED", "RUNNING", "RETRY_SCHEDULED"],
+      search: "Guide",
     });
-    await client.listDocumentVersions("system-1", "document-1", { page: 2, pageSize: 10 });
+    await client.listDocumentVersions("system-1", "document-1", {
+      page: 2,
+      pageSize: 10,
+      search: "guide-v2",
+      statuses: ["READY_DRAFT"],
+      publishStatuses: ["DRAFT"],
+    });
     await client.publishDocumentVersion("system-1", "document-1", "version-1");
     await client.retireDocumentVersion("system-1", "document-1", "version-1");
+    await client.deleteDocumentVersion("system-1", "document-1", "version-1");
+    await client.deleteDocument("system-1", "document-1");
     await client.getSystemOverview("system-1", {
       started_at: "2026-08-01T00:00:00Z",
       ended_at: "2026-08-08T00:00:00Z",
@@ -319,13 +334,34 @@ describe("ApiClient", () => {
       calls.some(
         ({ url }) =>
           url ===
-          "/api/v1/systems/system-1/ingestion-jobs?page=2&page_size=10&status=QUEUED&status=RUNNING&status=RETRY_SCHEDULED",
+          "/api/v1/systems/system-1/ingestion-jobs?page=2&page_size=10&status=QUEUED&status=RUNNING&status=RETRY_SCHEDULED&search=Guide",
       ),
     ).toBe(true);
     expect(
       calls.some(
         ({ url }) =>
-          url === "/api/v1/systems/system-1/documents?page=2&page_size=10&search=Guide+v2",
+          url ===
+          "/api/v1/systems/system-1/documents?page=2&page_size=10&search=Guide+v2&latest_status=FAILED&published=false",
+      ),
+    ).toBe(true);
+    expect(
+      calls.some(
+        ({ url }) =>
+          url ===
+          "/api/v1/systems/system-1/documents/document-1/versions?page=2&page_size=10&search=guide-v2&status=READY_DRAFT&publish_status=DRAFT",
+      ),
+    ).toBe(true);
+    expect(
+      calls.some(
+        ({ url, method }) =>
+          method === "DELETE" &&
+          url === "/api/v1/systems/system-1/documents/document-1/versions/version-1",
+      ),
+    ).toBe(true);
+    expect(
+      calls.some(
+        ({ url, method }) =>
+          method === "DELETE" && url === "/api/v1/systems/system-1/documents/document-1",
       ),
     ).toBe(true);
     expect(

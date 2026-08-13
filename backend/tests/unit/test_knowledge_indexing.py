@@ -156,6 +156,25 @@ async def test_index_source_batches_and_atomically_persists_model_contract() -> 
 
 
 @pytest.mark.anyio
+async def test_index_next_batch_persists_checkpoint_and_resumes() -> None:
+    factory = make_factory()
+    system_id = uuid4()
+    source_id = seed_chunks(factory, system_id=system_id)
+    embeddings = StubEmbeddings()
+    service = KnowledgeIndexService(factory, embeddings=embeddings, batch_size=2)
+
+    first = await service.index_next_batch(system_id=system_id, source_id=source_id, now=NOW)
+    second = await service.index_next_batch(system_id=system_id, source_id=source_id, now=NOW)
+
+    assert first.completed_chunks == 2
+    assert first.total_chunks == 3
+    assert first.complete is False
+    assert second.completed_chunks == 3
+    assert second.complete is True
+    assert embeddings.batches == [("第一段", "第二段"), ("第三段",)]
+
+
+@pytest.mark.anyio
 async def test_index_source_rejects_invalid_provider_count_without_partial_writes() -> None:
     factory = make_factory()
     system_id = uuid4()

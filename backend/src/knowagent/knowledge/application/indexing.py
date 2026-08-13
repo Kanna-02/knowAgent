@@ -7,7 +7,11 @@ from uuid import UUID
 from sqlalchemy.orm import Session, sessionmaker
 
 from knowagent.common.errors import ConflictError, NotFoundError, ProviderUnavailableError
-from knowagent.knowledge.domain.models import ChunkEmbeddingUpdate, KnowledgeIndexSummary
+from knowagent.knowledge.domain.models import (
+    ChunkEmbeddingUpdate,
+    KnowledgeIndexBatchSummary,
+    KnowledgeIndexSummary,
+)
 from knowagent.knowledge.infrastructure.sqlalchemy_repository import (
     SqlAlchemyKnowledgeRepository,
 )
@@ -38,13 +42,48 @@ class KnowledgeIndexService:  # pylint: disable=too-few-public-methods
         on_batch: Callable[[int, int], None] | None = None,
     ) -> KnowledgeIndexSummary:
         with self._session_factory() as session:
+            initial_chunks = SqlAlchemyKnowledgeRepository(session).list_source_chunks(
+                system_id=system_id,
+                source_id=source_id,
+            )
+        last_completed = sum(chunk.embedding is not None for chunk in initial_chunks)
+        first: KnowledgeIndexBatchSummary | None = None
+        while True:
+            batch = await self.index_next_batch(
+                system_id=system_id,
+                source_id=source_id,
+                now=now,
+            )
+            first = first or batch
+            if on_batch is not None and batch.completed_chunks > last_completed:
+                on_batch(batch.completed_chunks, batch.total_chunks)
+            last_completed = batch.completed_chunks
+            if batch.complete:
+                break
+        if first is None:
+            raise ProviderUnavailableError("embedding")
+        return KnowledgeIndexSummary(
+            source_id=source_id,
+            chunk_count=batch.total_chunks,
+            model=batch.model,
+            model_version=batch.model_version,
+            dimension=batch.dimension,
+        )
+
+    async def index_next_batch(
+        self,
+        *,
+        system_id: UUID,
+        source_id: UUID,
+        now: datetime,
+    ) -> KnowledgeIndexBatchSummary:
+        with self._session_factory() as session:
             all_chunks = SqlAlchemyKnowledgeRepository(session).list_source_chunks(
                 system_id=system_id,
                 source_id=source_id,
             )
         if not all_chunks:
             raise NotFoundError("KNOWLEDGE_SOURCE_NOT_FOUND", "知识来源不存在")
-
         existing_contract = next(
             (
                 EmbeddingBatch(
@@ -59,59 +98,53 @@ class KnowledgeIndexService:  # pylint: disable=too-few-public-methods
             ),
             None,
         )
-        chunks = [chunk for chunk in all_chunks if chunk.embedding is None]
+        chunks = [chunk for chunk in all_chunks if chunk.embedding is None][: self._batch_size]
+        completed = len(all_chunks) - sum(chunk.embedding is None for chunk in all_chunks)
         if not chunks:
             if existing_contract is None:
                 raise ProviderUnavailableError("embedding")
-            return KnowledgeIndexSummary(
+            return KnowledgeIndexBatchSummary(
                 source_id=source_id,
-                chunk_count=len(all_chunks),
+                total_chunks=len(all_chunks),
+                completed_chunks=completed,
+                complete=True,
                 model=existing_contract.model,
                 model_version=existing_contract.model_version,
                 dimension=existing_contract.dimension,
             )
-
-        contract = existing_contract
-        completed = len(all_chunks) - len(chunks)
-        for offset in range(0, len(chunks), self._batch_size):
-            chunk_batch = chunks[offset : offset + self._batch_size]
-            embedding_batch = await self._embeddings.embed(
-                texts=tuple(chunk.retrieval_text for chunk in chunk_batch)
+        embedding_batch = await self._embeddings.embed(
+            texts=tuple(chunk.retrieval_text for chunk in chunks)
+        )
+        self._validate_batch(
+            embedding_batch,
+            expected_count=len(chunks),
+            previous=existing_contract,
+        )
+        updates = tuple(
+            ChunkEmbeddingUpdate(chunk_id=chunk.id, vector=vector)
+            for chunk, vector in zip(chunks, embedding_batch.vectors, strict=True)
+        )
+        contract = existing_contract or embedding_batch
+        with self._session_factory.begin() as session:
+            updated = SqlAlchemyKnowledgeRepository(session).set_chunk_embeddings(
+                system_id=system_id,
+                source_id=source_id,
+                updates=updates,
+                model=contract.model,
+                model_version=contract.model_version,
+                now=now,
             )
-            self._validate_batch(
-                embedding_batch,
-                expected_count=len(chunk_batch),
-                previous=contract,
-            )
-            updates = tuple(
-                ChunkEmbeddingUpdate(chunk_id=chunk.id, vector=vector)
-                for chunk, vector in zip(chunk_batch, embedding_batch.vectors, strict=True)
-            )
-            if contract is None:
-                contract = embedding_batch
-            with self._session_factory.begin() as session:
-                updated = SqlAlchemyKnowledgeRepository(session).set_chunk_embeddings(
-                    system_id=system_id,
-                    source_id=source_id,
-                    updates=updates,
-                    model=contract.model,
-                    model_version=contract.model_version,
-                    now=now,
+            if updated != len(updates):
+                raise ConflictError(
+                    "KNOWLEDGE_INDEX_CHANGED",
+                    "知识片段在索引期间发生变化，请重试",
                 )
-                if updated != len(updates):
-                    raise ConflictError(
-                        "KNOWLEDGE_INDEX_CHANGED",
-                        "知识片段在索引期间发生变化，请重试",
-                    )
-            completed += len(updates)
-            if on_batch is not None:
-                on_batch(completed, len(all_chunks))
-
-        if contract is None:
-            raise ProviderUnavailableError("embedding")
-        return KnowledgeIndexSummary(
+        completed += len(updates)
+        return KnowledgeIndexBatchSummary(
             source_id=source_id,
-            chunk_count=len(all_chunks),
+            total_chunks=len(all_chunks),
+            completed_chunks=completed,
+            complete=completed == len(all_chunks),
             model=contract.model,
             model_version=contract.model_version,
             dimension=contract.dimension,

@@ -128,6 +128,34 @@ class IngestionProcessor:  # pylint: disable=too-few-public-methods
             final_version_status = DocumentVersionStatus.CHUNKED
             if self._chunk_ingestion is not None:
 
+                prepare_chunks = getattr(self._chunk_ingestion, "prepare_chunks", None)
+                if prepare_chunks is not None and hasattr(
+                    self._coordinator, "record_chunk_manifest"
+                ):
+                    _source_id, chunk_count = prepare_chunks(
+                        system_id=parsing.version.system_id,
+                        document_version_id=parsing.version.id,
+                        manifest_key=manifest_key,
+                        now=self._clock(),
+                    )
+                    self._coordinator.record_chunk_manifest(
+                        job_id,
+                        owner=worker_id,
+                        attempt=attempt,
+                        manifest_key=manifest_key,
+                        chunk_count=chunk_count,
+                        parser_name=parsed.parser_name,
+                        parser_version=parsed.parser_version,
+                        schema_version=parsed.schema_version,
+                        now=self._clock(),
+                    )
+                    return self._coordinator.release_for_continuation(
+                        job_id,
+                        owner=worker_id,
+                        attempt=attempt,
+                        now=self._clock(),
+                    )
+
                 def on_embedding_progress(completed: int, total: int) -> None:
                     if total <= 0:
                         return

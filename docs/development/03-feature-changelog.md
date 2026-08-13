@@ -17,6 +17,44 @@
 
 ## 功能变更记录
 
+### 2026-08-13 - 文档导入批任务超时保护与 macOS 原生 Ollama
+
+类型：新增 / 变更 / 测试 / 文档
+
+相关需求：REQ-004；AC-003。
+
+相关文件：`backend/src/knowagent/documents/application/{chunk_ingestion,processor}.py`、`backend/src/knowagent/documents/domain/ingestion.py`、`backend/src/knowagent/documents/infrastructure/sqlalchemy_repository.py`、`backend/src/knowagent/documents/ports.py`、`backend/src/knowagent/knowledge/application/indexing.py`、`backend/src/knowagent/knowledge/domain/models.py`、`backend/src/knowagent/platform/settings.py`、`backend/src/knowagent/worker/{celery_app,dispatcher,tasks}.py`、`backend/tests/unit/test_{ingestion_job,ingestion_repository,knowledge_indexing,worker_tasks,document_configuration}.py`、`backend/.env.example`、`scripts/local-env.sh` 及本地运行、状态、追溯、技术决策文档。
+
+变更说明：
+
+1. 将 `CHUNKING` 阶段的向量化拆为独立 `knowagent.ingestion.batch` Celery 任务；每批只处理 `embedding IS NULL` 的前 N 个片段，成功后立即写回向量、释放租约并调度下一批，`embedding IS NULL` 作为天然 checkpoint。
+2. 批任务独立配置 300 秒软超时 / 360 秒硬超时，异常批通过租约恢复和持久重试续跑，不重复已完成批次，也不耗尽文档整体重试预算；解析/恢复任务仍保留通用 600/660 秒超时。
+3. 本地运行改为 macOS 原生 Ollama：`scripts/local-env.sh` 检查 `ollama` CLI 与 `127.0.0.1:11434/api/tags`，不再启动或依赖 `rag-ollama` Docker 容器；本地文档同步更新安装、启动和批任务 checkpoint 说明。
+
+影响范围：文档导入 Worker 与索引服务、本地启动脚本及运维文档；不新增数据库迁移，不改变发布事务和检索隔离。
+
+验证方式：后端全量 426 passed、25 skipped，覆盖率 85.66%；方案 C 相关源文件与测试 `mypy --strict` 零错误、Black/isort 清洁，`git diff --check` 通过。
+
+### 2026-08-13 - 文档版本管理增强：删除、检索与状态筛选
+
+类型：新增 / 变更 / 测试 / 文档
+
+相关需求：REQ-011；AC-003。
+
+相关文件：`backend/src/knowagent/documents/api/{lifecycle_router,router}.py`、`backend/tests/integration/test_identity_api.py`、`frontend/src/features/admin/DocumentsPage.tsx`、`frontend/src/features/admin/DocumentsPage.test.tsx`、`frontend/src/api/{client,client.test}.ts`、`frontend/src/styles.css` 及状态、设计、追溯文档。
+
+变更说明：
+
+1. 新增文档删除与版本删除管理端点：按文档/版本范围清理知识来源、知识片段、导入任务和对象存储文件，并写入 `document.delete` / `document_version.delete` 审计；存在排队、处理中或待重试导入任务时返回 409，避免删除正在处理的版本。
+2. 版本列表新增文件名搜索、处理状态与发布状态服务端筛选；文档库新增最新处理状态与发布状态筛选；导入任务新增文档名称搜索。
+3. 前端文档库工具栏增加处理/发布状态筛选和删除文档确认；版本抽屉增加文件名搜索、状态/发布状态筛选、知识片段与创建时间列及版本删除确认；导入任务增加名称搜索。
+
+影响范围：文档管理 API 查询/删除端点和管理端页面；不修改数据库 Schema、发布事务、Worker 状态机或检索隔离逻辑。
+
+验证方式：后端 identity API 集成 15/15 通过（`--no-cov`），2 个相关源文件 `mypy --strict` 零错误、Black/isort 清洁；前端全量 22 个测试文件 109/109 通过，TypeScript、ESLint、Prettier 通过。
+
+后续注意：删除不可恢复；对象存储清理为数据库提交后的尽力而为操作，失败仅记录日志，数据库事实源不受影响。
+
 ### 2026-08-11 - 文档版本与导入任务管理工作台
 
 类型：变更 / 新增 / 测试 / 文档

@@ -19,9 +19,16 @@ def build_celery_app(settings: Settings) -> Celery:
         task_ignore_result=True,
         task_soft_time_limit=settings.ingestion.soft_time_limit_seconds,
         task_time_limit=settings.ingestion.hard_time_limit_seconds,
+        task_annotations={
+            "knowagent.ingestion.batch": {
+                "soft_time_limit": settings.ingestion.batch_soft_time_limit_seconds,
+                "time_limit": settings.ingestion.batch_hard_time_limit_seconds,
+            }
+        },
         broker_connection_retry_on_startup=True,
         task_routes={
             "knowagent.ingestion.process": {"queue": "ingestion"},
+            "knowagent.ingestion.batch": {"queue": "ingestion"},
             "knowagent.ingestion.recover": {"queue": "ingestion"},
             "knowagent.notification.deliver": {"queue": "notification"},
             "knowagent.notification.recover": {"queue": "notification"},

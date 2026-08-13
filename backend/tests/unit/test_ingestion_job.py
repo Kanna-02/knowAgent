@@ -53,6 +53,65 @@ def test_stage_regression_and_invalid_claim_are_rejected() -> None:
         running.claim(owner="worker-2", now=NOW, lease_seconds=60)
 
 
+def test_continuation_claim_releases_without_consuming_attempt_budget() -> None:
+    running = make_job().claim(owner="worker-1", now=NOW, lease_seconds=60)
+    chunking = running.advance(IngestionStage.CHUNKING, progress=70, now=NOW)
+    queued = chunking.release_for_continuation(now=NOW)
+    reclaimed = queued.claim_continuation(owner="worker-2", now=NOW, lease_seconds=60)
+
+    assert queued.status is IngestionStatus.QUEUED
+    assert queued.lease_owner is None
+    assert queued.progress == 70
+    assert reclaimed.status is IngestionStatus.RUNNING
+    assert reclaimed.attempt == 1
+    assert reclaimed.stage is IngestionStage.CHUNKING
+
+
+def test_retry_and_expired_chunking_preserve_resume_stage_and_progress() -> None:
+    running = make_job().claim(owner="worker-1", now=NOW, lease_seconds=60)
+    chunking = running.advance(IngestionStage.CHUNKING, progress=78, now=NOW)
+    retry = chunking.fail(
+        error_code="EMBEDDING_UNAVAILABLE",
+        error_message="temporary failure",
+        retryable=True,
+        now=NOW,
+        retry_base_seconds=10,
+    )
+    reclaimed = retry.claim(owner="worker-2", now=retry.next_retry_at or NOW, lease_seconds=60)
+    expired = reclaimed.recover_expired(now=NOW + timedelta(seconds=71))
+
+    assert reclaimed.stage is IngestionStage.CHUNKING
+    assert reclaimed.progress == 78
+    assert expired.stage is IngestionStage.CHUNKING
+    assert expired.progress == 78
+
+
+def test_retry_scheduled_chunking_claims_continuation_and_consumes_attempt() -> None:
+    running = make_job(max_attempts=3).claim(owner="worker-1", now=NOW, lease_seconds=60)
+    chunking = running.advance(IngestionStage.CHUNKING, progress=75, now=NOW)
+    retry = chunking.fail(
+        error_code="EMBEDDING_UNAVAILABLE",
+        error_message="temporary failure",
+        retryable=True,
+        now=NOW,
+        retry_base_seconds=10,
+    )
+    assert retry.next_retry_at is not None
+
+    continued = retry.claim_continuation(
+        owner="worker-2",
+        now=retry.next_retry_at,
+        lease_seconds=60,
+    )
+
+    assert continued.status is IngestionStatus.RUNNING
+    assert continued.attempt == 2
+    assert continued.stage is IngestionStage.CHUNKING
+    assert continued.progress == 75
+    assert continued.error_code is None
+    assert continued.last_dispatched_at is None
+
+
 def test_retryable_failures_back_off_then_exhaust_attempts() -> None:
     first = make_job(max_attempts=2).claim(owner="worker-1", now=NOW, lease_seconds=60)
     retry = first.fail(
